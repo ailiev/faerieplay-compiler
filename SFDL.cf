@@ -1,0 +1,53 @@
+-- -*- haskell -*-
+-- Javalette Light: a simple subset of C, covering
+-- programs with a single zero-argument function.
+-- example: koe.jll
+
+-- modified by sasho starting May 2005
+-- to cover SFDL
+
+---------------
+
+
+-- ordinary rules
+
+Fun.      Prog     ::= Typ Ident "(" ")" "{" [Stm] "}" ;
+
+SDecl.    Stm      ::= Typ Ident ";"  ;
+SAss.     Stm      ::= Ident "=" Exp ";"  ;
+SIncr.    Stm      ::= Ident "++" ";"  ;
+
+SWhile.   Stm      ::= "while" "(" Exp ")" "{" [Stm] "}" ;
+-- SFor      Stm      ::= "for"   "(" Ident     
+
+ELt.      Exp0     ::= Exp1 "<" Exp1 ;
+EPlus.    Exp1     ::= Exp1 "+" Exp2 ;
+ETimes.   Exp2     ::= Exp2 "*" Exp3 ;
+EVar.     Exp3     ::= Ident ;
+EInt.     Exp3     ::= Integer ;
+EDouble.  Exp3     ::= Double ;
+
+[].       [Stm]    ::= ;
+(:).      [Stm]    ::= Stm [Stm] ;
+
+-- coercions
+
+_.        Stm      ::= Stm ";" ;
+
+_.  Exp      ::= Exp0 ;
+_.  Exp0     ::= Exp1 ;
+_.  Exp1     ::= Exp2 ;
+_.  Exp2     ::= Exp3 ;
+_.  Exp3     ::= "(" Exp ")" ;
+
+TInt.     Typ  ::= "int" ;
+TDouble.  Typ  ::= "double" ;
+
+-- pragmas
+
+internal ExpT. Exp ::= Typ Exp ;
+
+comment "/*" "*/" ;
+comment "//" ;
+
+entrypoints Prog, Stm, Exp ;
