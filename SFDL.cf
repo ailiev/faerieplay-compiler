@@ -14,26 +14,112 @@
 -----------
 
 -- program
-Fun.      Prog     ::= Typ Ident "(" ")" "{" [Stm] "}" ;
+Program.        Prog    ::= "program" Ident "{" [Dec] "}" ;
+
+-- how are lists of Dec treated
+[].             [Dec]   ::= ;
+(:).            [Dec]   ::= Dec ";" [Dec] ;
+
+-- [].             [Stm]   ::= ;
+-- (:).            [Stm]   ::= Stm [Stm] ;
+
+
+-- this is needed for Ident lists in enum types and var declarations
+separator nonempty Ident "," ;
+
+separator nonempty Stm   ";" ;
+
+-- declarations
+ConstDecl.      Dec     ::= "const" Ident "=" Exp ;
+TypeDecl.       Dec     ::= "type"  Ident "=" Typ ;
+VarDecl.        Dec     ::= "var"   Typ [Ident] ;
+FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
+                            "{" [Dec] [Stm] "}" ;
+
+-----------
+-- types
+-----------
+
+-- NOTE: semantically, the size Exp for Int and arrays has to be a
+-- compile-time integer constant
+
+IntT.          Typ         ::= "Int" "<" Exp ">" ;
+BoolT.          Typ     ::= "Boolean" ;
+
+StructT.       Typ         ::= "struct" "{" [FieldDecl] "}" ;
+EnumT.          Typ     ::= "enum" "{" [Ident] "}" ;
+ArrayT.        Typ        ::= Typ "[" Exp "]" ;
+
+-- this is a declaration of a named typed variable, like in a function
+-- param list, or struct field
+FieldDecl.   FieldDecl   ::= Typ Ident ;
+
+-- fields in a struct are separated by commas
+-- a void type can be defined as an empty struct. (TODO: or should the
+-- compiler define one?)
+-- both the above requirements apply to function arg lists too
+separator FieldDecl "," ;
+
+
+
 
 -- statements
-SDecl.    Stm      ::= Typ Var ";"  ;
-SAss.     Stm      ::= Var "=" Exp ";"  ;
-SIncr.    Stm      ::= Var "++" ";"  ;
+SBlock.   Stm      ::= "{" [Dec] [Stm] "}" ;
 
-SWhile.   Stm      ::= "while" "(" Exp ")" "{" [Stm] "}" ;
-SFor.     Stm      ::= "for"   "(" Var "=" Exp "to" Exp ")" "{" [Stm] "}" ;
-SIf.      Stm      ::= "if"    "(" Exp ")" "{" [Stm] "}" ;
+SAss.     Stm      ::= Var "=" Exp  ;
+
+SFor.     Stm           ::= "for"   "(" Var "=" Exp "to" Exp ")" "{" [Stm] "}" ;
+SIf.      Stm      ::= "if"    "(" Exp ")" Stm ;
+SIfElse.        Stm     ::= "if"    "(" Exp ")" Stm "else" Stm ;
+-- to allow extra semicolons; no effect on the AST
+_.        Stm      ::= Stm ";" ;
 
 -- expressions
-ELt.      Exp0     ::= Exp1 "<" Exp1 ;
-EPlus.    Exp1     ::= Exp1 "+" Exp2 ;
-ETimes.   Exp2     ::= Exp2 "*" Exp3 ;
 
-EVar.     Exp3     ::= Var ;
+EOpA.     Exp      ::= Exp0 Op  Exp0 ;
+EOpB.     Exp0     ::= Exp1 Op0 Exp1 ;
+EOpC.     Exp1     ::= Exp1 Op1 Exp2 ;
+EOpD.     Exp2     ::= Exp2 Op2 Exp3 ;
+EOpE.     Exp      ::= Exp1 Op  Exp1 ;
 
+EVar.     Exp3     ::= Ident ;
 EInt.     Exp3     ::= Integer ;
-EDouble.  Exp3     ::= Double ;
+EString.  Exp3     ::= String ;
+ETrue.          Exp3    ::= "true" ;
+EFalse.         Exp3    ::= "false" ;
+
+
+EArr.           Exp     ::= Ident "[" Exp "]" ;
+EStruct.        Exp     ::= Ident "." Ident ;
+
+_.        Exp      ::= Exp0 ;
+_.        Exp0     ::= Exp1 ;
+_.        Exp1     ::= Exp2 ;
+_.        Exp2     ::= Exp3 ;
+_.        Exp3     ::= "(" Exp ")" ;
+
+OPlus.    Op1      ::= "+" ;
+OTimes.   Op2      ::= "*" ;
+ODiv.           Op2     ::= "/" ;
+OMinus.   Op1      ::= "-" ;
+OLt.      Op0      ::= "<" ;
+OGt.      Op0      ::= ">" ;
+OLtEq.      Op0      ::= "<=" ;
+OGtEq.      Op0      ::= ">=" ;
+OEq.      Op0      ::= "==" ;
+ONeq.   Op0             ::= "!=" ;
+OAnd.     Op       ::= "&&" ;
+OOr.      Op       ::= "||" ;
+
+
+-- ELt.      Exp0     ::= Exp1 "<" Exp1 ;
+-- EPlus.    Exp1     ::= Exp1 "+" Exp2 ;
+-- ETimes.   Exp2     ::= Exp2 "*" Exp3 ;
+
+-- EVar.     Exp3     ::= Var ;
+
+-- EInt.     Exp3     ::= Integer ;
+-- EDouble.  Exp3     ::= Double ;
 
 -- variables
 VName.    Var      ::= Ident ;
@@ -46,16 +132,16 @@ VName.    Var      ::= Ident ;
 ---------
 -- coercions
 ---------
-_.      Stm      ::= Stm ";" ;
+-- _.      Stm      ::= Stm ";" ;
 
-_.      Exp      ::= Exp0 ;
-_.      Exp0     ::= Exp1 ;
-_.      Exp1     ::= Exp2 ;
-_.      Exp2     ::= Exp3 ;
-_.      Exp3     ::= "(" Exp ")" ;
+-- _.      Exp      ::= Exp0 ;
+-- _.      Exp0     ::= Exp1 ;
+-- _.      Exp1     ::= Exp2 ;
+-- _.      Exp2     ::= Exp3 ;
+-- _.      Exp3     ::= "(" Exp ")" ;
 
-TInt.     Typ  ::= "int" ;
-TDouble.  Typ  ::= "double" ;
+-- TInt.     Typ  ::= "int" ;
+-- TDouble.  Typ  ::= "double" ;
 
 -- pragmas
 
