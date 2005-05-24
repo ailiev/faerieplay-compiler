@@ -9,31 +9,43 @@
 ---------------
 
 
+-----------
 -- ordinary rules
+-----------
 
+-- program
 Fun.      Prog     ::= Typ Ident "(" ")" "{" [Stm] "}" ;
 
+-- statements
 SDecl.    Stm      ::= Typ Var ";"  ;
 SAss.     Stm      ::= Var "=" Exp ";"  ;
 SIncr.    Stm      ::= Var "++" ";"  ;
 
 SWhile.   Stm      ::= "while" "(" Exp ")" "{" [Stm] "}" ;
 SFor.     Stm      ::= "for"   "(" Var "=" Exp "to" Exp ")" "{" [Stm] "}" ;
+SIf.      Stm      ::= "if"    "(" Exp ")" "{" [Stm] "}" ;
 
+-- expressions
 ELt.      Exp0     ::= Exp1 "<" Exp1 ;
 EPlus.    Exp1     ::= Exp1 "+" Exp2 ;
 ETimes.   Exp2     ::= Exp2 "*" Exp3 ;
+
 EVar.     Exp3     ::= Var ;
+
 EInt.     Exp3     ::= Integer ;
 EDouble.  Exp3     ::= Double ;
 
-VString.  Var      ::= Ident ;
+-- variables
+VName.    Var      ::= Ident ;
 
 [].       [Stm]    ::= ;
 (:).      [Stm]    ::= Stm [Stm] ;
 
--- coercions
 
+
+---------
+-- coercions
+---------
 _.      Stm      ::= Stm ";" ;
 
 _.      Exp      ::= Exp0 ;
