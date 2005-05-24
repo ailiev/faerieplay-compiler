@@ -6,6 +6,13 @@
 -- modified by sasho starting May 2005
 -- to cover SFDL
 
+-- NOTES:
+--
+-- There is 1 shift-reduce conflict due to the classical
+-- ambiguous if () {} else {}
+-- putting a "fi" at the end of an if statement solves those, but
+-- breaks current SFDL syntax.
+
 ---------------
 
 
@@ -17,21 +24,23 @@
 Program.        Prog    ::= "program" Ident "{" [Dec] "}" ;
 
 -- how are lists of Dec treated
-[].             [Dec]   ::= ;
-(:).            [Dec]   ::= Dec ";" [Dec] ;
+--[].             [Dec]   ::= ;
+--(:).            [Dec]   ::= Dec ";" [Dec] ;
+separator Dec ";" ;
 
 -- [].             [Stm]   ::= ;
--- (:).            [Stm]   ::= Stm [Stm] ;
+-- (:).            [Stm]   ::= Stm ";" [Stm] ;
+separator Stm   ";" ;
 
 
--- this is needed for Ident lists in enum types and var declarations
+-- this is needed for Ident lists in enum types and var declarations.
 separator nonempty Ident "," ;
 
-separator nonempty Stm   ";" ;
 
 -- declarations
 ConstDecl.      Dec     ::= "const" Ident "=" Exp ;
 TypeDecl.       Dec     ::= "type"  Ident "=" Typ ;
+-- TypeDecl.       Dec     ::= "typedef"  Typ Ident ;
 VarDecl.        Dec     ::= "var"   Typ [Ident] ;
 FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
                             "{" [Dec] [Stm] "}" ;
@@ -43,12 +52,20 @@ FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
 -- NOTE: semantically, the size Exp for Int and arrays has to be a
 -- compile-time integer constant
 
-IntT.          Typ         ::= "Int" "<" Exp ">" ;
+-- FIXME: the bitsize of an Int should be an expression (even if a
+-- compile-time exp) and not just an Integer. This is not doable with
+-- this parse arrangement though, unless the <> syntax is dropped, eg
+-- have:
+IntT.          Typ         ::= "Int" "<" Exp "]" ;
+--IntT.          Typ         ::= "Int" "[<" Exp ">]" ;
+--IntT.          Typ         ::= "Int" "<" Integer ">" ;
 BoolT.          Typ     ::= "Boolean" ;
+VoidT.          Typ     ::= "void" ;
 
 StructT.       Typ         ::= "struct" "{" [FieldDecl] "}" ;
 EnumT.          Typ     ::= "enum" "{" [Ident] "}" ;
 ArrayT.        Typ        ::= Typ "[" Exp "]" ;
+SimpleT.        Typ     ::= Ident ;
 
 -- this is a declaration of a named typed variable, like in a function
 -- param list, or struct field
@@ -58,90 +75,83 @@ FieldDecl.   FieldDecl   ::= Typ Ident ;
 -- a void type can be defined as an empty struct. (TODO: or should the
 -- compiler define one?)
 -- both the above requirements apply to function arg lists too
+-- separator FieldDecl "," ;
+-- [].             [FieldDecl]   ::= ;
+-- (:).            [FieldDecl]   ::= FieldDecl "," [FieldDecl] ;
 separator FieldDecl "," ;
-
-
 
 
 -- statements
 SBlock.   Stm      ::= "{" [Dec] [Stm] "}" ;
 
-SAss.     Stm      ::= Var "=" Exp  ;
+SAss.     Stm      ::= RVal "=" Exp  ;
 
-SFor.     Stm           ::= "for"   "(" Var "=" Exp "to" Exp ")" "{" [Stm] "}" ;
-SIf.      Stm      ::= "if"    "(" Exp ")" Stm ;
-SIfElse.        Stm     ::= "if"    "(" Exp ")" Stm "else" Stm ;
+SFor.     Stm           ::= "for" "(" Var "=" Exp "to" Exp ")" Stm ;
+SIf.      Stm      ::= "if" "(" Exp ")" Stm ;
+SIfElse.        Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
+
 -- to allow extra semicolons; no effect on the AST
-_.        Stm      ::= Stm ";" ;
+-- PROBLEM: caused 5 reduce-reduce conflicts (when combined with empty
+-- StmList possibility), so just took it out for now.
+-- _.        Stm      ::= Stm ";" ;
 
+
+RVal.           RVal    ::= Exp ;
+
+--------------
 -- expressions
+--------------
 
-EOpA.     Exp      ::= Exp0 Op  Exp0 ;
-EOpB.     Exp0     ::= Exp1 Op0 Exp1 ;
-EOpC.     Exp1     ::= Exp1 Op1 Exp2 ;
-EOpD.     Exp2     ::= Exp2 Op2 Exp3 ;
-EOpE.     Exp      ::= Exp1 Op  Exp1 ;
-
-EVar.     Exp3     ::= Ident ;
-EInt.     Exp3     ::= Integer ;
-EString.  Exp3     ::= String ;
-ETrue.          Exp3    ::= "true" ;
-EFalse.         Exp3    ::= "false" ;
+EVar.     Exp12     ::= Ident ;
+EInt.     Exp12     ::= Integer ;
+EString.  Exp12     ::= String ;
+ETrue.          Exp12    ::= "true" ;
+EFalse.         Exp12    ::= "false" ;
 
 
-EArr.           Exp     ::= Ident "[" Exp "]" ;
-EStruct.        Exp     ::= Ident "." Ident ;
+EArr.           Exp12   ::= Exp12 "[" Exp "]" ;
+EStruct.        Exp12   ::= Exp12 "." Ident ;
 
-_.        Exp      ::= Exp0 ;
-_.        Exp0     ::= Exp1 ;
-_.        Exp1     ::= Exp2 ;
-_.        Exp2     ::= Exp3 ;
-_.        Exp3     ::= "(" Exp ")" ;
+EFunCall.       Exp12   ::= Ident "(" [FunArg] ")" ;
 
-OPlus.    Op1      ::= "+" ;
-OTimes.   Op2      ::= "*" ;
-ODiv.           Op2     ::= "/" ;
-OMinus.   Op1      ::= "-" ;
-OLt.      Op0      ::= "<" ;
-OGt.      Op0      ::= ">" ;
-OLtEq.      Op0      ::= "<=" ;
-OGtEq.      Op0      ::= ">=" ;
-OEq.      Op0      ::= "==" ;
-ONeq.   Op0             ::= "!=" ;
-OAnd.     Op       ::= "&&" ;
-OOr.      Op       ::= "||" ;
+-- binary operators, grouped by precedence, numbered as in the C
+-- operator precedence man page (some are missing here, hence the gap
+-- 4-6)
+ENot.           Exp11   ::= "!" Exp12 ;
+ENeg.           Exp11   ::= "-" Exp12 ;
 
+ETimes.         Exp10   ::= Exp10 "*" Exp11 ;
+EDiv.           Exp10   ::= Exp10 "/" Exp11 ;
 
--- ELt.      Exp0     ::= Exp1 "<" Exp1 ;
--- EPlus.    Exp1     ::= Exp1 "+" Exp2 ;
--- ETimes.   Exp2     ::= Exp2 "*" Exp3 ;
+EPlus.          Exp9    ::= Exp9 "+" Exp10 ;
+EMinus.         Exp9    ::= Exp9 "-" Exp10 ;
 
--- EVar.     Exp3     ::= Var ;
+ESL.            Exp8    ::= Exp9 "<<" Exp9 ;
+ESR.            Exp8    ::= Exp9 ">>" Exp9 ;
 
--- EInt.     Exp3     ::= Integer ;
--- EDouble.  Exp3     ::= Double ;
+ELt.            Exp7    ::= Exp8 "<" Exp8 ;
+EGt.            Exp7    ::= Exp8 ">" Exp8 ;
+ELtEq.          Exp7    ::= Exp8 "<=" Exp8 ;
+EGtEq.          Exp7    ::= Exp8 ">=" Exp8 ;
+
+EEq.            Exp6    ::= Exp7 "==" Exp7 ;
+ENeq.           Exp6    ::= Exp7 "!=" Exp7 ;
+
+EAnd.           Exp2    ::= Exp2 "&&" Exp3 ;
+
+EOr.            Exp1    ::= Exp1 "||" Exp2 ;
+
+coercions Exp 12 ;
+
+-- function call arguments
+FunArg.         FunArg  ::= Exp ;
+separator FunArg "," ;
+
 
 -- variables
 VName.    Var      ::= Ident ;
 
-[].       [Stm]    ::= ;
-(:).      [Stm]    ::= Stm [Stm] ;
 
-
-
----------
--- coercions
----------
--- _.      Stm      ::= Stm ";" ;
-
--- _.      Exp      ::= Exp0 ;
--- _.      Exp0     ::= Exp1 ;
--- _.      Exp1     ::= Exp2 ;
--- _.      Exp2     ::= Exp3 ;
--- _.      Exp3     ::= "(" Exp ")" ;
-
--- TInt.     Typ  ::= "int" ;
--- TDouble.  Typ  ::= "double" ;
 
 -- pragmas
 
