@@ -1,0 +1,6 @@
+Tue May 24 01:50:56 2005
+
+- figure out conversion into a circuit, see perhaps single assignment details if
+  deemed necessary.
+- complete the parser to correct SFDL syntax, run the example programs through.
+

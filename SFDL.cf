@@ -21,7 +21,7 @@
 -----------
 
 -- program
-Program.        Prog    ::= "program" Ident "{" [Dec] "}" ;
+Prog.           Prog    ::= "program" Ident "{" [Dec] "}" ;
 
 -- how are lists of Dec treated
 --[].             [Dec]   ::= ;
@@ -56,9 +56,9 @@ FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
 -- compile-time exp) and not just an Integer. This is not doable with
 -- this parse arrangement though, unless the <> syntax is dropped, eg
 -- have:
-IntT.          Typ         ::= "Int" "<" Exp "]" ;
+--IntT.          Typ         ::= "Int" "<" Exp ">" ;
 --IntT.          Typ         ::= "Int" "[<" Exp ">]" ;
---IntT.          Typ         ::= "Int" "<" Integer ">" ;
+IntT.          Typ         ::= "Int" "<" Integer ">" ;
 BoolT.          Typ     ::= "Boolean" ;
 VoidT.          Typ     ::= "void" ;
 

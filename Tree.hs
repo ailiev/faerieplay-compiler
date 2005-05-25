@@ -1,4 +1,5 @@
 -- a tree class
+-- awaiting understanding of universal quantification for types...
 
 -- needed functions:
 -- children (t)    -- list of children
