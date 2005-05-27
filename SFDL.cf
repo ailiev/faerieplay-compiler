@@ -29,8 +29,11 @@ Prog.           Prog    ::= "program" Ident "{" [Dec] "}" ;
 separator Dec ";" ;
 
 -- [].             [Stm]   ::= ;
--- (:).            [Stm]   ::= Stm ";" [Stm] ;
-separator Stm   ";" ;
+-- (:).            [Stm]   ::= Stm [Stm] ;
+
+-- only an Assignment statement needs a ";" terminator, so specify
+-- that only there
+terminator Stm "" ;
 
 
 -- this is needed for Ident lists in enum types and var declarations.
@@ -56,9 +59,9 @@ FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
 -- compile-time exp) and not just an Integer. This is not doable with
 -- this parse arrangement though, unless the <> syntax is dropped, eg
 -- have:
+IntT.          Typ         ::= "Int" "<" Exp "`>" ;
 --IntT.          Typ         ::= "Int" "<" Exp ">" ;
---IntT.          Typ         ::= "Int" "[<" Exp ">]" ;
-IntT.          Typ         ::= "Int" "<" Integer ">" ;
+--IntT.          Typ         ::= "Int" "<" Integer ">" ;
 BoolT.          Typ     ::= "Boolean" ;
 VoidT.          Typ     ::= "void" ;
 
@@ -84,16 +87,17 @@ separator FieldDecl "," ;
 -- statements
 SBlock.   Stm      ::= "{" [Dec] [Stm] "}" ;
 
-SAss.     Stm      ::= RVal "=" Exp  ;
+SAss.     Stm      ::= RVal "=" Exp ";" ;
 
-SFor.     Stm           ::= "for" "(" Var "=" Exp "to" Exp ")" Stm ;
+-- none of these statements need a trailing semicolon. so, only
+-- Assignment needs it (as specified above)
+SFor.     Stm           ::= "for" "(" Ident "=" Exp "to" Exp ")" Stm ;
 SIf.      Stm      ::= "if" "(" Exp ")" Stm ;
 SIfElse.        Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
 
 -- to allow extra semicolons; no effect on the AST
--- PROBLEM: caused 5 reduce-reduce conflicts (when combined with empty
--- StmList possibility), so just took it out for now.
--- _.        Stm      ::= Stm ";" ;
+-- causes 3 shift-reduce conflicts
+_.        Stm      ::= Stm ";" ;
 
 
 RVal.           RVal    ::= Exp ;
@@ -102,15 +106,15 @@ RVal.           RVal    ::= Exp ;
 -- expressions
 --------------
 
-EVar.     Exp12     ::= Ident ;
-EInt.     Exp12     ::= Integer ;
-EString.  Exp12     ::= String ;
-ETrue.          Exp12    ::= "true" ;
-EFalse.         Exp12    ::= "false" ;
+EVar.     Exp13     ::= Ident ;
+EInt.     Exp13     ::= Integer ;
+EString.  Exp13     ::= String ;
+ETrue.          Exp13    ::= "true" ;
+EFalse.         Exp13    ::= "false" ;
 
 
 EArr.           Exp12   ::= Exp12 "[" Exp "]" ;
-EStruct.        Exp12   ::= Exp12 "." Ident ;
+EStruct.        Exp12   ::= Exp12 "." Exp13 ;
 
 EFunCall.       Exp12   ::= Ident "(" [FunArg] ")" ;
 
@@ -141,7 +145,7 @@ EAnd.           Exp2    ::= Exp2 "&&" Exp3 ;
 
 EOr.            Exp1    ::= Exp1 "||" Exp2 ;
 
-coercions Exp 12 ;
+coercions Exp 13 ;
 
 -- function call arguments
 FunArg.         FunArg  ::= Exp ;
@@ -149,13 +153,16 @@ separator FunArg "," ;
 
 
 -- variables
-VName.    Var      ::= Ident ;
-
+-- VName.    Var      ::= Ident ;
 
 
 -- pragmas
 
-internal ExpT. Exp ::= Typ Exp ;
+-- type annotated expression. this node will only be added by the
+-- typechecker, but the pretty-printer will print it following this
+-- syntax
+internal ExpT. Exp ::= Typ "(" Exp ")" ;
+-- internal ExpT. Exp ::= Typ Exp ;
 
 comment "/*" "*/" ;
 comment "//" ;

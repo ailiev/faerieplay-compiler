@@ -15,38 +15,46 @@ import SFDL.ErrM
 
 import SplitAST
 
-{-
+
+unrollStms = concatMap unrollFor
+
+
 -- unroll a for-loop
 unrollFor :: Stm -> [Stm]
-unrollFor for@(SFor _ (EInt lo) (EInt hi) _) = concat $ unfoldr unroll1 (for, lo)
+unrollFor for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = concat $ unfoldr unroll1 (for, lo)
           -- unrolled enough when loop counter exceeds 'hi'
     where unroll1 (_, cur)  | cur > hi               = Nothing
           -- substitute in the value of the loop counter, and then recursively unroll
-          unroll1 (for@(SFor var _ _ stmts) , cur)   = let substed  = map (subst var (EInt cur)) stmts
-                                                           unrolled = concatMap unrollFor substed
-                                                       in Just (unrolled, (for,cur+1))
+          unroll1 (for@(SFor var _ _ (SBlock _ stmts)) , cur)   = let substed  = map (subst var (EInt cur)) stmts
+                                                                      unrolled = concatMap unrollFor substed
+                                                                  in Just (unrolled, (for,cur+1))
+          unroll1 (for@(SFor _ _ _ stm) , cur)                  = Just    ([stm], (for,cur+1))
+unrollFor for@(SFor _ _ _ stm)               = [stm]
 unrollFor stm                                = [stm] -- non-for statements not unrolled
-
 
 -- substitute a value for a variable into a statement
 
-subst :: Var -> Exp -> Stm -> Stm
-subst var _   (SAss var2 _  )   | var == var2 = error "Assigning to loop variable"
+subst :: Ident -> Exp -> Stm -> Stm
+-- subst var _   (SAss var2 _  )   | var == var2 = error "Assigning to loop variable"
 subst var _   (SFor var2 _ _ _) | var == var2 = error "Outer loop var reused as inner loop var"
-subst var _   (SDecl _ var2)    | var == var2 = error "Redeclaring loop variable in loop"
-subst var val (SFor var2 elo ehi stmts)       = SFor var2
-                                                     (substExp var val elo)
-                                                     (substExp var val ehi)
-                                                     (map (subst var val) stmts)
-subst var val (SIf test stmts)                = SIf (substExp var val test)
-                                                    (map (subst var val) stmts)
+--subst var _   (VarDecl _ var2)    | var == var2 = error "Redeclaring loop variable in loop"
+subst var val (SFor var2 elo ehi stm)       = SFor var2
+                                                   (substExp var val elo)
+                                                   (substExp var val ehi)
+                                                   (subst var val stm)
+subst var val (SIf test stm)                = SIf (substExp var val test)
+                                                    (subst var val stm)
+subst var val (SIfElse test stm1 stm2)      = SIfElse (substExp var val test)
+                                                      (subst var val stm1)
+                                                      (subst var val stm2)
 subst var val (SAss var2 exp)                 = SAss var2 (substExp var val exp)
-subst _   _   stm                             = stm
+subst var val (SBlock d stms)                 = SBlock d (map (subst var val) stms)
+-- subst _   _   stm                             = stm
 
 
 -- substitue a value for a var into an exp
 --          var    val    exp    result
-substExp :: Var -> Exp -> Exp -> Exp
+substExp :: Ident -> Exp -> Exp -> Exp
 substExp var val (EVar var2) | var == var2  = val
 -- one entry for binary operations, with the help of extrBinOp
 -- this whole rigmarole is because Haskell will not take:
@@ -58,6 +66,9 @@ substExp var val (EVar var2) | var == var2  = val
 -- and using GHC pattern guards:
 substExp var val exp
     | Just (op, e1, e2) <- extrBinOpFields exp = op (substExp var val e1) (substExp var val e2)
+substExp var val (EArr e idx)               = EArr (substExp var val e) (substExp var val idx)
+substExp var val (EStruct e efield)         = EStruct (substExp var val e) (substExp var val efield)
+
 substExp _   _   exp                        = exp
 
 
@@ -65,9 +76,9 @@ extrBinOpFields :: Exp -> Maybe ( (Exp -> Exp -> Exp), Exp, Exp )
 extrBinOpFields (ETimes e1 e2) = Just (ETimes, e1, e2)
 extrBinOpFields (EPlus  e1 e2) = Just (EPlus, e1, e2)
 extrBinOpFields (ELt    e1 e2) = Just (ELt, e1, e2)
+extrBinOpFields (EEq    e1 e2) = Just (EEq, e1, e2)
 extrBinOpFields _              = Nothing
 
--}
 
 main = hGetContents stdin >>= run 2 pProg
 
@@ -89,15 +100,13 @@ showTree v tree
 run v p s = let ts =  myLexer s
                 ast = p ts
             in case ast of
-                        Bad s    -> do putStrLn "\nParse              Failed...\n"
-                                       putStrV v "Tokens:"
-                                       putStrV v $ show ts
-                                       putStrLn s
---                         Ok  tree -> do putStrLn "\nParse Successful!"
---                                        showTree v tree
-                        Ok  tree -> do putStrLn "\nParse Successful!"
-                                       putStrV v "Unrolling for's"
-                                       case tree of
-                                                 Prog _ decls -> do let symtable = collectDecs decls
-                                                                    print symtable
---                                                                    showTree v $ Fun TInt (Ident "unrolled") unrolled
+               Bad s    -> do putStrLn "\nParse              Failed...\n"
+                              putStrV v "Tokens:"
+                              putStrV v $ show ts
+                              putStrLn s
+               Ok  tree -> do putStrLn "\nParse Successful!"
+                              putStrV v "Unrolling for's"
+                              case tree of
+                                Prog _ decls -> case head decls of
+                                                     FunDecl _ _ _ _ stms -> print $ unrollStms stms
+                                                 --                                                                    showTree v $ Fun TInt (Ident "unrolled") unrolled
