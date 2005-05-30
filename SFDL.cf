@@ -103,6 +103,9 @@ _.        Stm      ::= Stm ";" ;
 
 
 RVal.           RVal    ::= Exp ;
+-- for type annotation
+internal RValT. RVal    ::= "cast" "<" Typ ">" "(" RVal ")" ; 
+
 
 --------------
 -- expressions
@@ -156,6 +159,22 @@ EOr.            Exp1    ::= Exp1 "||" Exp2 ;
 coercions Exp 13 ;
 
 
+-- a coercion expression! right now only for the bitsize of Int values.
+internal ECoerce.       Exp     ::= Integer Exp ;
+
+-- a Max expression, used by the typechecker to indicate the bitsize of
+-- added values (max of the args, + 1)
+internal EMax.          Exp     ::= "_max" "(" Exp "," Exp ")" ;
+
+-- a bit-access expression          int       bit index
+internal EGetBit.       Exp     ::= Exp  "["    Exp  "]";
+
+-- a log expression, added by typechecker to compute the size of a counter
+-- variable
+internal ELog2.         Exp     ::= "_log2" "(" Exp ")" ;
+
+
+
 -- function call arguments
 -- this causes some shift-reduce conflicts
 FunArg.         FunArg  ::= Exp ;
@@ -183,10 +202,6 @@ internal RedIntT.       Typ     ::= Integer ;
 -- ArrayT with an interger size
 internal RedArrayT.     Typ     ::= Typ Integer ;
 -- a reduced EnumT?
-
-
--- a coercion expression! right now only for the bitsize of Int values.
-internal ECoerce.       Exp     ::= Integer Exp ;
 
 
 -- these should really be internal, as they are not used by the concrete syntax,
