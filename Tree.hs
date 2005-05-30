@@ -7,7 +7,8 @@
 -- node (t)        -- the actual node of this tree
 
 
-class Tree t where
+-- use multi-parameter type classes
+class Tree t a where
     children        :: t a -> [t a]
     nil             :: t a -> Bool
     node            :: t a -> a

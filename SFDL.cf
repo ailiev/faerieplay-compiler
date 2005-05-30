@@ -47,6 +47,8 @@ TypeDecl.       Dec     ::= "type"  Ident "=" Typ ;
 VarDecl.        Dec     ::= "var"   Typ [Ident] ;
 FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
                             "{" [Dec] [Stm] "}" ;
+TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [FieldDecl] ")" ":" Typ
+                            "{" [Dec] [Stm] "}" ;
 
 -----------
 -- types
@@ -106,9 +108,9 @@ RVal.           RVal    ::= Exp ;
 -- expressions
 --------------
 
-EVar.     Exp13     ::= Ident ;
+EIdent.   Exp13     ::= Ident ;
 EInt.     Exp13     ::= Integer ;
-EString.  Exp13     ::= String ;
+-- EString.  Exp13     ::= String ;
 ETrue.          Exp13    ::= "true" ;
 EFalse.         Exp13    ::= "false" ;
 
@@ -116,13 +118,16 @@ EFalse.         Exp13    ::= "false" ;
 EArr.           Exp12   ::= Exp12 "[" Exp "]" ;
 EStruct.        Exp12   ::= Exp12 "." Exp13 ;
 
+-- this causes some shift-reduce conflicts
 EFunCall.       Exp12   ::= Ident "(" [FunArg] ")" ;
 
 -- binary operators, grouped by precedence, numbered as in the C
 -- operator precedence man page (some are missing here, hence the gap
 -- 4-6)
 ENot.           Exp11   ::= "!" Exp12 ;
+-- this appears to cause a bunch of shift-reduce conflicts
 ENeg.           Exp11   ::= "-" Exp12 ;
+EBNot.          Exp11   ::= "~" Exp12 ;
 
 ETimes.         Exp10   ::= Exp10 "*" Exp11 ;
 EDiv.           Exp10   ::= Exp10 "/" Exp11 ;
@@ -141,19 +146,21 @@ EGtEq.          Exp7    ::= Exp8 ">=" Exp8 ;
 EEq.            Exp6    ::= Exp7 "==" Exp7 ;
 ENeq.           Exp6    ::= Exp7 "!=" Exp7 ;
 
-EAnd.           Exp2    ::= Exp2 "&&" Exp3 ;
+EBAnd.          Exp5    ::= Exp5 "&" Exp6 ;
+EBXor.          Exp4    ::= Exp4 "^" Exp5 ;
+EBOr.           Exp3    ::= Exp3 "|" Exp4 ;
 
+EAnd.           Exp2    ::= Exp2 "&&" Exp3 ;
 EOr.            Exp1    ::= Exp1 "||" Exp2 ;
 
 coercions Exp 13 ;
 
+
 -- function call arguments
+-- this causes some shift-reduce conflicts
 FunArg.         FunArg  ::= Exp ;
 separator FunArg "," ;
 
-
--- variables
--- VName.    Var      ::= Ident ;
 
 
 -- pragmas
@@ -162,7 +169,33 @@ separator FunArg "," ;
 -- typechecker, but the pretty-printer will print it following this
 -- syntax
 internal ExpT. Exp ::= Typ "(" Exp ")" ;
--- internal ExpT. Exp ::= Typ Exp ;
+
+-- a Type constructor for a function type (which is not syntactically declared,
+-- nor added to the AST), to hold a function's type in the TypeTable
+--                          return type    param types
+internal FuncT. Typ     ::= Typ            [Typ] ;
+
+-------
+-- "reduced" types, which are described by simpler types than the originals
+-------
+-- IntT with just an interger size, not an Exp
+internal RedIntT.       Typ     ::= Integer ;
+-- ArrayT with an interger size
+internal RedArrayT.     Typ     ::= Typ Integer ;
+-- a reduced EnumT?
+
+
+-- a coercion expression! right now only for the bitsize of Int values.
+internal ECoerce.       Exp     ::= Integer Exp ;
+
+
+-- these should really be internal, as they are not used by the concrete syntax,
+-- but internally by FuncT the typechecker. BNFC does not do internal list defs
+-- though
+-- results in 2 unused rules by Happy
+[].    [Typ]   ::= ;
+(:).   [Typ]   ::= Typ [Typ] ;
+
 
 comment "/*" "*/" ;
 comment "//" ;
