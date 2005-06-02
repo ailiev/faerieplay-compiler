@@ -45,9 +45,9 @@ ConstDecl.      Dec     ::= "const" Ident "=" Exp ;
 TypeDecl.       Dec     ::= "type"  Ident "=" Typ ;
 -- TypeDecl.       Dec     ::= "typedef"  Typ Ident ;
 VarDecl.        Dec     ::= "var"   Typ [Ident] ;
-FunDecl.        Dec     ::= "function" Typ Ident "(" [FieldDecl] ")"
+FunDecl.        Dec     ::= "function" Typ Ident "(" [TypedName] ")"
                             "{" [Dec] [Stm] "}" ;
-TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [FieldDecl] ")" ":" Typ
+TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [TypedName] ")" ":" Typ
                             "{" [Dec] [Stm] "}" ;
 
 -----------
@@ -61,35 +61,38 @@ TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [FieldDecl] ")" ":" Typ
 -- compile-time exp) and not just an Integer. This is not doable with
 -- this parse arrangement though, unless the <> syntax is dropped, eg
 -- have:
-IntT.          Typ         ::= "Int" "<" Exp "`>" ;
+IntT.          Typ      ::= "Int" "<" Exp "`>" ;
+-- generic int, without a specified size. can only be used in a
+-- function signature I believe
+GenIntT.        Typ     ::= "Int" "<`>" ;
 --IntT.          Typ         ::= "Int" "<" Exp ">" ;
 --IntT.          Typ         ::= "Int" "<" Integer ">" ;
 BoolT.          Typ     ::= "Boolean" ;
 VoidT.          Typ     ::= "void" ;
 
-StructT.       Typ         ::= "struct" "{" [FieldDecl] "}" ;
+StructT.       Typ         ::= "struct" "{" [TypedName] "}" ;
 EnumT.          Typ     ::= "enum" "{" [Ident] "}" ;
 ArrayT.        Typ        ::= Typ "[" Exp "]" ;
 SimpleT.        Typ     ::= Ident ;
 
 -- this is a declaration of a named typed variable, like in a function
 -- param list, or struct field
-FieldDecl.   FieldDecl   ::= Typ Ident ;
+TypedName.             TypedName         ::= Typ Ident ;
 
 -- fields in a struct are separated by commas
 -- a void type can be defined as an empty struct. (TODO: or should the
 -- compiler define one?)
 -- both the above requirements apply to function arg lists too
--- separator FieldDecl "," ;
--- [].             [FieldDecl]   ::= ;
--- (:).            [FieldDecl]   ::= FieldDecl "," [FieldDecl] ;
-separator FieldDecl "," ;
+-- separator TypedName "," ;
+-- [].             [TypedName]   ::= ;
+-- (:).            [TypedName]   ::= TypedName "," [TypedName] ;
+separator TypedName "," ;
 
 
 -- statements
 SBlock.   Stm      ::= "{" [Dec] [Stm] "}" ;
 
-SAss.     Stm      ::= RVal "=" Exp ";" ;
+SAss.     Stm      ::= LVal "=" Exp ";" ;
 
 -- none of these statements need a trailing semicolon. so, only
 -- Assignment needs it (as specified above)
@@ -102,9 +105,9 @@ SIfElse.        Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
 _.        Stm      ::= Stm ";" ;
 
 
-RVal.           RVal    ::= Exp ;
+LVal.           LVal    ::= Exp ;
 -- for type annotation
-internal RValT. RVal    ::= "cast" "<" Typ ">" "(" RVal ")" ; 
+internal LValT. LVal    ::= "cast" "<" Typ ">" "(" LVal ")" ; 
 
 
 --------------
