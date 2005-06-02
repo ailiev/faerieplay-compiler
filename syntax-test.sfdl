@@ -1,0 +1,42 @@
+/* -*- c -*-
+* Alice should search in Bob's database without revealing what is searched
+*/
+program PIR {
+
+	const KEYSIZE = 6;
+
+    type Key = Int<KEYSIZE`>;
+    type Data = Int<24`>;
+
+    type Pair = struct {Key key, Data data};
+
+    const DBsize = 16;
+    
+    type Pair = struct {Key key, Data data};
+ 
+	type AliceT = struct
+	{
+	    Key input,Data output
+	};
+	
+	type BobT = struct { Pair[DBsize] input };
+	
+	
+	
+    function void main (AliceT alice,BobT bob) {
+       //var Int<8> i ; - indexs of for loops are not declared
+      
+        var Int<KEYSIZE`> dummy;
+
+        dummy = alice.input;
+
+        for (i = 0 to DBsize-1) {
+            if (alice.input == bob.input[i].key) {
+                alice.output = bob.input[i].data; ;
+		dummy = dummy - 1;
+            }
+        }
+        
+        
+    }
+}

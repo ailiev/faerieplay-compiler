@@ -105,19 +105,20 @@ showTree v tree
 
 
 -- run :: (Print a, Show a) => Verbosity -> ParseFun a -> String -> IO ()
-run v p s = let ts =  myLexer s
-                ast = p ts
-            in case ast of
-               Bad s    -> do putStrLn "\nParse              Failed...\n"
-                              putStrV v "Tokens:"
-                              putStrV v $ show ts
-                              putStrLn s
-               Ok  tree -> do putStrLn "\nParse Successful!"
-                              putStrV v "Unrolling for's"
-                              case tree of
-                                prog@(Prog _ _) -> case typeCheck prog of
-                                                      (Left err)       -> print $ "Error! " << err
-                                                      (Right (Im.Prog id Im.ProgTables{Im.types=ts})) -> printMap ts
+run v p s =
+    let ts =  myLexer s
+        ast = p ts
+    in case ast of
+         Bad s    -> do putStrLn "\nParse              Failed...\n"
+                        putStrV v "Tokens:"
+                        putStrV v $ show ts
+                        putStrLn s
+         Ok  tree -> do putStrLn "\nParse Successful!"
+                        putStrV v "Unrolling for's"
+                        case tree of
+                          prog@(Prog _ _) -> case typeCheck prog of
+                                               (Left err)        -> print $ "Error! " << err
+                                               (Right prog)      -> putStrLn $ PP.render $ Im.docProg prog
 
 
 printMap m = mapM_ print $ Map.fold (:) [] m
