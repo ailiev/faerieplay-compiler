@@ -259,8 +259,8 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                 EntConst i         -> checkExp (T.EInt i)
                 -- a var is usually variable, but loop counters will be static
                 EntVar (typ,flags) -> return $ annot typ $ if elem Im.LoopCounter flags
-                                                           then Im.EStatic (Im.EVar nm)
-                                                           else Im.EVar nm
+                                                           then Im.EStatic (Im.var nm)
+                                                           else Im.var nm
                 _                  -> throwErr 42 $ "Identifier " << nm << " is illegal in expression " << e
 
 
@@ -368,7 +368,7 @@ checkLVal :: T.LVal -> StateWithErr Im.LVal
 checkLVal (T.LVal (T.EIdent (T.Ident name))) =
     do ent <- extractEnt name
        case ent of
-          (EntVar (_,flags)) | not $ elem Im.Immutable flags  -> return (Im.LVal $ Im.EVar name)
+          (EntVar (_,flags)) | not $ elem Im.Immutable flags  -> return (Im.LVal $ Im.var name)
           -- can assign to a function name, inside that function!
           _       -> throwErr 42 $ "Assigning to immutable value " << name
 

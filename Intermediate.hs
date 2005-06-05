@@ -8,7 +8,7 @@ import qualified Data.Map as Map
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
 
-data Func = Func Typ VarTable [Stm] deriving (Eq,Ord,Show)
+data Func = Func Typ VarTable [Stm] deriving (Eq,Ord)
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -40,7 +40,7 @@ type Ident = String
 
 data Prog =
    Prog Ident ProgTables
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 data Typ =
    IntT Exp
@@ -56,11 +56,11 @@ data Typ =
  | FuncT Typ [Typ]
  | RedIntT Integer              -- RedIntT =def IntT . ELit . LInt
  | RedArrayT Typ Integer        -- similar
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 data TypedName =
    TypedName Typ Ident
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 data Stm =
    SBlock [Stm]
@@ -68,16 +68,16 @@ data Stm =
  | SFor Ident Exp Exp Stm
  | SIf     Exp Stm
  | SIfElse Exp Stm Stm
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 data LVal =
    LVal Exp
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 data Exp =
    -- variables just need a name, and the scope stack will take care of
    -- making sure we get the correct instance of that name
-   EVar Ident
+   EVar Var
  | EStruct Exp String           -- Structure and field
  | EArr Exp Exp                 -- array
  | ELit Lit                     -- literal
@@ -90,12 +90,21 @@ data Exp =
                                 -- compile time. use to mark all
                                 -- static expressions
  | ExpT Typ Exp                 -- a type annotation
-  deriving (Eq,Ord,Show)
+ | ESeq [Stm] Exp               -- several assignment statements,
+                                -- followed by an expression.
+  deriving (Eq,Ord)
 
 
 -- some expressions have to be static, hence not annotated with EStatic:
 -- arg of IntT
 
+-- this is the more common usage:
+var = EVar . VSimple
+
+data Var =
+    VSimple Ident
+  | VTemp Int
+    deriving (Eq,Ord)
 
 data Lit =                      -- literals
     LInt Int
@@ -193,7 +202,7 @@ docStm (SIfElse test s1 s2)  = docStm (SIf test s1) $$
 
 
 docExp e = case e of
-    (EVar nm)           -> text nm
+    (EVar v)            -> docVar v
     (EStruct str field) -> cat [docExp str, text ".", text field]
     (EArr arr idx)      -> cat [docExp arr, text "[", docExp idx, text "]"]
     (ELit l)            -> docLit l
@@ -231,6 +240,11 @@ docTyp t =
 
 docTypedName (TypedName t name) = sep [docTyp t, text name]
 
+docVar v =
+    case v of
+      (VSimple name)    -> text name
+      (VTemp i)         -> text "temp" <> (parens (int i))
+
 
 docLit (LInt i)          = int i
 docLit (LBool b)         = text $ show b
@@ -261,3 +275,25 @@ docBinOp o = case o of
                     BOr -> text "|" 
                     And -> text "&&" 
                     Or -> text "||"
+
+
+instance Show Stm where
+    showsPrec i = showsPrec i . docStm
+
+instance Show Exp where
+    showsPrec i = showsPrec i . docExp
+
+instance Show Typ where
+    showsPrec i = showsPrec i . docTyp
+
+instance Show Var where
+    showsPrec i = showsPrec i . docVar
+
+instance Show Prog where
+    showsPrec i = showsPrec i . docProg
+
+instance Show TypedName where
+    showsPrec i = showsPrec i . docTypedName
+
+instance Show Func where
+    showsPrec i = showsPrec i . docFunc
