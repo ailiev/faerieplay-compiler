@@ -1,0 +1,19 @@
+Analysis of what is static and what not:
+
+Could check all expressions which should be static (eg. consts, int size, array
+length) during first typecheck phase. but this is nasty to mix with actual
+typechecking.
+
+Perhaps have a second pass right away, which actually computes all available
+static expressions? 
+
+All consts should be available before unrolling? yes!
+
+how to deal with structs?? name + offset? a set of separate names?
+
+
+
+Sun Jun  5 17:37:53 2005
+
+Current implementation of HoistStms will not handle a function call in an
+l-value. this seems fairly sensible to prohibit.
