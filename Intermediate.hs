@@ -3,6 +3,8 @@ module Intermediate where
 
 import Text.PrettyPrint
 
+-- import Tree
+
 
 import qualified Data.Map as Map
 
@@ -13,7 +15,12 @@ data Func = Func Typ VarTable [Stm] deriving (Eq,Ord)
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
 
-data VarFlag = LoopCounter | Immutable deriving (Show,Ord,Eq)
+data VarFlag =
+    LoopCounter
+  | Immutable
+  | RetVar                      -- a return variable, ie. a var
+                                -- representing its enclosing function
+   deriving (Show,Ord,Eq)
 
 -- we'll have a stack of these, one per scope.
 type VarTable = Map.Map EntName (Typ,[VarFlag])
@@ -85,7 +92,7 @@ data Exp =
  | UnOp UnOp Exp
  | BinOp BinOp Exp Exp
  | EGetBit Exp Exp              -- EGetBit i exp = i-th bit of exp
- | EBitsize Exp                 -- bitsize of an int expression
+-- | EBitsize Exp                 -- bitsize of an int expression
  | EStatic Exp                  -- a static expression, computable at
                                 -- compile time. use to mark all
                                 -- static expressions
@@ -98,18 +105,27 @@ data Exp =
 -- some expressions have to be static, hence not annotated with EStatic:
 -- arg of IntT
 
--- this is the more common usage:
+
+-- helpers for variables
 var = EVar . VSimple
+tempVar = EVar . VTemp
 
 data Var =
     VSimple Ident
   | VTemp Int
+  | VScoped Var [ScopeId]           -- during unrolling, everything ends
+                                    -- up in one scope; thus add a
+                                    -- list of the enclosing scope id's
     deriving (Eq,Ord)
+
+
+type ScopeId = Int
+
 
 data Lit =                      -- literals
     LInt Int
   | LBool Bool
-   deriving (Eq,Show,Ord)
+   deriving (Eq,Ord)
              
 
 data BinOp =
@@ -141,10 +157,37 @@ data UnOp =
   | Neg
 -- and internal:
   | Log2
+  | Bitsize
    deriving (Eq,Show,Ord)
 
 
+data Points a = P0 |
+                P1   (a -> a)         a |
+                P2   (a -> a -> a)   (a,a)
+-- etc...
 
+classifyExp :: Exp -> (Points Exp)
+classifyExp e =
+    case e of
+         (BinOp op e1 e2)  -> P2 (BinOp op) (e1,e2)
+         (UnOp op e1)      -> P1 (UnOp op) e1
+         (EStruct str fld) -> P1 (`EStruct` fld) str
+         (EArr arr idx)    -> P2 EArr (arr , idx)
+         (EGetBit base bit)-> P2 EGetBit (base,bit)
+         (EStatic e)       -> P1 EStatic e
+         (ExpT t e)        -> P1 (ExpT t) e
+         (ESeq ss e1)      -> P1 (ESeq ss) e1
+         _                 -> P0
+
+---------------------------
+-- Tree instances
+---------------------------
+{-
+instance Tree Exp where
+    children e = [e]
+    nodeExtr e     = 1
+    nodeCons i es = 
+-}
 
 
 ----------------------------
@@ -183,7 +226,7 @@ docFunc (Func t vars stms)      = vcat [text "function:",
                                         empty]
 
 docStm :: Stm -> Doc
-docStm (SAss (LVal lval) val)= sep [docExp lval, text "=", docExp val, text ";"]
+docStm (SAss (LVal lval) val)= sep [docExp lval, text "=", docExp val]
 docStm (SBlock stms)         = vcat (map docStm stms)
                                
 docStm (SFor nm hi lo stm)   = sep [text "for",
@@ -206,15 +249,18 @@ docExp e = case e of
     (EStruct str field) -> cat [docExp str, text ".", text field]
     (EArr arr idx)      -> cat [docExp arr, text "[", docExp idx, text "]"]
     (ELit l)            -> docLit l
-    (EFunCall f args)   -> sep [text f, text "(",
-                                sep (punctuate (text ", ") (map docExp args)),
+    (EFunCall f args)   -> cat [text f, text "(",
+                                sep (punctuate (text ",") (map docExp args)),
                                 text ")"]
     (UnOp op e)         -> cat [docUnOp op, text "(", docExp e, text ")"]
     (BinOp op e1 e2)    -> cat [docExp e1, docBinOp op, docExp e2]
     (EGetBit x b)       -> docExp (EArr x b)
-    (EBitsize e)        -> docExp (EStruct e "bitSize")
     (EStatic e)         -> docExp e
     (ExpT t e)          -> docExp e
+    (ESeq stms e)       -> brackets $
+                           cat ((punctuate comma (map docStm stms))) <>
+                           text ": " <>
+                           docExp e
 
 
 docTyp :: Typ -> Doc
@@ -255,6 +301,7 @@ docUnOp o = case o of
                    BNot -> text "~"
                    Neg  -> text "-"
                    Log2 -> text "log2"
+                   Bitsize -> text "bitsize"
 
 
 docBinOp o = case o of
@@ -297,3 +344,6 @@ instance Show TypedName where
 
 instance Show Func where
     showsPrec i = showsPrec i . docFunc
+
+instance Show Lit where
+    showsPrec i = showsPrec i . docLit

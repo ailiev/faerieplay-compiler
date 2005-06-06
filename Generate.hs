@@ -15,6 +15,8 @@ import SFDL.ErrM
 import Data.Map as Map
 
 import qualified Intermediate as Im
+import qualified HoistStms as Ho
+
 import TypeChecker
 
 import SashoLib
@@ -118,10 +120,16 @@ run v p s =
                         case tree of
                           prog@(Prog _ _) -> case typeCheck prog of
                                                (Left err)        -> print $ "Error! " << err
-                                               (Right prog)      -> putStrLn $ PP.render $ Im.docProg prog
+                                               (Right prog)      -> do print prog
+                                                                       testFlatten prog "main"
 
 
 printMap m = mapM_ print $ Map.fold (:) [] m
+
+testFlatten (Im.Prog pname (Im.ProgTables {Im.funcs=fs})) fname =
+    do let (Just f) = Map.lookup fname fs
+           f_flat = Ho.flattenFunc f
+       print f_flat
 
 --                                 Prog _ decls -> case head decls of
 --                                                      FunDecl _ _ _ _ stms -> print $ unrollStms stms

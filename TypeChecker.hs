@@ -118,8 +118,12 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        -- now prepare the new scope for this function, by pushing a new empty
        -- Map to the top of the SymbolTable stack
        pushScope
-       im_args <- mapM checkTypedName args -- check the formal args
-       mapM_ addArgVar im_args -- add the formal argument variables to the scope
+       -- check the formal args
+       im_args <- mapM checkTypedName args 
+       -- add the formal argument variables to the scope
+       mapM_ addArgVar im_args 
+       -- add the function name as a variable
+       addToVars im_t [Im.RetVar] name
        mapM checkDec decs
        im_stms <- mapM checkStm stms
        vars    <- popScope
@@ -160,7 +164,7 @@ checkStm (T.SBlock decs stms) = do pushScope
                                    popScope
                                    return (Im.SBlock new_stms)
 
-checkStm (T.SAss rval val)     = do lval_new <- checkLVal rval
+checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
                                     return (Im.SAss lval_new val_new)
 
@@ -253,7 +257,7 @@ bitsize = (max 1) . ilog2
 
 -- for all these Exp's, want to figure out which are const and 
 checkExp e@(T.EIdent (T.Ident nm)) =
-    do ent <- extractEnt nm
+    do ent <- extractEnt e nm
        case ent of
                 -- same as a literal int!
                 EntConst i         -> checkExp (T.EInt i)
@@ -307,12 +311,12 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
 
           -- if it's an i.bitSize expression, just return an Int
           check (Im.IntT size) _
-              | fieldname == "bitSize" = do return ( Im.IntT (Im.EBitsize size), size )
+              | fieldname == "bitSize" = do return ( Im.IntT (Im.UnOp Im.Bitsize size), size )
 
           -- for bitSize on a "generic" int (type Int<`>), we need to add EBitsize
           -- expressions, to be evaluated when functions are inlined.
-          check (Im.GenIntT) new_str = let val = Im.EStatic $ Im.EBitsize new_str
-                                       in  return (Im.IntT (Im.EBitsize val) , val)
+          check (Im.GenIntT) new_str = let val = Im.EStatic $ Im.UnOp Im.Bitsize new_str
+                                       in  return (Im.IntT (Im.UnOp Im.Bitsize val) , val)
 
           check typ _              = throwErr 42 $ str << " in " << e << " is not a struct, it is " << typ
 
@@ -325,10 +329,11 @@ checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not
 -- to check a function call:
 -- - check and get types for all the args
 -- - compare those to the function's formal params
--- - add coercions if necessary
+
 checkExp e@(T.EFunCall (T.Ident fcnName) args) =
-    do im_args <- mapM (checkExp . extrExp) args
-       return (Im.EFunCall fcnName im_args)
+    do (Im.Func t _ _) <- extractFunc e fcnName
+       im_args <- mapM (checkExp . extrExp) args
+       return (Im.ExpT t (Im.EFunCall fcnName im_args))
     where extrExp (T.FunArg e) = e
 
 
@@ -365,8 +370,8 @@ checkTypedName (T.TypedName t (T.Ident name)) = do t_new <- checkTyp t
 checkLVal :: T.LVal -> StateWithErr Im.LVal
 
 -- an identifier needs special treatment: don't assign to consts etc
-checkLVal (T.LVal (T.EIdent (T.Ident name))) =
-    do ent <- extractEnt name
+checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
+    do ent <- extractEnt lv name
        case ent of
           (EntVar (_,flags)) | not $ elem Im.Immutable flags  -> return (Im.LVal $ Im.var name)
           -- can assign to a function name, inside that function!
@@ -397,11 +402,16 @@ data Entity = EntConst Integer
             | EntVar   (Im.Typ,[Im.VarFlag])
             | EntType  Im.Typ
 
-extractEnt :: Im.EntName -> StateWithErr Entity
-extractEnt name = do Im.ProgTables {Im.types=ts, Im.consts=cs, Im.funcs=fs, Im.vars=vs} <- St.get
-                     case extractHelper (ts,cs,fs,vs) name of
+extractEnt :: (Show a) => a -> Im.EntName -> StateWithErr Entity
+extractEnt ctx name = do Im.ProgTables {Im.types=ts,
+                                        Im.consts=cs,
+                                        Im.funcs=fs,
+                                        Im.vars=vs} <- St.get
+                         case extractHelper (ts,cs,fs,vs) name of
                            (Just ent)   -> return ent
-                           _            -> throwErr 42 $ "Entity " << name << " not in scope"
+                           _            -> throwErr 42 $ "Entity " << name
+                                                           << " not in scope in "
+                                                           << ctx
 
 -- the first one that succeeds will be the result
 -- extractHelper :: Im.EntName -> Maybe Entity
@@ -415,6 +425,11 @@ extractHelper (ts,cs,fs,vs) name = (do v <- maybeLookup name vs
                                        return (EntFunc res))
 
 
+extractFunc ctx name = do Im.ProgTables {Im.funcs=fs} <- St.get
+                          let res = maybeLookup name [fs]
+                          case res of (Just f) -> return f
+                                      _        -> throwErr 42 $ name << " in " << ctx
+                                                              << " is not in scope as a function"
 
 -- check a unary opeartion, and return its type.
 -- here 'e' is the whole unary expression, not just the parameter
@@ -440,12 +455,15 @@ checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
 
 -- check an arithmetic expression whose components e1 and e2 are already checked.
 checkBinary op e1 e2 =
-    case (e1,e2) of
-       ( (Im.ExpT (Im.IntT i1) _),
-         (Im.ExpT (Im.IntT i2) _) )    -> return $ annot (Im.IntT $ Im.BinOp Im.Max i1 i2) (Im.BinOp op e1 e2)
-       _                               -> throwErr 42 $ "Arithmetic expression "
-                                                      << (Im.BinOp op e1 e2)
-                                                      << " has non-integer params"
+    do let ( (Im.ExpT t1 _), (Im.ExpT t2 _) ) = (e1,e2)
+       t1_full <- expandTyp t1
+       t2_full <- expandTyp t2
+       case (t1_full,t2_full) of
+             ((Im.IntT i1),
+              (Im.IntT i2) )    -> return $ annot (Im.IntT $ Im.BinOp Im.Max i1 i2) (Im.BinOp op e1 e2)
+             _                  -> throwErr 42 $ "Arithmetic expression "
+                                            << (Im.BinOp op e1 e2)
+                                            << " has non-integer params"
 
 -- same as checkBinary except we have to increment the bitsize of the
 -- output by 1
@@ -563,7 +581,8 @@ analyzeBinExp e = case e of
                      (T.EPlus e1 e2)      -> Just (Arith,Im.Plus,e1,e2)
                      (T.ETimes e1 e2)     -> Just (Arith,Im.Times,e1,e2)
                      (T.EMinus e1 e2)     -> Just (Arith,Im.Minus,e1,e2)
-                          
+                     (T.EDiv e1 e2)       -> Just (Arith,Im.Div,e1,e2)
+
                      (T.EEq e1 e2)      -> Just (Comparison,Im.Eq,e1,e2)
                      (T.ENeq e1 e2)     -> Just (Comparison,Im.Neq,e1,e2)
                      (T.ELt e1 e2)     -> Just (Comparison,Im.Lt,e1,e2)
