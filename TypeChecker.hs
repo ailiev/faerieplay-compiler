@@ -130,9 +130,10 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        -- add this function's type
        addToTypes name (Im.FuncT im_t (map extractTyp im_args))
        -- and add the actual function
-       addToFuncs name (Im.Func im_t vars im_stms)
-    where extractTyp (Im.TypedName typ _) = typ
-          addArgVar (Im.TypedName argtyp argname) = addToVars argtyp [] argname
+       addToFuncs name (Im.Func name im_t (map tn2var im_args) im_stms)
+    where extractTyp (Im.TypedName typ _)    = typ
+          addArgVar  (Im.TypedName typ name) = addToVars typ [Im.FormalParam] name
+          tn2var     (Im.TypedName _ name)   = (Im.VFlagged [Im.FormalParam] (Im.VSimple name))
 
 -- special treatment for an Enum
 checkDec (T.TypeDecl (T.Ident name) t@(T.EnumT ids)) =
@@ -261,9 +262,9 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                 -- same as a literal int!
                 EntConst i         -> checkExp (T.EInt i)
                 -- a var is usually variable, but loop counters will be static
-                EntVar (typ,flags) -> return $ annot typ $ if elem Im.LoopCounter flags
-                                                           then Im.EStatic (Im.var nm)
-                                                           else Im.var nm
+                EntVar (typ,v) -> return $ annot typ $ if elem Im.LoopCounter (Im.vflags v)
+                                                       then Im.EStatic (Im.EVar v)
+                                                       else Im.EVar v
                 _                  -> throwErr 42 $ "Identifier " << nm << " is illegal in expression " << e
 
 
@@ -328,9 +329,9 @@ checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not
 -- to check a function call:
 -- - check and get types for all the args
 -- - compare those to the function's formal params
-
+-- TODO: not finished with the checking here!
 checkExp e@(T.EFunCall (T.Ident fcnName) args) =
-    do (Im.Func t _ _) <- extractFunc e fcnName
+    do (Im.Func _ t _ _) <- extractFunc e fcnName
        im_args <- mapM (checkExp . extrExp) args
        return (Im.ExpT t (Im.EFunCall fcnName im_args))
     where extrExp (T.FunArg e) = e
@@ -372,7 +373,9 @@ checkLVal :: T.LVal -> StateWithErr Im.LVal
 checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
     do ent <- extractEnt lv name
        case ent of
-          (EntVar (_,flags)) | not $ elem Im.Immutable flags  -> return (Im.LVal $ Im.var name)
+          (EntVar (_,v))
+              | not $ elem Im.Immutable (Im.vflags v) 
+                  -> return (Im.LVal $ Im.EVar v)
           _       -> throwErr 42 $ "Assigning to immutable value " << name
 
 checkLVal (T.LVal e) =
@@ -393,17 +396,17 @@ checkLoopCounter ctx name =
     -- (EntConst 0)
     do var <- extractEnt ctx name `catchError` (const $ return $ EntConst 0)
        case var of
-         (EntVar (_, flags))
-             | elem Im.LoopCounter flags   -> throwErr 42 $ "Loop counter " << name
-                                                           << " reused"
-         _                                 -> return ()
+         (EntVar (_,v))
+             | elem Im.LoopCounter (Im.vflags v)  -> throwErr 42 $ "Loop counter " << name
+                                                                << " reused"
+         _                                        -> return ()
          
 
 
 -- extractor of different table objects
 data Entity = EntConst Integer
             | EntFunc  Im.Func
-            | EntVar   (Im.Typ,[Im.VarFlag])
+            | EntVar   (Im.Typ,Im.Var)
             | EntType  Im.Typ
 
 extractEnt :: (Show a) => a -> Im.EntName -> StateWithErr Entity
@@ -546,10 +549,17 @@ addToTypes name typ = St.modify $
                       projFromTypes $
                       Map.insert name typ
 
-addToVars typ flags name = St.modify $
-                           projFromVars $
-                           modifyListHead $
-                           Map.insert name (typ,flags)
+
+-- take care of constructing a VFlagged if there are flags
+addToVars typ flags name = let v' = (Im.VSimple name)
+                               v  = if null flags
+                                    then v'
+                                    else (Im.VFlagged flags v')
+                           in St.modify $
+                              projFromVars $
+                              modifyListHead $
+                              Map.insert name (typ,v)
+
 
 lookupType :: String -> StateWithErr Im.Typ
 lookupType name =

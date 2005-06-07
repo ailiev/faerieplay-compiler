@@ -22,9 +22,9 @@ import Intermediate
 
 flattenFunc :: Func -> Func
 flattenFunc f = fst $ St.runState (stateComp f) 0
-    where stateComp (Func t vars stms) =
+    where stateComp (Func name t args stms) =
               do stmss <- mapM flatten stms
-                 return (Func t vars (concat stmss))
+                 return (Func name t args (concat stmss))
 
 
 

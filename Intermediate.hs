@@ -16,11 +16,11 @@ import SashoLib (myLiftM)
 data EntType = Type | Var deriving (Eq,Ord,Show)
 
 -- Func takes:
+-- - name
 -- - return Typ
 -- - list of formal params
--- - the variable table
 -- - the list of statements
-data Func = Func Typ [Var] VarTable [Stm] deriving (Eq,Ord)
+data Func = Func Ident Typ [Var] [Stm] deriving (Eq,Ord)
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -28,12 +28,14 @@ type EntName = String
 data VarFlag =
     LoopCounter
   | Immutable
+  | FormalParam
   | RetVar                      -- a return variable, ie. a var
                                 -- representing its enclosing function
    deriving (Show,Ord,Eq)
 
--- we'll have a stack of these, one per scope.
-type VarTable = Map.Map EntName (Typ,[VarFlag])
+-- we'll have a stack of these, one per active scope, during
+-- typechecking
+type VarTable = Map.Map EntName (Typ,Var)
 
 type TypeTable = Map.Map EntName Typ
 
@@ -116,18 +118,34 @@ data Exp =
 -- arg of IntT
 
 
--- helpers for variables
+-- helpers for variables (without flags)
 var = EVar . VSimple
 tempVar = EVar . VTemp
 
 data Var =
     VSimple Ident
   | VTemp Int
-  | VScoped Var [ScopeId]           -- during unrolling, everything ends
+  | VFlagged [VarFlag] Var
+  | VScoped [ScopeId] Var           -- during unrolling, everything ends
                                     -- up in one scope; thus add a
                                     -- list of the enclosing scope id's
     deriving (Eq,Ord)
 
+
+-- quick helper to get the flags
+vflags (VFlagged fl _)  = fl
+vflags _                = []
+
+
+-- ScopeId, by example:
+-- -       1
+--   -     1,1
+--   -     1,2
+--     -   1,2,1
+--     -   1,2,2
+--   -     1,3
+-- -       2
+-- -       3
 
 type ScopeId = Int
 
@@ -301,7 +319,8 @@ docProg (Prog id (ProgTables {funcs=fs,
           docPair sf (n,t)      = sep [text n, equals, sf t]
           docVar (t,flags)      = sep [docTyp t, parens (text $ show flags)]
 
-docFunc (Func t vars stms)      = vcat [text "function:",
+docFunc (Func name t args stms) = vcat [text "function" <+> (text name) <+>
+                                             (parens $ cat $ punctuate comma (map docVar args)),
                                         nest 2 (vcat (map docStm stms)),
                                         text "end",
                                         empty]
@@ -371,6 +390,8 @@ docVar v =
     case v of
       (VSimple name)    -> text name
       (VTemp i)         -> text "temp" <> (parens (int i))
+      (VScoped scopes v)-> parens (cat $ punctuate (text "/") (map int scopes) ++ [docVar v])
+      (VFlagged flags v)-> docVar v
 
 
 docLit (LInt i)          = int i
