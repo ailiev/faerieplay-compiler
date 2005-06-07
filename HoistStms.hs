@@ -62,51 +62,54 @@ flatten s =
                                         (SIf t_i (groupStms s1s_new)),
                                         (SIf (UnOp Not t_i) (groupStms s2s_new))]
 
-    where extrStms e = do e_subbed <- subFunCalls e
+    where extrStms :: Exp -> St.State Int ([Stm],Exp)
+          extrStms e = do e_subbed <- subFunCalls e
                           let e_h = hoist e_subbed
                           return $ splitEseq e_h
           -- squash potentially many statements into one (SBlock)
           groupStms [s] = s
           groupStms ss  = SBlock ss
 
+{-
+f_e   = hoist . subFunCalls
 
+f_s s = case s of
+        (SAss lval val)         -> do let (stms,val_new) = splitEseq val
+                                      return $ smts ++ [(SAss lval val_new)]
+        (SFor id lo hi s)       -> do 
+-}
 
 
 -- hoist: take an expression (with component ESeq's), and produce one
 -- with ESeq only at the top level
-hoist :: Exp -> Exp
-hoist (EFunCall nm args) = let args_h   = map hoist args
-                           in combHoisted (EFunCall nm) args_h
--- for ESeq may need to recurse into the inner Exp to gather
--- ESeq's from there
--- ALSO: ESeq's in the 'stms' need to be cleaned up, ie. all assignments brought directly into the 'stms' list
-hoist (ESeq stms e_in) = let (ss,e_pure) = splitEseq $ hoist e_in
-                             stms_h = concatMap flatAss stms
-                         in (ESeq (stms_h++ss) e_pure)
-hoist e
-    | P1 cons e1      <- classifyExp e = combHoisted1 cons (hoist e1)
-    | P2 cons (e1,e2) <- classifyExp e = combHoisted2 cons (hoist e1) (hoist e2)
-
-hoist e                = e
+hoist = mapExp f
+-- for ESeq we may have top-level ESeq's inside the inner expression,
+-- thus get them out with splitEseq
+-- ALSO: ESeq's in the 'stms' need to be cleaned up, ie. all
+-- assignments brought directly into the 'stms' list, using flatAss
+    where f e@(ESeq stms e1)    = let (ss,e_pure) = splitEseq e1
+                                      stms_h      = concatMap flatAss stms
+                                  in  (ESeq (stms_h++ss) e_pure)
+-- all other Exp's just call combHoisted on the recursive
+-- result, to move ESeq's to the top level
+          f e                   = combHoisted e
+         
 
 
-
-subFunCalls (EFunCall nm args)  = do sub_args   <- mapM subFunCalls args
-                                     i          <- nextInt
-                                     let t_i    =  tempVar i
-                                     return $ ESeq [(SAss (LVal t_i) (EFunCall nm sub_args))]
-                                                   t_i
--- subFunCalls e = return e
-
-subFunCalls e | P1 cons e1      <- classifyExp e = do e1_s <- subFunCalls e1
-                                                      return $ cons e1_s
-              | P2 cons (e1,e2) <- classifyExp e = do e1_s <- subFunCalls e1
-                                                      e2_s <- subFunCalls e2
-                                                      return $ cons e1_s e2_s
-              | otherwise                        = return e
+-- replace all function calls in 'e' with an ESeq which assigns the
+-- call to a temp var, and then returns the temp var
+subFunCalls e = mapExpM f e
+    where f (EFunCall nm args) = do sub_args   <- mapM subFunCalls args
+                                    i          <- nextInt
+                                    let t_i    =  tempVar i
+                                    return $ ESeq [(SAss (LVal t_i) (EFunCall nm sub_args))]
+                                                  t_i
+          f e                  = return e
 
 
--- bring all ESeq statements in the 'val' to the top
+
+-- bring all statements (ie Assignments) in ESeq expressions in the
+-- 'val' to the outside, so there are no ESeq's left
 flatAss :: Stm -> [Stm]
 flatAss s@(SAss lval val) = let val_h = hoist val
                             in  case val_h of
@@ -127,19 +130,21 @@ nextInt = do i <- St.get
              return i
 
 
--- take 1 or 2 expressions, potentially ESeq, and an expression
--- constructor, and return the constructed expression (potentially
--- ESeq) with non-ESeq components. Ie ESeq's moved one level up.
-combHoisted2 cons e1 e2 = combHoisted (\[e1,e2] -> cons e1 e2) [e1,e2]
-combHoisted1 cons e1    = combHoisted (\[e] -> cons e)         [e1]
-
 
 -- moves ESeq's from one level deep to just top-level
 -- 'cons' is a function which makes an Exp from a list of other Exp's,
 -- component_es are the potential ESeq's
-combHoisted :: ([Exp] -> Exp) -> [Exp] -> Exp
-combHoisted cons component_es = let (stmss, new_es) = unzip $ map splitEseq component_es
-                                    stms = concat stmss
-                                in if   null stms
-                                   then cons component_es
-                                   else (ESeq stms (cons new_es))
+combHoistedL :: ([Exp] -> Exp) -> [Exp] -> Exp
+combHoistedL cons component_es = let (stmss, new_es) = unzip $ map splitEseq component_es
+                                     stms = concat stmss
+                                 in if   null stms
+                                    then cons component_es
+                                    else (ESeq stms (cons new_es))
+
+combHoisted :: Exp -> Exp
+combHoisted e
+    | P1 cons e1      <- classe = combHoistedL (\[e] -> cons e)         [e1]
+    | P2 cons (e1,e2) <- classe = combHoistedL (\[e1,e2] -> cons e1 e2) [e1,e2]
+    | PList cons es   <- classe = combHoistedL cons es
+    | P0              <- classe = e
+    where classe = classifyExp e

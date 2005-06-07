@@ -78,7 +78,7 @@ instance (LabTree BinTree) a where
 -- and some tree functions
 ------
 
---                       fnode            fcons           base  tree
+--                           fnode            fcons           base  tree
 redtree :: (LabTree t a) => (a -> b -> c) -> (c -> b -> b) -> b -> t a ->  c
 redtree fnode fcons base t = fnode (nodeExtr t) (redtree' fnode fcons base (children t))
 -- redtree' takes (fnode, fcons, start) and a list of trees

@@ -5,12 +5,22 @@ import Text.PrettyPrint
 
 -- import Tree
 
+import Control.Monad.Identity
+import Monad (liftM)
 
 import qualified Data.Map as Map
 
+import SashoLib (myLiftM)
+
+
 data EntType = Type | Var deriving (Eq,Ord,Show)
 
-data Func = Func Typ VarTable [Stm] deriving (Eq,Ord)
+-- Func takes:
+-- - return Typ
+-- - list of formal params
+-- - the variable table
+-- - the list of statements
+data Func = Func Typ [Var] VarTable [Stm] deriving (Eq,Ord)
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -123,7 +133,7 @@ type ScopeId = Int
 
 
 data Lit =                      -- literals
-    LInt Int
+    LInt Int                    -- TODO: change to Integer
   | LBool Bool
    deriving (Eq,Ord)
              
@@ -163,7 +173,8 @@ data UnOp =
 
 data Points a = P0 |
                 P1   (a -> a)         a |
-                P2   (a -> a -> a)   (a,a)
+                P2   (a -> a -> a)   (a,a) |
+                PList ([a] -> a)     [a]
 -- etc...
 
 classifyExp :: Exp -> (Points Exp)
@@ -177,7 +188,77 @@ classifyExp e =
          (EStatic e)       -> P1 EStatic e
          (ExpT t e)        -> P1 (ExpT t) e
          (ESeq ss e1)      -> P1 (ESeq ss) e1
+         (EFunCall nm args)-> PList (EFunCall nm) args
          _                 -> P0
+
+-- returns the children statements and expressions of an Stm, and also
+-- a constructor to construct the Stm from (new) children
+stmChildren :: Stm -> ([Stm], [Exp], ([Stm] -> [Exp] -> Stm))
+stmChildren s =
+    case s of
+      (SBlock stms)             -> ( stms,   [],         (\ss []        -> (SBlock ss)) )
+      (SAss (LVal lval) val)    -> ( [],     [lval,val], (\[] [lval,val]-> (SAss (LVal lval) val)) )
+      (SFor nm lo hi fors)      -> ( [fors], [lo,hi],    (\[s] [lo,hi]  -> (SFor nm lo hi s)) )
+      (SIf test ifs)            -> ( [ifs] , [test],     (\[s] [test]   -> (SIf test s)) )
+
+
+-- some recursive structure for Stm's and Exp's. Make it monadic for
+-- generality
+-- The children expressions of 'e' are processed first, and then 'f'
+-- is called on the resulting Exp.
+-- 'f' is called without recursion if there are no children Exp's (eg.
+-- for EVar)
+mapExpM :: (Monad m) => (Exp -> m Exp) -> Exp -> m Exp
+mapExpM f e
+    | P2 cons (e1,e2) <- eclass         = do e1_f <- mapExpM f e1
+                                             e2_f <- mapExpM f e2
+                                             f $ cons e1_f e2_f
+    | P1 cons e1      <- eclass         = do e1_f <- mapExpM f e1
+                                             f $ cons e1_f
+    | PList cons es   <- eclass         = do es_f <- mapM (mapExpM f) es
+                                             f $ cons es_f
+    | P0              <- eclass         = f e
+   where eclass = classifyExp e
+
+
+-- use the Identity Monad to extract a non-monadic version of mapExpM
+mapExp :: (Exp -> Exp) -> Exp -> Exp
+mapExp f e = runIdentity (mapExpM (myLiftM f) e)
+
+
+
+-- and a recursion structure for Stm's!
+-- f_s: function on a statement
+-- f_e: function on an expression (passed on to mapExpM)
+mapStmM :: (Monad m) => (Stm -> m Stm) -> (Exp -> m Exp) -> Stm -> m Stm
+mapStmM f_s f_e s = do let (ss, es, scons) = stmChildren s
+                       new_es <- mapM (mapExpM f_e) es
+                       new_ss <- mapM (mapStmM f_s f_e) ss
+                       f_s (scons new_ss new_es)
+
+mapStm :: (Stm -> Stm) -> (Exp -> Exp) -> Stm -> Stm
+mapStm f_s f_e s = runIdentity (mapStmM (myLiftM f_s) (myLiftM f_e) s)
+
+{-
+-- generalize a bit to allow [Stm] to be produced
+mapStmLM :: (Monad m) => (Stm -> m [Stm]) -> (Exp -> m Exp) -> Stm -> m [Stm]
+mapStmLM f_s f_e s = do let (ss, es, scons) = stmChildren s
+                        new_es  <- mapM (mapExpM  f_e) es
+                        new_sss <- mapM (mapStmLM f_s f_e) ss
+                        let new_ss = map ((flip scons) new_es) new_sss
+                        mapM f_s new_ss
+-}
+
+{-
+-- even more general
+mapStmGenM :: (Monad m) => (Stm -> m a) -> (Exp -> m Exp) -> Stm -> m a
+mapStmGenM f_s f_e s = do let (ss, es, scons) = stmChildren s
+                          new_es <- mapM (mapExpM f_e) es
+                          new_ss <- mapM (mapStmGenM f_s f_e) ss
+                          f_s (scons (new_ss . conv) new_es)
+-}
+
+
 
 ---------------------------
 -- Tree instances

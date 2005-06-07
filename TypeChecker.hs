@@ -3,7 +3,7 @@
 
 module TypeChecker where
 
-import Monad (foldM)
+import Monad (foldM, msum)
 import List (find)
 
 import qualified Data.Map as Map (Map, insert, empty, lookup, member)
@@ -169,15 +169,14 @@ checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
                                     return (Im.SAss lval_new val_new)
 
 
-checkStm (T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
+checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
     do new_lo <- checkExp lo
        new_hi <- checkExp hi
        pushScope
-       -- add an Int of size log(number of iters) to the scope symbol table
-       -- give it a LoopCounter flag
-       -- TODO: how to prevent assignement to the loop variable inside the loop?
-       -- it doesnt make sense but should be flagged somehow?
-       addToVars (Im.IntT (Im.UnOp Im.Log2 (new_hi - new_lo)))
+       checkLoopCounter s cnt_str
+       -- add an Int to the scope symbol table for the loop counter
+       -- give it a LoopCounter and Immutable flag
+       addToVars (Im.IntT (Im.UnOp Im.Bitsize (new_hi - new_lo)))
                  [Im.LoopCounter, Im.Immutable]
                  cnt_str
        new_stm <- checkStm stm
@@ -374,7 +373,6 @@ checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
     do ent <- extractEnt lv name
        case ent of
           (EntVar (_,flags)) | not $ elem Im.Immutable flags  -> return (Im.LVal $ Im.var name)
-          -- can assign to a function name, inside that function!
           _       -> throwErr 42 $ "Assigning to immutable value " << name
 
 checkLVal (T.LVal e) =
@@ -385,15 +383,21 @@ checkLVal (T.LVal e) =
        return (Im.LVal im_e)
 
 
---findInStack :: (a -> Maybe b) -> [a] -> Maybe b
--- findInStack _ []     = Nothing
--- findInStack f (x:xs) = case f x
---                                 res@(Just _) -> res
---                                 _            -> findInStack f xs
 
 
 
-
+checkLoopCounter :: (Show a) => a -> Im.Ident -> StateWithErr ()
+checkLoopCounter ctx name =
+    -- if extractEnt returns an error, that's fine, we don't want to
+    -- propagate it, hence we replace it with a dummy Entity value
+    -- (EntConst 0)
+    do var <- extractEnt ctx name `catchError` (const $ return $ EntConst 0)
+       case var of
+         (EntVar (_, flags))
+             | elem Im.LoopCounter flags   -> throwErr 42 $ "Loop counter " << name
+                                                           << " reused"
+         _                                 -> return ()
+         
 
 
 -- extractor of different table objects
@@ -413,16 +417,17 @@ extractEnt ctx name = do Im.ProgTables {Im.types=ts,
                                                            << " not in scope in "
                                                            << ctx
 
--- the first one that succeeds will be the result
--- extractHelper :: Im.EntName -> Maybe Entity
-extractHelper (ts,cs,fs,vs) name = (do v <- maybeLookup name vs
-                                       return (EntVar v))             `catchEmptyErr`
-                                   (do res <- maybeLookup name [ts]
-                                       return (EntType res))          `catchEmptyErr`
-                                   (do res <- maybeLookup name [cs]
-                                       return (EntConst res))         `catchEmptyErr`
-                                   (do res <- maybeLookup name [fs]
-                                       return (EntFunc res))
+-- the first one that succeeds will be the result (which is what msum
+-- does in the Maybe monad)
+-- extractHelper :: ... -> Maybe Entity
+extractHelper (ts,cs,fs,vs) name = msum [(maybeLookup name vs >>=
+                                          return . EntVar),
+                                         (do res <- maybeLookup name [ts]
+                                             return (EntType res)),
+                                         (do res <- maybeLookup name [cs]
+                                             return (EntConst res)),
+                                         (do res <- maybeLookup name [fs]
+                                             return (EntFunc res))]
 
 
 extractFunc ctx name = do Im.ProgTables {Im.funcs=fs} <- St.get
