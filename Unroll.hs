@@ -29,9 +29,22 @@ type StateWithErr = St.StateT MyStateT OutMonad
 
 unroll :: Stm -> StateWithErr [Stm]
 unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
-unroll (SAss (LVal (EVar v)) e@(EFunCall nm args)) =
-    do (Func t vars stms) <- Tc.extractFunc e nm
-       new_stms <- mapM subst 
+unroll (SAss (LVal (EVar v)) e@(EFunCall nm form_args)) =
+    do (Func name t args stms) <- Tc.extractFunc e nm
+       -- replace all local variables with Scoped ones, in stms
+       let stms'  = map scopeVars stms
+       
+       -- substitute actual values for all the formal params, in all
+       -- stms
+           substs = zipWith subst form_args args
+           stms'' = foldl ($) stms' substs
+
+
+scopeVars :: Stm -> Stm
+scopeVars s = mapStm f_s f_e s
+    where f_e (EVar (VScoped scopes v)) = (EVar (VScoped scopes v))
+          f_e (EVar v                   = (EVar (VScoped x v))
+           
        
 
 

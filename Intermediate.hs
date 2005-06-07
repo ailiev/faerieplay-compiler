@@ -29,29 +29,23 @@ data VarFlag =
     LoopCounter
   | Immutable
   | FormalParam
+  | Global
   | RetVar                      -- a return variable, ie. a var
                                 -- representing its enclosing function
    deriving (Show,Ord,Eq)
-
--- we'll have a stack of these, one per active scope, during
--- typechecking
-type VarTable = Map.Map EntName (Typ,Var)
 
 type TypeTable = Map.Map EntName Typ
 
 type FuncTable = Map.Map EntName Func
 
--- we go with integer consts for now
-type ConstTable = Map.Map EntName Integer
 
 
 
-
-data ProgTables = ProgTables { vars   :: [VarTable],
-                               types  :: TypeTable,
-                               consts :: ConstTable,
-                               funcs  :: FuncTable    }
+data ProgTables = ProgTables { types  :: TypeTable,
+                               funcs  :: FuncTable }
     deriving (Show,Eq,Ord)
+
+
 
 
 type Ident = String
@@ -60,6 +54,8 @@ type Ident = String
 data Prog =
    Prog Ident ProgTables
   deriving (Eq,Ord)
+
+
 
 data Typ =
    IntT Exp
@@ -295,23 +291,13 @@ instance Tree Exp where
 
 docProg :: Prog -> Doc
 docProg (Prog id (ProgTables {funcs=fs,
-                              types=ts,
-                              consts=cs,
-                              vars=vs})) = let funcList   = Map.fold (:) [] fs
+                              types=ts})) = let funcList   = Map.fold (:) [] fs
                               -- list of (name , value):
-                                               typList   = Map.foldWithKey collect [] ts
-                                               constList  = Map.foldWithKey collect [] cs
-                                               varList    = Map.foldWithKey collect [] (head vs)
+                                                typList   = Map.foldWithKey collect [] ts
                                             in  vcat [sep [text "Program", text id, colon],
                                                       text "\n",
                                                       text "Types:",
                                                       vcat (map (docPair docTyp) typList),
-                                                      text "\n",
-                                                      text "Variables:",
-                                                      vcat (map (docPair docVar) varList),
-                                                      text "\n",
-                                                      text "Constants:",
-                                                      vcat (map (docPair integer) constList),
                                                       text "\n",
                                                       sep [text "Functions", colon],
                                                       vcat (map docFunc funcList)]

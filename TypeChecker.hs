@@ -42,9 +42,23 @@ data BinOpType = Arith | Logical | Binary | Comparison | NotBin deriving (Eq,Sho
 
 -- data EntType = Var | Func | Type | Const deriving (Eq,Show)
 
+-- we'll have a stack of these, one per active scope, during
+-- typechecking
+type VarTable = Map.Map Im.EntName (Im.Typ,Im.Var)
+
+-- we go with integer consts for now
+type ConstTable = Map.Map Im.EntName Integer
 
 
-type MyStateT = Im.ProgTables
+data TCState = TCS { vars   :: [VarTable],
+                     types  :: Im.TypeTable,
+                     consts :: ConstTable,
+                     funcs  :: Im.FuncTable    }
+    deriving (Show,Eq,Ord)
+
+
+
+type MyStateT = TCState
 
 
 type StateWithErr = St.StateT MyStateT OutMonad
@@ -68,10 +82,10 @@ instance Num Im.Exp where
 
 
 typeCheck :: T.Prog -> OutMonad Im.Prog
-typeCheck p = let startState = Im.ProgTables { Im.vars   = [Map.empty],
-                                               Im.consts = Map.empty,
-                                               Im.funcs  = Map.empty,
-                                               Im.types  = Map.empty  }
+typeCheck p = let startState = TCS { vars   = [Map.empty],
+                                               consts = Map.empty,
+                                               funcs  = Map.empty,
+                                               types  = Map.empty  }
                   out = St.runStateT (checkProg p) startState
               in  case out of
                   Left err           -> Left err
@@ -84,13 +98,13 @@ typeCheck p = let startState = Im.ProgTables { Im.vars   = [Map.empty],
 -- take a function which takes and returns the ConstTable, and project it onto
 -- the whole MyStateT, keeping the other fields fixed
 -- projFromConst :: (ConstTable -> ConstTable) -> MyStateT -> MyStateT
-projFromConst  f ms@(Im.ProgTables {Im.consts = ct})   = ms { Im.consts = f ct }
+projFromConst  f ms@(TCS {consts = ct})   = ms { consts = f ct }
 
-projFromTypes f ms@(Im.ProgTables {Im.types = ts})    = ms { Im.types = f ts }
+projFromTypes f ms@(TCS {types = ts})    = ms { types = f ts }
 
-projFromFuncs f ms@(Im.ProgTables {Im.funcs = fs})    = ms { Im.funcs = f fs }
+projFromFuncs f ms@(TCS {funcs = fs})    = ms { funcs = f fs }
 
-projFromVars f ms@(Im.ProgTables {Im.vars = vs})    = ms { Im.vars = f vs }
+projFromVars f ms@(TCS {vars = vs})    = ms { vars = f vs }
 
 
 
@@ -99,17 +113,22 @@ projFromVars f ms@(Im.ProgTables {Im.vars = vs})    = ms { Im.vars = f vs }
 ------------
 checkProg :: T.Prog -> StateWithErr Im.Prog
 checkProg (T.Prog (T.Ident id) decs) = do mapM checkDec decs
-                                          state <- St.get
-                                          return (Im.Prog id state)
+                                          TCS { funcs=fs,
+                                                types=ts } <- St.get
+                                          return (Im.Prog id (Im.ProgTables {Im.funcs=fs,
+                                                                             Im.types=ts}))
 
 
 
 
--- checkDec only adds stuff to our tables, consts, types, etc
+-- checkDec only adds stuff to our tables, consts, types, etc; doesn't
+-- return anything
 -- ::::::::::::::::
 checkDec :: T.Dec -> StateWithErr ()
 -- ::::::::::::::::
 
+
+-- addendum - we want to flag global variables
 checkDec dec@(T.VarDecl t ids) = do im_t <- checkTyp t
                                     mapM_ (\(T.Ident id) -> addToVars im_t [] id) ids
 
@@ -135,7 +154,7 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
           addArgVar  (Im.TypedName typ name) = addToVars typ [Im.FormalParam] name
           tn2var     (Im.TypedName _ name)   = (Im.VFlagged [Im.FormalParam] (Im.VSimple name))
 
--- special treatment for an Enum
+-- special treatment for an Enum type declaration
 checkDec (T.TypeDecl (T.Ident name) t@(T.EnumT ids)) =
     do (Im.EnumT _ size) <- checkTyp t
        let im_t = (Im.EnumT name size)
@@ -410,10 +429,10 @@ data Entity = EntConst Integer
             | EntType  Im.Typ
 
 extractEnt :: (Show a) => a -> Im.EntName -> StateWithErr Entity
-extractEnt ctx name = do Im.ProgTables {Im.types=ts,
-                                        Im.consts=cs,
-                                        Im.funcs=fs,
-                                        Im.vars=vs} <- St.get
+extractEnt ctx name = do TCS {types=ts,
+                                        consts=cs,
+                                        funcs=fs,
+                                        vars=vs} <- St.get
                          case extractHelper (ts,cs,fs,vs) name of
                            (Just ent)   -> return ent
                            _            -> throwErr 42 $ "Entity " << name
@@ -433,7 +452,7 @@ extractHelper (ts,cs,fs,vs) name = msum [(maybeLookup name vs >>=
                                              return (EntFunc res))]
 
 
-extractFunc ctx name = do Im.ProgTables {Im.funcs=fs} <- St.get
+extractFunc ctx name = do TCS {funcs=fs} <- St.get
                           let res = maybeLookup name [fs]
                           case res of (Just f) -> return f
                                       _        -> throwErr 42 $ name << " in " << ctx
@@ -511,9 +530,9 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
 -- push and pop a SymbolTable scope
 pushScope = St.modify $ projFromVars $ (`push` Map.empty)
 -- want to return the scope here
-popScope  = do ms@(Im.ProgTables {Im.vars = vs}) <- St.get
+popScope  = do ms@(TCS {vars = vs}) <- St.get
                let scope = peek vs
-               St.put (ms {Im.vars = pop vs})
+               St.put (ms {vars = pop vs})
                return scope
 
                
@@ -530,7 +549,7 @@ computeStaticExp e
                (T.EInt i)       -> return i
                (T.EIdent (T.Ident nm)) ->
                    do -- has to be a constant, look in the ConstTable
-                     Im.ProgTables {Im.consts=ct} <- St.get
+                     TCS {consts=ct} <- St.get
                      let val = maybeLookup nm [ct]
                      case val of
                               (Just i) -> return i
@@ -563,7 +582,7 @@ addToVars typ flags name = let v' = (Im.VSimple name)
 
 lookupType :: String -> StateWithErr Im.Typ
 lookupType name =
-     do Im.ProgTables {Im.types=ts} <- St.get
+     do TCS {types=ts} <- St.get
         let res = maybeLookup name [ts]
         case res of
            Just t -> return t
