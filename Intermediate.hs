@@ -79,18 +79,17 @@ data TypedName =
   deriving (Eq,Ord)
 
 
+-- I would ideally not have an SBlock here, but it conveys variable scoping
+-- information, so we'll keep the blocks until scoping of variables (VScoped) is
+-- done, then SBlock will be done away with
 data Stm =
    SBlock [Stm]
- | SAss LVal Exp
- | SFor Ident Exp Exp Stm
- | SIf     Exp Stm
- | SIfElse Exp Stm Stm
+ | SAss Exp Exp
+ | SFor Ident Exp Exp [Stm]
+ | SIf     Exp [Stm]
+ | SIfElse Exp [Stm] [Stm]
   deriving (Eq,Ord)
 
-
-data LVal =
-   LVal Exp
-  deriving (Eq,Ord)
 
 
 data Exp =
@@ -232,10 +231,10 @@ classifyExp e =
 stmChildren :: Stm -> ([Stm], [Exp], ([Stm] -> [Exp] -> Stm))
 stmChildren s =
     case s of
-      (SBlock stms)             -> ( stms,   [],         (\ss []        -> (SBlock ss)) )
-      (SAss (LVal lval) val)    -> ( [],     [lval,val], (\[] [lval,val]-> (SAss (LVal lval) val)) )
-      (SFor nm lo hi fors)      -> ( [fors], [lo,hi],    (\[s] [lo,hi]  -> (SFor nm lo hi s)) )
-      (SIf test ifs)            -> ( [ifs] , [test],     (\[s] [test]   -> (SIf test s)) )
+      (SBlock ss)               -> ( ss,     [],         (\ss []        -> (SBlock ss)) )
+      (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
+      (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
+      (SIf test ifs)            -> ( ifs ,   [test],     (\ss  [test]   -> (SIf test ss)) )
 
 
 -- some recursive structure for Stm's and Exp's. Make it monadic for
@@ -334,22 +333,23 @@ docFunc (Func name t args stms) = vcat [text "function" <+> (text name) <+>
                                         empty]
 
 docStm :: Stm -> Doc
-docStm (SAss (LVal lval) val)= sep [docExp lval, text "=", docExp val]
-docStm (SBlock stms)         = vcat (map docStm stms)
+docStm (SBlock stms)    = nest 4 (vcat (map docStm stms))
+docStm (SAss lval val)= sep [docExp lval, text "=", docExp val]
                                
-docStm (SFor nm hi lo stm)   = sep [text "for",
+docStm (SFor nm hi lo stms)  = sep [text "for",
                                     parens $ sep [
                                                   text nm, text "=",
                                                   docExp hi, text "to", docExp lo
                                                  ]] $$
-                               nest 4 (docStm stm)
+                               nest 4 (vcat (map docStm stms))
 
-docStm (SIf test stm)        = sep [text "if",
+docStm (SIf test stms)       = sep [text "if",
                                     parens $ docExp test] $$
-                               nest 4 (docStm stm)
+                               nest 4 (vcat (map docStm stms))
 
-docStm (SIfElse test s1 s2)  = docStm (SIf test s1) $$
-                               docStm s2
+docStm (SIfElse test s1s s2s)= vcat [docStm (SIf test s1s),
+                                     text "else",
+                                     nest 4 (vcat (map docStm s2s))]
 
 
 docExp e = case e of

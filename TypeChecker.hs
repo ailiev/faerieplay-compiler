@@ -178,17 +178,19 @@ checkDec (T.ConstDecl (T.Ident name) _)          =
 
 
 
-
+-- :::::::::::::::::::::
 checkStm :: T.Stm -> StateWithErr Im.Stm
+-- :::::::::::::::::::::
+
 checkStm (T.SBlock decs stms) = do pushScope
                                    mapM checkDec decs
                                    new_stms <- mapM checkStm stms
                                    popScope
-                                   return (Im.SBlock new_stms)
+                                   return $ Im.SBlock new_stms
 
 checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
-                                    return (Im.SAss lval_new val_new)
+                                    return $ Im.SAss lval_new val_new
 
 
 checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
@@ -203,7 +205,7 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
                  cnt_str
        new_stm <- checkStm stm
        popScope
-       return (Im.SFor cnt_str new_lo new_hi new_stm)
+       return (Im.SFor cnt_str new_lo new_hi [new_stm])
                                    
 
 checkStm s@(T.SIf cond stm) =
@@ -213,13 +215,13 @@ checkStm s@(T.SIf cond stm) =
               _          -> throwErr 42 $ "In if statement " << s << ", " << cond
                                       << " is not boolean"
        new_stm <- checkStm stm
-       return (Im.SIf new_cond new_stm)
+       return (Im.SIf new_cond [new_stm])
 
 -- reuse the above code a bit...
 checkStm s@(T.SIfElse cond stm1 stm2) =
-    do (Im.SIf new_cond new_stm1) <- checkStm (T.SIf cond stm1)
+    do (Im.SIf new_cond new_stm1s) <- checkStm (T.SIf cond stm1)
        new_stm2 <- checkStm stm2
-       return (Im.SIfElse new_cond new_stm1 new_stm2)
+       return (Im.SIfElse new_cond new_stm1s [new_stm2])
 
 
 
@@ -388,15 +390,16 @@ checkTypedName (T.TypedName t (T.Ident name)) = do t_new <- checkTyp t
 
 
 -- make sure an LVal is actually assignable
-checkLVal :: T.LVal -> StateWithErr Im.LVal
+checkLVal :: T.LVal -> StateWithErr Im.Exp
 
--- an identifier needs special treatment: don't assign to consts etc
+-- an identifier needs special treatment: don't assign to consts etc; only
+-- assign to variables
 checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
     do ent <- extractEnt lv name
        case ent of
           (EntVar (_,v))
               | not $ elem Im.Immutable (Im.vflags v) 
-                  -> return (Im.LVal $ Im.EVar v)
+                  -> return (Im.EVar v)
           _       -> throwErr 42 $ "Assigning to immutable value " << name
 
 checkLVal (T.LVal e) =
@@ -404,7 +407,7 @@ checkLVal (T.LVal e) =
                    e@(T.EStruct _ _) -> checkExp e
                    e@(T.EArr _ _)    -> checkExp e
                    _                 -> throwErr 42 $ e << " is not an lvalue"
-       return (Im.LVal im_e)
+       return im_e
 
 
 

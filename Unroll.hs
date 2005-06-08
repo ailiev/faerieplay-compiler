@@ -101,8 +101,8 @@ unroll (SAss lv e@(EFunCall nm args)) =
 unroll (SBlock stms) = do stmss <- mapM unroll stms
                           return $ [SBlock (concat stmss)]
 
-unroll (SFor id lo hi stm) = do stms <- unroll stm
-                                return [(SFor id lo hi (SBlock stms))]
+unroll (SFor id lo hi stms) = do stmss <- mapM unroll stms
+                                 return [SFor id lo hi (concat stmss)]
 
 unroll s = return [s]
 

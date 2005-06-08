@@ -48,34 +48,32 @@ flatten s =
       (SAss lval val)   -> do (stms,val_new) <- extrStms val
                               return $ stms ++ [(SAss lval val_new)]
       (SBlock stms)     -> do stmss <- mapM flatten stms
-                              return $ concat stmss
-      (SFor id lo hi s) -> do (stms_lo,lo_new) <- extrStms lo
+                              return $ [(SBlock $ concat stmss)]
+      (SFor id lo hi ss)-> do (stms_lo,lo_new) <- extrStms lo
                               (stms_hi,hi_new) <- extrStms hi
-                              fors <- flatten s
+                              forss <- mapM flatten ss
                               return $ stms_lo ++ stms_hi ++ [(SFor id
                                                                     lo_new
                                                                     hi_new
-                                                                    (groupStms fors))]
-      (SIf test s)      -> do (test_stms,test_new) <- extrStms test
-                              ss_new <- flatten s
-                              return $ test_stms ++ [(SIf test_new (groupStms ss_new))]
-      (SIfElse t s1 s2) -> do (t_stms,t_new) <- extrStms t
-                              s2s_new <- flatten s2
-                              s1s_new <- flatten s1
+                                                                    (concat forss))]
+      (SIf test ss)     -> do (test_stms,test_new) <- extrStms test
+                              ss_new <- mapM flatten ss
+                              return $ test_stms ++ [(SIf test_new (concat ss_new))]
+      (SIfElse t s1s s2s)->do (t_stms,t_new) <- extrStms t
+                              s2ss_new <- mapM flatten s2s
+                              s1ss_new <- mapM flatten s1s
                               i <- nextInt
                               let t_i = (tempVar i)
                               return $ t_stms ++
-                                       [(SAss (LVal t_i) t_new),
-                                        (SIf t_i (groupStms s1s_new)),
-                                        (SIf (UnOp Not t_i) (groupStms s2s_new))]
+                                       [(SAss t_i t_new),
+                                        (SIf t_i (concat s1ss_new)),
+                                        (SIf (UnOp Not t_i) (concat s2ss_new))]
 
     where extrStms :: Exp -> St.State Int ([Stm],Exp)
           extrStms e = do e_subbed <- subFunCalls e
                           let e_h = hoist e_subbed
                           return $ splitEseq e_h
-          -- squash potentially many statements into one (SBlock)
-          groupStms [s] = s
-          groupStms ss  = SBlock ss
+
 
 {-
 f_e   = hoist . subFunCalls
@@ -109,7 +107,7 @@ subFunCalls e = mapExpM f e
     where f (EFunCall nm args) = do sub_args   <- mapM subFunCalls args
                                     i          <- nextInt
                                     let t_i    =  tempVar i
-                                    return $ ESeq [(SAss (LVal t_i) (EFunCall nm sub_args))]
+                                    return $ ESeq [(SAss t_i (EFunCall nm sub_args))]
                                                   t_i
           f e                  = return e
 
