@@ -1,12 +1,19 @@
 module Unroll where
 
-import qualified Control.Monad.State as St
 
+import Control.Monad.Error (Error, noMsg, strMsg)
 import Data.Bits
+import qualified Control.Monad.State as St
+import Control.Monad.Trans (lift)
+import Maybe (fromJust)
+import qualified Data.Map as Map
+
+import SashoLib (maybeLookup, (<<), ilog2)
 
 import Intermediate
+import HoistStms
 
-import TypeChecker as Tc
+import qualified TypeChecker as Tc
 
 
 
@@ -21,42 +28,106 @@ instance Error TypeError where
 type OutMonad = Either TypeError
 
 
-type MyStateT = ProgTables
+type MyStateT = (ProgTables , Scope)
+-- and accessor functions:
+applyToPT :: (ProgTables -> ProgTables) -> MyStateT -> MyStateT
+
+applyToPT f (pt,scope) = (f pt, scope)
+applyToScope f (pt,scope) = (pt, f scope)
+
+getsPT = fst
+getsScope = snd
+
+
 
 type StateWithErr = St.StateT MyStateT OutMonad
 
 
+throwErr :: Int -> String -> StateWithErr a
+throwErr p msg = lift $ Left $ Err p msg
 
+
+unrollProg :: Prog -> OutMonad [Stm]
+unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
+    let (Func _ t form_args stms) = fromJust $ Map.lookup "main" fs
+        startScope = pushScope []
+        out = St.runStateT (mapM unroll stms) (pt, startScope)
+    in case out of
+                Left err        -> Left err
+                Right (stmss,_) -> Right (concat stmss)
+
+
+
+-- scope invariants:
+-- unroll is called with the correct scope depth, but with the top-level scope
+-- number of the previous unroll call. Thus, have to increment the scope at the
+-- start, and add a new depth before calling unroll recursively
 unroll :: Stm -> StateWithErr [Stm]
-unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
-unroll (SAss (LVal (EVar v)) e@(EFunCall nm form_args)) =
-    do (Func name t args stms) <- Tc.extractFunc e nm
+-- unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
+unroll (SAss lv e@(EFunCall nm args)) =
+    do doScope incrScope
+       scope <- St.gets getsScope
+       (Func name t form_args stms) <- extractFunc nm
        -- replace all local variables with Scoped ones, in stms
-       let stms'  = map scopeVars stms
-       
-       -- substitute actual values for all the formal params, in all
-       -- stms
-           substs = zipWith subst form_args args
-           stms'' = foldl ($) stms' substs
-
-
-scopeVars :: Stm -> Stm
-scopeVars s = mapStm f_s f_e s
-    where f_e (EVar (VScoped scopes v)) = (EVar (VScoped scopes v))
-          f_e (EVar v                   = (EVar (VScoped x v))
+       let stms'  = map (scopeVars scope) stms
            
-       
+           -- substitute actual values for all the formal params, in all
+           -- stms
+           -- substs is a list of subst partial applications, and
+           -- substs :: [Stm -> Stm]
+           substs = zipWith subst form_args args
+           stms'' = map (\stm -> foldl (flip ($)) stm substs) stms'
+           -- append an assignment to the target var
+           stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
+       -- and now recursively unroll these statements
+       doScope pushScope
+       stmss <- mapM unroll stms3
+       doScope popScope
+       return $ concat stmss
+     where doScope = St.modify . applyToScope
+
+unroll (SBlock stms) = do stmss <- mapM unroll stms
+                          return $ [SBlock (concat stmss)]
+
+unroll (SFor id lo hi stm) = do stms <- unroll stm
+                                return [(SFor id lo hi (SBlock stms))]
+
+unroll s = return [s]
 
 
-evalStatic :: Exp -> StateWithErr Integer
+
+
+scopeVars scope s = mapStm f_s f_e s
+    where f_e (EVar (VScoped _ v)) = error "Unroll.scopeVars did not expect a VScoped var!"
+          f_e (EVar v)
+              | not $ elem Global (vflags v)  = (EVar (VScoped scope v))
+          f_e e                         = e
+
+          f_s                           = id
+               
+
+-- to reconstruct the return variable of a function in a given scope
+-- FIXME: rather awkward, may be better if a Func carried its return var around
+-- explicitly
+fcnRetVar fname scope = EVar (VScoped scope (VFlagged [RetVar] (VSimple fname)))
+
+
+extractFunc name = do ProgTables {funcs=fs} <- St.gets getsPT
+                      case maybeLookup name [fs] of
+                            (Just f)    -> return f
+                            _           -> throwErr 42 $ "Unroll.extractFunc failed!"
+
+
+{-
+-- evalStatic :: Exp -> StateWithErr Integer
 evalStatic = mapExpM f
     where f e =
               case e of
                 (BinOp op (ELit l1) (ELit l2))  -> evalBinOp op l1 l2
                 (UnOp  op (ELit l1))            -> evalUnOp op l1
-                (ELit l)                        -> evalLit l
-                (EGetBit (ELit (LInt x)
-                         (ELit (LInt i))        -> fromIntegral $ testBit x i
+                (ELit l)                        -> e
+                (EGetBit (ELit (LInt x))
+                         (ELit (LInt i)))       -> fromIntegral $ testBit x i
                 EStatic e                       -> e
                 ExpT e                          -> e
                 e                               -> throwErr 42 $ "Static expression " << e
@@ -100,11 +171,11 @@ transIntUnOp  op = case op of
 evalLit (LInt i)  = i
 evalLit (LBool b) = fromIntegral b
 
-
+-}
 
 --unrollStms =  unrollFor
 
-
+{-
 -- unroll a for-loop
 unrollFor :: Stm -> [Stm]
 unrollFor for@(SFor _ lo hi s) = let 
@@ -120,7 +191,7 @@ concat $ unfoldr unroll1 (for, lo)
           unroll1 (for@(SFor _ _ _ stm) , cur)                  =
               Just    ([stm], (for,cur+1))
 unrollFor stm                                = [stm]
-
+-}
 
 
 -- substitute a value for a variable into a statement

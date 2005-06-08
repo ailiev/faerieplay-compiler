@@ -130,7 +130,9 @@ checkDec :: T.Dec -> StateWithErr ()
 
 -- addendum - we want to flag global variables
 checkDec dec@(T.VarDecl t ids) = do im_t <- checkTyp t
-                                    mapM_ (\(T.Ident id) -> addToVars im_t [] id) ids
+                                    isGlobal <- atGlobalScope
+                                    let flags = if isGlobal then [Im.Global] else []
+                                    mapM_ (\(T.Ident id) -> addToVars im_t flags id) ids
 
 checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
     do im_t <- checkTyp t
@@ -421,6 +423,10 @@ checkLoopCounter ctx name =
          _                                        -> return ()
          
 
+-- at the global scope, the VarTable has only one level
+atGlobalScope = do TCS {vars=vs} <- St.get
+                   return (length vs == 1)
+
 
 -- extractor of different table objects
 data Entity = EntConst Integer
@@ -430,9 +436,9 @@ data Entity = EntConst Integer
 
 extractEnt :: (Show a) => a -> Im.EntName -> StateWithErr Entity
 extractEnt ctx name = do TCS {types=ts,
-                                        consts=cs,
-                                        funcs=fs,
-                                        vars=vs} <- St.get
+                              consts=cs,
+                              funcs=fs,
+                              vars=vs} <- St.get
                          case extractHelper (ts,cs,fs,vs) name of
                            (Just ent)   -> return ent
                            _            -> throwErr 42 $ "Entity " << name
@@ -596,15 +602,6 @@ lookupType name =
 -- annotate an expression
 annot t e = Im.ExpT t e
 
-
--- force a Map.lookup in the Maybe monad
-maybeLookup :: Ord k => k -> [Map.Map k a] -> Maybe a
-maybeLookup key maps = findInStack (Map.lookup key) maps
-
-
-
-modifyListHead _ [] = error "modifyListHead on empty list!"
-modifyListHead f (x:xs) = (f x : xs)
 
 
 

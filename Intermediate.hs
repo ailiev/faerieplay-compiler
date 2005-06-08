@@ -5,12 +5,13 @@ import Text.PrettyPrint
 
 -- import Tree
 
-import Control.Monad.Identity
-import Monad (liftM)
+import List (intersperse)
+
+import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
 
-import SashoLib (myLiftM)
+import SashoLib (myLiftM, pop, push, modifyListHead)
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -122,15 +123,19 @@ data Var =
     VSimple Ident
   | VTemp Int
   | VFlagged [VarFlag] Var
-  | VScoped [ScopeId] Var           -- during unrolling, everything ends
-                                    -- up in one scope; thus add a
-                                    -- list of the enclosing scope id's
+  | VScoped Scope Var           -- during unrolling, everything ends
+                                -- up in one scope; thus add a
+                                -- list of the pre-unroll scope id's
     deriving (Eq,Ord)
+
+-- CONVENTION: VScoped goes on the outside of VFlagged (as illustrated in
+-- vflags), and they don't recurse further (that'd be a mess!)
 
 
 -- quick helper to get the flags
-vflags (VFlagged fl _)  = fl
-vflags _                = []
+vflags (VFlagged fl _)                  = fl
+vflags (VScoped _ (VFlagged fl _))      = fl
+vflags _                                = []
 
 
 -- ScopeId, by example:
@@ -143,7 +148,21 @@ vflags _                = []
 -- -       2
 -- -       3
 
-type ScopeId = Int
+type Scope = [Int]
+
+
+-- enter a new scope depth (eg. upon entering a function call)
+-- uses the Stack class functions
+-- pushScope :: Scope -> Scope
+pushScope scope = push scope 0
+popScope scope = pop scope
+
+-- enter the next scope at the same depth (eg. from one function call to the
+-- next)
+-- for some reason, without the type signature the type of 1 was inferred as
+-- Integer
+-- incrScope :: Scope -> Scope
+incrScope scope = modifyListHead (+1) scope
 
 
 data Lit =                      -- literals
@@ -292,15 +311,15 @@ instance Tree Exp where
 docProg :: Prog -> Doc
 docProg (Prog id (ProgTables {funcs=fs,
                               types=ts})) = let funcList   = Map.fold (:) [] fs
-                              -- list of (name , value):
+                                                -- typList is a list of (name , value):
                                                 typList   = Map.foldWithKey collect [] ts
-                                            in  vcat [sep [text "Program", text id, colon],
-                                                      text "\n",
+                                            in  vcat [text "Program" <+> text id <> colon,
+                                                      text "",
                                                       text "Types:",
                                                       vcat (map (docPair docTyp) typList),
-                                                      text "\n",
-                                                      sep [text "Functions", colon],
-                                                      vcat (map docFunc funcList)]
+                                                      text "",
+                                                      text "Functions:",
+                                                      vcat (intersperse (text "") $ map docFunc funcList)]
     where collect key val accum = ((key,val) : accum)
           docPair sf (n,t)      = sep [text n, equals, sf t]
           docVar (t,flags)      = sep [docTyp t, parens (text $ show flags)]
@@ -331,7 +350,7 @@ docStm (SIfElse test s1 s2)  = docStm (SIf test s1) $$
 
 
 docExp e = case e of
-    (EVar v)            -> docVar v
+    (EVar v)            -> parens $ docVar v
     (EStruct str field) -> cat [docExp str, text ".", text field]
     (EArr arr idx)      -> cat [docExp arr, text "[", docExp idx, text "]"]
     (ELit l)            -> docLit l
@@ -376,8 +395,18 @@ docVar v =
     case v of
       (VSimple name)    -> text name
       (VTemp i)         -> text "temp" <> (parens (int i))
-      (VScoped scopes v)-> parens (cat $ punctuate (text "/") (map int scopes) ++ [docVar v])
-      (VFlagged flags v)-> docVar v
+      -- the scope list is reversed so we see the outermost scope (which is at
+      -- the list end) first
+      (VScoped scopes v)-> cat $ punctuate (text "/") (map int (reverse scopes)) ++ [text "/", docVar v]
+      (VFlagged flags v)-> docVar v <> (text "\\") <> cat (map docVarFlag flags)
+
+
+docVarFlag f = char (case f of
+                           Global       -> 'g'
+                           Immutable    -> 'i'
+                           LoopCounter  -> 'l'
+                           FormalParam  -> 'f'
+                           RetVar       -> 'r')
 
 
 docLit (LInt i)          = int i

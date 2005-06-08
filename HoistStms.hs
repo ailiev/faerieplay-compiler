@@ -12,12 +12,19 @@
 module HoistStms where
 
 import qualified Control.Monad.State as St
+import qualified Data.Map as Map
 
 import Intermediate
 
 -- the state for these computations:
 -- 1) counter (Int) for naming temporary vars
 --
+
+
+flattenProg :: Prog -> Prog
+flattenProg (Prog pname pt@(ProgTables {funcs=fs})) =
+    let new_fs = Map.map flattenFunc fs
+    in Prog pname (pt {funcs=new_fs})
 
 
 flattenFunc :: Func -> Func
