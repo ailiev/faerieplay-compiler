@@ -78,6 +78,7 @@ data TypedName =
    TypedName Typ Ident
   deriving (Eq,Ord)
 
+
 data Stm =
    SBlock [Stm]
  | SAss LVal Exp
@@ -86,9 +87,11 @@ data Stm =
  | SIfElse Exp Stm Stm
   deriving (Eq,Ord)
 
+
 data LVal =
    LVal Exp
   deriving (Eq,Ord)
+
 
 data Exp =
    -- variables just need a name, and the scope stack will take care of

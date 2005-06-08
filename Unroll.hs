@@ -35,10 +35,16 @@ applyToPT :: (ProgTables -> ProgTables) -> MyStateT -> MyStateT
 applyToPT f (pt,scope) = (f pt, scope)
 applyToScope f (pt,scope) = (pt, f scope)
 
+pushScope' = applyToScope pushScope
+incrScope' = applyToScope incrScope
+popScope'  = applyToScope popScope
+
 getsPT = fst
 getsScope = snd
 
 
+-- maximum function recursion depth
+cMAXSCOPE = 32
 
 type StateWithErr = St.StateT MyStateT OutMonad
 
@@ -65,8 +71,10 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 unroll :: Stm -> StateWithErr [Stm]
 -- unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
 unroll (SAss lv e@(EFunCall nm args)) =
-    do doScope incrScope
+    do St.modify incrScope'
        scope <- St.gets getsScope
+       checkScopeDepth scope
+
        (Func name t form_args stms) <- extractFunc nm
        -- replace all local variables with Scoped ones, in stms
        let stms'  = map (scopeVars scope) stms
@@ -80,11 +88,15 @@ unroll (SAss lv e@(EFunCall nm args)) =
            -- append an assignment to the target var
            stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
        -- and now recursively unroll these statements
-       doScope pushScope
+       St.modify pushScope'
        stmss <- mapM unroll stms3
-       doScope popScope
+       St.modify popScope'
        return $ concat stmss
-     where doScope = St.modify . applyToScope
+    where checkScopeDepth scope
+              | length scope > cMAXSCOPE = throwErr 42 $ "Function recursion deeper than"
+                                                         << cMAXSCOPE
+              | otherwise                = return ()
+
 
 unroll (SBlock stms) = do stmss <- mapM unroll stms
                           return $ [SBlock (concat stmss)]
