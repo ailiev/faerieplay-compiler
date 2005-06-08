@@ -46,6 +46,7 @@ getsScope = snd
 -- maximum function recursion depth
 cMAXSCOPE = 32
 
+
 type StateWithErr = St.StateT MyStateT OutMonad
 
 
@@ -70,36 +71,42 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 -- start, and add a new depth before calling unroll recursively
 unroll :: Stm -> StateWithErr [Stm]
 -- unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
-unroll (SAss lv e@(EFunCall nm args)) =
-    do St.modify incrScope'
-       scope <- St.gets getsScope
-       checkScopeDepth scope
-
-       (Func name t form_args stms) <- extractFunc nm
-       -- replace all local variables with Scoped ones, in stms
-       let stms'  = map (scopeVars scope) stms
-           
-           -- substitute actual values for all the formal params, in all
-           -- stms
-           -- substs is a list of subst partial applications, and
-           -- substs :: [Stm -> Stm]
-           substs = zipWith subst form_args args
-           stms'' = map (\stm -> foldl (flip ($)) stm substs) stms'
-           -- append an assignment to the target var
-           stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
-       -- and now recursively unroll these statements
-       St.modify pushScope'
-       stmss <- mapM unroll stms3
-       St.modify popScope'
-       return $ concat stmss
-    where checkScopeDepth scope
-              | length scope > cMAXSCOPE = throwErr 42 $ "Function recursion deeper than"
-                                                         << cMAXSCOPE
-              | otherwise                = return ()
+unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
+    where unrollAss scope (SAss lv e@(EFunCall nm args)) =
+              do (Func name t form_args stms) <- extractFunc nm
+                 -- replace all local variables with Scoped ones, in stms
+                 let stms'  = map (scopeVars scope) stms
+                 -- substitute actual values for all the formal params, in all
+                 -- stms
+                 -- substs is a list of subst partial applications:
+                 -- substs :: [Stm -> Stm]
+                     substs = [subst farg arg | farg <- form_args, arg <- args]
+                     stms'' = map (\stm -> foldl (flip ($)) stm substs) stms'
+                     -- append an assignment to the target var
+                     stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
+                 return stms3
 
 
-unroll (SBlock stms) = do stmss <- mapM unroll stms
-                          return $ [SBlock (concat stmss)]
+-- this is a problem. it should only scope vars which are local to
+-- this block. how do we know this? mark it during typecheck?
+unroll s@(SBlock stms) = genericUnroll unrollBlock s
+    where unrollBlock scope (SBlock stms) =
+              do -- replace all local variables with Scoped ones, in stms
+                 let stms' = map (scopeVars scope) stms
+                 return stms'
+{-
+unroll s@(SFor id lo hi stms) = genericUnroll unrollFor s
+    where unrollFor scope (SFor id lo_exp hi_exp stms) =
+              do lo <- evalStatic lo_exp
+                 hi <- evalStatic hi_exp
+                 let stms' = map (scopeVars scope) stms
+                     -- the actual unrolling!
+                     stmss = replicate (hi-lo) stms'
+                     -- and add correct counter values in there
+                     counters = [lo..hi]
+                     stmss' = zipWith (subst 
+-}
+                   
 
 unroll (SFor id lo hi stms) = do stmss <- mapM unroll stms
                                  return [SFor id lo hi (concat stmss)]
@@ -108,14 +115,45 @@ unroll s = return [s]
 
 
 
+genericUnroll f stm = do St.modify incrScope'
+                         scope <- St.gets getsScope
+                         checkScopeDepth scope
+                         -- do the "real work"
+                         stms <- f scope stm
+                         -- and recurse
+                         St.modify pushScope'
+                         stmss <- mapM unroll stms
+                         St.modify popScope'
+                         return $ concat stmss
+                         
+
+
+checkScopeDepth scope
+    | length scope > cMAXSCOPE = throwErr 42 $ "Function recursion deeper than"
+                                           << cMAXSCOPE
+    | otherwise                = return ()
+
+
+
+
+
+
 
 scopeVars scope s = mapStm f_s f_e s
-    where f_e (EVar (VScoped _ v)) = error "Unroll.scopeVars did not expect a VScoped var!"
+          -- if already scoped, just overwrite the old scope
+    where f_e (EVar v@(VScoped _ _))            = (EVar (doVar v))
+          -- only scope non-global vars
           f_e (EVar v)
-              | not $ elem Global (vflags v)  = (EVar (VScoped scope v))
-          f_e e                         = e
+              | not $ elem Global (vflags v)    = (EVar (doVar v))
+          f_e e                                 = e
 
-          f_s                           = id
+          f_s (SFor counter lo hi stms)         = SFor (doVar counter) lo hi stms
+          f_s s                                 = s
+
+          -- if already scoped, just overwrite the old scope
+          doVar (VScoped scope_old v)   = (VScoped scope v)
+          doVar v                       = (VScoped scope v)
+
                
 
 -- to reconstruct the return variable of a function in a given scope

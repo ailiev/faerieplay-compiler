@@ -85,7 +85,7 @@ data TypedName =
 data Stm =
    SBlock [Stm]
  | SAss Exp Exp
- | SFor Ident Exp Exp [Stm]
+ | SFor Var Exp Exp [Stm]
  | SIf     Exp [Stm]
  | SIfElse Exp [Stm] [Stm]
   deriving (Eq,Ord)
@@ -336,12 +336,11 @@ docStm :: Stm -> Doc
 docStm (SBlock stms)    = nest 4 (vcat (map docStm stms))
 docStm (SAss lval val)= sep [docExp lval, text "=", docExp val]
                                
-docStm (SFor nm hi lo stms)  = sep [text "for",
-                                    parens $ sep [
-                                                  text nm, text "=",
-                                                  docExp hi, text "to", docExp lo
-                                                 ]] $$
-                               nest 4 (vcat (map docStm stms))
+docStm (SFor counter lo hi stms) = sep [text "for",
+                                        parens $ sep [docVar counter, text "=",
+                                                      docExp lo, text "to", docExp hi
+                                                     ]] $$
+                                   nest 4 (vcat (map docStm stms))
 
 docStm (SIf test stms)       = sep [text "if",
                                     parens $ docExp test] $$

@@ -200,12 +200,14 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
        checkLoopCounter s cnt_str
        -- add an Int to the scope symbol table for the loop counter
        -- give it a LoopCounter and Immutable flag
+       let flags = [Im.LoopCounter, Im.Immutable]
        addToVars (Im.IntT (Im.UnOp Im.Bitsize (new_hi - new_lo)))
-                 [Im.LoopCounter, Im.Immutable]
+                 flags
                  cnt_str
        new_stm <- checkStm stm
        popScope
-       return (Im.SFor cnt_str new_lo new_hi [new_stm])
+       let counterVar = (Im.VFlagged flags (Im.VSimple cnt_str))
+       return (Im.SFor counterVar new_lo new_hi [new_stm])
                                    
 
 checkStm s@(T.SIf cond stm) =
