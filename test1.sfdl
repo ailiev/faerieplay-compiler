@@ -1,0 +1,29 @@
+// -*- c -*-
+
+program Test2 {
+
+    type Key = Int<16`>;
+    
+    function Key f (Key x) {
+        f = x * 2;
+    };
+
+
+
+    function void main () {
+        var Key j, k;
+
+        {
+            var Key b;
+            b = j;
+            {
+                var Key b;
+                b = k;
+                main = b
+            }
+            b = k+j;
+        }
+    }
+    
+
+}

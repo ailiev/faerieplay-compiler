@@ -1,6 +1,8 @@
 module Unroll where
 
 
+import Debug.Trace
+
 import Control.Monad.Error (Error, noMsg, strMsg)
 import Data.Bits
 import qualified Control.Monad.State as St
@@ -70,8 +72,11 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 -- unroll is called with the correct scope depth, but with the top-level scope
 -- number of the previous unroll call. Thus, have to increment the scope at the
 -- start, and add a new depth before calling unroll recursively
+
+-- :::::::::::::::::::::
 unroll :: Stm -> StateWithErr [Stm]
--- unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
+-- :::::::::::::::::::::
+
 unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
               do (Func name locals t form_args stms) <- extractFunc nm
@@ -81,7 +86,8 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                  -- stms
                  -- substs is a list of subst partial applications:
                  -- substs :: [Stm -> Stm]
-                     substs = [subst farg arg | farg <- form_args, arg <- args]
+                     form_args' = map (addScope scope) form_args
+                     substs = [subst farg arg | farg <- form_args', arg <- args]
                      stms'' = map (\stm -> foldl (flip ($)) stm substs) stms'
                      -- append an assignment to the target var
                      stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
@@ -96,23 +102,31 @@ unroll s@(SBlock _ _) = genericUnroll unrollBlock s
               do -- replace all local variables with Scoped ones, in stms
                  let stms' = map (scopeVars locals scope) stms
                  return stms'
-{-
-unroll s@(SFor id lo hi stms) = genericUnroll unrollFor s
-    where unrollFor scope (SFor id lo_exp hi_exp stms) =
-              do lo <- evalStatic lo_exp
-                 hi <- evalStatic hi_exp
-                 let stms' = map (scopeVars scope) stms
-                     -- the actual unrolling!
-                     stmss = replicate (hi-lo) stms'
-                     -- and add correct counter values in there
-                     counters = [lo..hi]
-                     stmss' = zipWith (subst 
--}
-                   
 
+unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
+    where unrollFor scope (SFor countVar lo_exp hi_exp stms) =
+              do lo <- lift $ evalStatic lo_exp
+                 hi <- lift $ evalStatic hi_exp
+                 let stms' = map (scopeVars (Cont.singleton (stripScope countVar))
+                                            scope)
+                                 stms
+--                 return stms'
+                     -- the actual unrolling!
+--                     dummy = trace ("num reps = " << (hi - lo)) 3
+                     stmss = replicate (fromInteger (hi-lo)) stms'
+                     -- and subst correct counter values into all the statements
+                     -- a version of subst for each unrolled block of stm's
+                     countVar' = addScope scope countVar
+                     substs = [subst countVar' (ELit (LInt val)) | val <- [lo..hi]]
+                     stmss' = zipWith map substs stmss
+                 return $ concat stmss'
+
+
+{-
 unroll (SFor id lo hi stms) = do stmss <- mapM unroll stms
                                  return [SFor id lo hi (concat stmss)]
-
+-}
+                   
 unroll s = return [s]
 
 
@@ -155,16 +169,18 @@ scopeVars locals scope s = mapStm f_s f_e s
                                                        stms
           f_s s                                 = s
 
-          -- if already scoped, just overwrite the old scope
-          addScope sc (VScoped scope_old v)     = (VScoped sc v)
-          addScope sc v                         = (VScoped sc v)
-
-          stripScope (VScoped sc v)             = v
-          stripScope v                          = v
-
           inScope :: VarSet -> Var -> Bool
           inScope locals var = Cont.member (stripScope var) locals 
 
+                               
+
+-- remove the scope from a Var
+stripScope (VScoped sc v)             = v
+stripScope v                          = v
+
+-- if already scoped, just overwrite the old scope
+addScope sc (VScoped scope_old v)     = (VScoped sc v)
+addScope sc v                         = (VScoped sc v)
                
 
 -- to reconstruct the return variable of a function in a given scope
@@ -179,8 +195,19 @@ extractFunc name = do ProgTables {funcs=fs} <- St.gets getsPT
                             _           -> throwErr 42 $ "Unroll.extractFunc failed!"
 
 
+
+evalStatic :: Exp -> OutMonad Integer
+evalStatic e = case e of
+                      (ELit l)          -> evalLit l
+                      (ExpT _ e)        -> evalStatic e
+                      _                 -> Left $ Err 42 "Not static!"
+
+
+evalLit (LInt i)  = return i
+evalLit (LBool b) = return $ toInteger $ fromEnum b
+
 {-
--- evalStatic :: Exp -> StateWithErr Integer
+-- evalStatic :: Exp -> OutMonad Exp
 evalStatic = mapExpM f
     where f e =
               case e of
@@ -229,10 +256,9 @@ transIntUnOp  op = case op of
                            Bitsize -> (max 1) . ilog2
                          
 
-evalLit (LInt i)  = i
-evalLit (LBool b) = fromIntegral b
 
 -}
+
 
 --unrollStms =  unrollFor
 

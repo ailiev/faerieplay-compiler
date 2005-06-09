@@ -73,15 +73,6 @@ throwErr p msg = lift $ Left $ Err p msg
 
 
 
-instance Num Im.Exp where
-    (+) = Im.BinOp Im.Plus
-    (-) = Im.BinOp Im.Minus
-    (*) = Im.BinOp Im.Times
-    negate   = Im.UnOp Im.Neg
-    abs      = id
-    signum   = id
-    fromInteger i = Im.ELit $ Im.LInt $ fromInteger i
-
 
 
 typeCheck :: T.Prog -> OutMonad Im.Prog

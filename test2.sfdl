@@ -1,0 +1,51 @@
+// -*- c -*-
+
+program Test2 {
+
+    const N = 16;
+    
+    var Int<N`> g_count;
+
+    type byte = Int<8`>;
+    type Key = Int<16`>;
+    
+    function Key g (Key x) {
+	var byte b;
+	b = 129;
+        g = x + 5;
+    };
+    
+    function Key f (Key x) {
+        for (i = N/2 to N) {
+            x = g(x);
+            x = x + i;
+//            g_count = g_count + 1;
+        }
+        f = x * 2;
+    };
+
+
+
+    function void main () {
+        var Key j, k, l;
+
+        j = 12;
+        k = 34;
+//	l = f (f(f(k)-f(j)) + f(j));
+        l = f (k);
+
+//	k = k + f(l) - f(k) * f(k-f(j));
+        k = f(j);
+        
+
+        if (k > f(j)) {
+            k = N;
+        }
+        else {
+            k = N*2;
+        }
+    }
+
+    
+
+}

@@ -179,7 +179,7 @@ incrScope scope = modifyListHead (+1) scope
 
 
 data Lit =                      -- literals
-    LInt Int                    -- TODO: change to Integer
+    LInt Integer                -- TODO: change to Integer
   | LBool Bool
    deriving (Eq,Ord)
              
@@ -303,6 +303,26 @@ mapStmGenM f_s f_e s = do let (ss, es, scons) = stmChildren s
                           new_ss <- mapM (mapStmGenM f_s f_e) ss
                           f_s (scons (new_ss . conv) new_es)
 -}
+
+
+
+instance Num Exp where
+    -- some specific cases, which can be simplified
+    (ELit (LInt i1)) + (ELit (LInt i2)) = (ELit $ LInt $ i1 + i2)
+    e1 + e2 = BinOp Plus e1 e2
+
+    (ELit (LInt i1)) * (ELit (LInt i2)) = (ELit $ LInt $ i1 * i2)
+    e1 * e2                             = BinOp Times e1 e2
+
+    (ELit (LInt i1)) - (ELit (LInt i2)) = (ELit $ LInt $ i1 - i2)
+    e1 - e2 = BinOp Minus e1 e2 
+
+    negate (ELit (LInt i))              = (ELit $ LInt (-1))
+    negate e                            = UnOp Neg e
+
+    abs      = id
+    signum   = id
+    fromInteger i = ELit $ LInt $ fromInteger i
 
 
 
@@ -430,7 +450,7 @@ docVarSet m = vcat $ map docVar (Cont.toList m)
 
 
 
-docLit (LInt i)          = int i
+docLit (LInt i)          = integer i
 docLit (LBool b)         = text $ show b
 
 
