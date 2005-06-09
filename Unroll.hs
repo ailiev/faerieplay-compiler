@@ -9,9 +9,10 @@ import Maybe (fromJust)
 import qualified Data.Map as Map
 
 import SashoLib (maybeLookup, (<<), ilog2)
+import qualified Container as Cont
 
 import Intermediate
-import HoistStms
+import HoistStms hiding (popScope, pushScope)
 
 import qualified TypeChecker as Tc
 
@@ -56,7 +57,7 @@ throwErr p msg = lift $ Left $ Err p msg
 
 unrollProg :: Prog -> OutMonad [Stm]
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
-    let (Func _ t form_args stms) = fromJust $ Map.lookup "main" fs
+    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
         startScope = pushScope []
         out = St.runStateT (mapM unroll stms) (pt, startScope)
     in case out of
@@ -73,9 +74,9 @@ unroll :: Stm -> StateWithErr [Stm]
 -- unroll for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = for
 unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
-              do (Func name t form_args stms) <- extractFunc nm
+              do (Func name locals t form_args stms) <- extractFunc nm
                  -- replace all local variables with Scoped ones, in stms
-                 let stms'  = map (scopeVars scope) stms
+                 let stms'  = map (scopeVars locals scope) stms
                  -- substitute actual values for all the formal params, in all
                  -- stms
                  -- substs is a list of subst partial applications:
@@ -89,10 +90,11 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
 
 -- this is a problem. it should only scope vars which are local to
 -- this block. how do we know this? mark it during typecheck?
-unroll s@(SBlock stms) = genericUnroll unrollBlock s
-    where unrollBlock scope (SBlock stms) =
+
+unroll s@(SBlock _ _) = genericUnroll unrollBlock s
+    where unrollBlock scope (SBlock locals stms) =
               do -- replace all local variables with Scoped ones, in stms
-                 let stms' = map (scopeVars scope) stms
+                 let stms' = map (scopeVars locals scope) stms
                  return stms'
 {-
 unroll s@(SFor id lo hi stms) = genericUnroll unrollFor s
@@ -138,21 +140,30 @@ checkScopeDepth scope
 
 
 
-
-scopeVars scope s = mapStm f_s f_e s
-          -- if already scoped, just overwrite the old scope
-    where f_e (EVar v@(VScoped _ _))            = (EVar (doVar v))
-          -- only scope non-global vars
-          f_e (EVar v)
-              | not $ elem Global (vflags v)    = (EVar (doVar v))
+-- set the scope of variables which are local in this block, as indicated by the
+-- set 'locals'
+scopeVars locals scope s = mapStm f_s f_e s
+                           
+    where f_e (EVar v)
+              | inScope locals v                = EVar (addScope scope v)
           f_e e                                 = e
 
-          f_s (SFor counter lo hi stms)         = SFor (doVar counter) lo hi stms
+          -- also set the scope of the counter variable inside its For loop
+          f_s (SFor counter lo hi stms)         = SFor (addScope scope counter)
+                                                       lo
+                                                       hi
+                                                       stms
           f_s s                                 = s
 
           -- if already scoped, just overwrite the old scope
-          doVar (VScoped scope_old v)   = (VScoped scope v)
-          doVar v                       = (VScoped scope v)
+          addScope sc (VScoped scope_old v)     = (VScoped sc v)
+          addScope sc v                         = (VScoped sc v)
+
+          stripScope (VScoped sc v)             = v
+          stripScope v                          = v
+
+          inScope :: VarSet -> Var -> Bool
+          inScope locals var = Cont.member (stripScope var) locals 
 
                
 

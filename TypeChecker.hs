@@ -6,12 +6,15 @@ module TypeChecker where
 import Monad (foldM, msum)
 import List (find)
 
-import qualified Data.Map as Map (Map, insert, empty, lookup, member)
+import qualified Data.Map as Map (Map, insert, empty, lookup, member, toAscList)
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
 import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
 import Control.Monad.Trans (lift)
 
+
 import SashoLib -- ((<<), Stack, push, pop, ilog2)
+import qualified Container as Cont
+
 
 -- the abstract syntax tree description
 import qualified SFDL.Abs as T
@@ -44,13 +47,13 @@ data BinOpType = Arith | Logical | Binary | Comparison | NotBin deriving (Eq,Sho
 
 -- we'll have a stack of these, one per active scope, during
 -- typechecking
-type VarTable = Map.Map Im.EntName (Im.Typ,Im.Var)
+-- type VarTable = Map.Map Im.EntName (Im.Typ,Im.Var)
 
 -- we go with integer consts for now
 type ConstTable = Map.Map Im.EntName Integer
 
 
-data TCState = TCS { vars   :: [VarTable],
+data TCState = TCS { vars   :: [Im.VarTable],
                      types  :: Im.TypeTable,
                      consts :: ConstTable,
                      funcs  :: Im.FuncTable    }
@@ -147,11 +150,11 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        addToVars im_t [Im.RetVar] name
        mapM checkDec decs
        im_stms <- mapM checkStm stms
-       vars    <- popScope
+       var_tab <- popScope
        -- add this function's type
        addToTypes name (Im.FuncT im_t (map extractTyp im_args))
        -- and add the actual function
-       addToFuncs name (Im.Func name im_t (map tn2var im_args) im_stms)
+       addToFuncs name (Im.Func name (mkVarSet var_tab) im_t (map tn2var im_args) im_stms)
     where extractTyp (Im.TypedName typ _)    = typ
           addArgVar  (Im.TypedName typ name) = addToVars typ [Im.FormalParam] name
           tn2var     (Im.TypedName _ name)   = (Im.VFlagged [Im.FormalParam] (Im.VSimple name))
@@ -185,8 +188,8 @@ checkStm :: T.Stm -> StateWithErr Im.Stm
 checkStm (T.SBlock decs stms) = do pushScope
                                    mapM checkDec decs
                                    new_stms <- mapM checkStm stms
-                                   popScope
-                                   return $ Im.SBlock new_stms
+                                   var_tab <- popScope
+                                   return $ Im.SBlock (mkVarSet var_tab) new_stms
 
 checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
@@ -356,7 +359,7 @@ checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not
 -- - compare those to the function's formal params
 -- TODO: not finished with the checking here!
 checkExp e@(T.EFunCall (T.Ident fcnName) args) =
-    do (Im.Func _ t _ _) <- extractFunc e fcnName
+    do (Im.Func _ _ t _ _) <- extractFunc e fcnName
        im_args <- mapM (checkExp . extrExp) args
        return (Im.ExpT t (Im.EFunCall fcnName im_args))
     where extrExp (T.FunArg e) = e
@@ -531,7 +534,10 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
                                                   << " are invalid"
 
 
-
+mkVarSet :: Im.VarTable -> Im.VarSet
+-- toAscList gives a list of (key,value), and the values are
+-- (typ,var), thus (snd . snd) to extract the var
+mkVarSet = Cont.fromList . (map (snd . snd)) . Map.toAscList
 
 ----------------------------------------------------------
 ----------------------------------------------------------

@@ -12,6 +12,7 @@ import Control.Monad.Identity (runIdentity)
 import qualified Data.Map as Map
 
 import SashoLib (myLiftM, pop, push, modifyListHead)
+import qualified Container as Cont
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -21,7 +22,7 @@ data EntType = Type | Var deriving (Eq,Ord,Show)
 -- - return Typ
 -- - list of formal params
 -- - the list of statements
-data Func = Func Ident Typ [Var] [Stm] deriving (Eq,Ord)
+data Func = Func Ident VarSet Typ [Var] [Stm] deriving (Eq,Ord)
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -40,6 +41,14 @@ type TypeTable = Map.Map EntName Typ
 type FuncTable = Map.Map EntName Func
 
 
+-- we'll have a stack of these, one per active scope, during
+-- typechecking
+type VarTable = Map.Map EntName (Typ,Var)
+
+
+-- Also we'll attach one of these to every scope-creating object
+-- (which are Func and SBlock)
+type VarSet = [Var]
 
 
 data ProgTables = ProgTables { types  :: TypeTable,
@@ -83,7 +92,7 @@ data TypedName =
 -- information, so we'll keep the blocks until scoping of variables (VScoped) is
 -- done, then SBlock will be done away with
 data Stm =
-   SBlock [Stm]
+   SBlock VarSet [Stm]
  | SAss Exp Exp
  | SFor Var Exp Exp [Stm]
  | SIf     Exp [Stm]
@@ -155,9 +164,11 @@ type Scope = [Int]
 
 -- enter a new scope depth (eg. upon entering a function call)
 -- uses the Stack class functions
--- pushScope :: Scope -> Scope
+pushScope :: Scope -> Scope
 pushScope scope = push scope 0
-popScope scope = pop scope
+popScope  :: Scope -> Scope
+popScope        = pop
+
 
 -- enter the next scope at the same depth (eg. from one function call to the
 -- next)
@@ -231,7 +242,7 @@ classifyExp e =
 stmChildren :: Stm -> ([Stm], [Exp], ([Stm] -> [Exp] -> Stm))
 stmChildren s =
     case s of
-      (SBlock ss)               -> ( ss,     [],         (\ss []        -> (SBlock ss)) )
+      (SBlock vars ss)          -> ( ss,     [],         (\ss []        -> (SBlock vars ss)) )
       (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
       (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
       (SIf test ifs)            -> ( ifs ,   [test],     (\ss  [test]   -> (SIf test ss)) )
@@ -326,14 +337,18 @@ docProg (Prog id (ProgTables {funcs=fs,
           docPair sf (n,t)      = sep [text n, equals, sf t]
           docVar (t,flags)      = sep [docTyp t, parens (text $ show flags)]
 
-docFunc (Func name t args stms) = vcat [text "function" <+> (text name) <+>
+docFunc (Func name vars t args stms) = vcat [text "function" <+> (text name) <+>
                                              (parens $ cat $ punctuate comma (map docVar args)),
-                                        nest 2 (vcat (map docStm stms)),
-                                        text "end",
-                                        empty]
+                                             nest 2 (vcat (docVarSet vars :
+                                                           text "-------------" :
+                                                           (map docStm stms))),
+                                             text "end",
+                                             empty]
 
 docStm :: Stm -> Doc
-docStm (SBlock stms)    = nest 4 (vcat (map docStm stms))
+docStm (SBlock vars stms)    = nest 4 (vcat (docVarSet vars :
+                                             text "-----------" :
+                                             (map docStm stms)))
 docStm (SAss lval val)= sep [docExp lval, text "=", docExp val]
                                
 docStm (SFor counter lo hi stms) = sep [text "for",
@@ -409,6 +424,10 @@ docVarFlag f = char (case f of
                            LoopCounter  -> 'l'
                            FormalParam  -> 'f'
                            RetVar       -> 'r')
+
+docVarSet :: VarSet -> Doc
+docVarSet m = vcat $ map docVar (Cont.toList m)
+
 
 
 docLit (LInt i)          = int i

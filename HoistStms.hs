@@ -14,11 +14,27 @@ module HoistStms where
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import Intermediate
+import SashoLib (Stack, push, pop, peek)
+import qualified Container as Cont
+
+import Intermediate hiding (pushScope, popScope)
+
 
 -- the state for these computations:
 -- 1) counter (Int) for naming temporary vars
---
+-- 2) A (Stack VarSet) (implemented as [VarSet]) to gather up new temp
+--    variables for every scope
+
+
+type MyState = (Int,[VarSet])
+
+getsInt = fst
+getsVarSet = snd
+
+modifyInt f (i,vs) = (f i, vs)
+modifyVarSet f (i, vs) = (i, f vs)
+ 
+
 
 
 flattenProg :: Prog -> Prog
@@ -28,27 +44,35 @@ flattenProg (Prog pname pt@(ProgTables {funcs=fs})) =
 
 
 flattenFunc :: Func -> Func
-flattenFunc f = fst $ St.runState (stateComp f) 0
-    where stateComp (Func name t args stms) =
-              do stmss <- mapM flatten stms
-                 return (Func name t args (concat stmss))
-
-
+flattenFunc f = fst $ St.runState (stateComp f) startState
+    where stateComp (Func name vars t args stms) =
+              do pushScope
+                 stmss <- mapM flatten stms
+                 varset <- popScope
+                 return (Func name
+                              (Cont.union vars varset)
+                              t
+                              args
+                              (concat stmss))
+          startState = (firstInt, [])
 
 
 
 -- flatten: take a statement which has ESeq expressions, and pull all
 -- the embedded statments out in front, producing a list of statements
 -- without any ESeq anywhere
-flatten :: Stm -> St.State Int [Stm]
+flatten :: Stm -> St.State MyState [Stm]
 
 
 flatten s =
     case s of
       (SAss lval val)   -> do (stms,val_new) <- extrStms val
                               return $ stms ++ [(SAss lval val_new)]
-      (SBlock stms)     -> do stmss <- mapM flatten stms
-                              return $ [(SBlock $ concat stmss)]
+      (SBlock vars stms)-> do pushScope
+                              stmss <- mapM flatten stms
+                              varset <- popScope
+                              return $ [SBlock (Cont.union varset vars)
+                                               (concat stmss)]
       (SFor id lo hi ss)-> do (stms_lo,lo_new) <- extrStms lo
                               (stms_hi,hi_new) <- extrStms hi
                               forss <- mapM flatten ss
@@ -69,7 +93,7 @@ flatten s =
                                         (SIf t_i (concat s1ss_new)),
                                         (SIf (UnOp Not t_i) (concat s2ss_new))]
 
-    where extrStms :: Exp -> St.State Int ([Stm],Exp)
+    where extrStms :: Exp -> St.State MyState ([Stm],Exp)
           extrStms e = do e_subbed <- subFunCalls e
                           let e_h = hoist e_subbed
                           return $ splitEseq e_h
@@ -128,12 +152,19 @@ splitEseq (ESeq stms e)   = (stms,e)
 splitEseq e               = ([],  e)
 
 
--- return the current Int state, and increment the state
-nextInt :: St.State Int Int
-nextInt = do i <- St.get
-             St.put (i+1)
+firstInt = 0
+
+-- return the current Int state, and increment the Int state
+nextInt :: St.State MyState Int
+nextInt = do i <- St.gets getsInt
+             St.modify (modifyInt (+1))
              return i
 
+
+pushScope =    St.modify $ modifyVarSet $ (`push` Cont.empty)
+popScope  = do top <- St.gets (peek . getsVarSet)
+               St.modify $ modifyVarSet $ pop
+               return top
 
 
 -- moves ESeq's from one level deep to just top-level
