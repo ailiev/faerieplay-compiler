@@ -14,13 +14,18 @@ program Test2 {
         var Key k, l;
         k = 0;
 
-        {
-            for (i = 1 to 3) {
-                k = f(k);
-                for (j = 1 to 3)
-                    k = k * j;
-            }
-        }
+/*
+	for (i = 1 to 10000) {
+	    k = k + i;
+	    for (j = 1 to 200)
+		k = k * j;
+	}
+*/
+	for (i = 0 to 1000)
+	    for (j = 0 to 2000)
+		k = k + i - j;
+
+
     }
     
 

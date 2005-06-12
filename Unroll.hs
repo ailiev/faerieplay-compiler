@@ -8,9 +8,10 @@ import Data.Bits
 import qualified Control.Monad.State as St
 import Control.Monad.Trans (lift)
 import Maybe (fromJust)
+import List  (unfoldr)
 import qualified Data.Map as Map
 
-import SashoLib (maybeLookup, (<<), ilog2)
+import SashoLib (maybeLookup, (<<), ilog2, unfoldrM)
 import qualified Container as Cont
 
 import Intermediate
@@ -56,7 +57,7 @@ type StateWithErr = St.StateT MyStateT OutMonad
 throwErr :: Int -> String -> StateWithErr a
 throwErr p msg = lift $ Left $ Err p msg
 
-
+{-
 unrollProg :: Prog -> OutMonad [Stm]
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
@@ -65,6 +66,15 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     in case out of
                 Left err        -> Left err
                 Right (stmss,_) -> Right (concat stmss)
+-}
+
+
+-- a version using the simplified unrollFor
+unrollProg :: Prog -> OutMonad [Stm]
+unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
+    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+        stmss = map unrollFor stms
+    in Right (concat stmss)
 
 
 
@@ -77,6 +87,8 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 unroll :: Stm -> StateWithErr [Stm]
 -- :::::::::::::::::::::
 
+unroll s@(SAss lv e@(EFunCall nm args)) = return [s]
+{-
 unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
               do (Func name locals t form_args stms) <- extractFunc nm
@@ -92,7 +104,7 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                      -- append an assignment to the target var
                      stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
                  return stms3
-
+-}
 
 -- this is a problem. it should only scope vars which are local to
 -- this block. how do we know this? mark it during typecheck?
@@ -103,6 +115,7 @@ unroll s@(SBlock _ _) = genericUnroll unrollBlock s
                  let stms' = map (scopeVars locals scope) stms
                  return stms'
 
+{-
 unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
     where unrollFor scope (SFor countVar lo_exp hi_exp stms) =
               do lo <- lift $ evalStatic lo_exp
@@ -120,6 +133,32 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                      substs = [subst countVar' (ELit (LInt val)) | val <- [lo..hi]]
                      stmss' = zipWith map substs stmss
                  return $ concat stmss'
+-}
+
+
+-- unroll a for-loop
+unroll for@(SFor _ lo_exp hi_exp _) =
+    do St.modify incrScope'
+       scope <- St.gets getsScope
+       lift $ checkScopeDepth scope
+
+       lo <- lift $ evalStatic lo_exp
+       hi <- lift $ evalStatic hi_exp
+       let unroll1 (_, cur)  | cur > hi               = return Nothing
+       -- substitute in the value of the loop counter, and then recursively unroll
+           unroll1 (for@(SFor countVar _ _ stms) , cur)   =
+              do let countVar' = addScope scope countVar
+                     stms'  = map (subst countVar' (ELit (LInt cur))) stms
+                 -- recurse
+                 St.modify pushScope'
+                 stmss <- stms' `seq` mapM unroll stms'
+                 St.modify popScope'
+                 return $ Just (concat stmss, (for,cur+1))
+
+       stmss <- unfoldrM unroll1 (for, lo)
+       return $ concat stmss
+
+
 
 
 {-
@@ -133,7 +172,7 @@ unroll s = return [s]
 
 genericUnroll f stm = do St.modify incrScope'
                          scope <- St.gets getsScope
-                         checkScopeDepth scope
+                         lift $ checkScopeDepth scope
                          -- do the "real work"
                          stms <- f scope stm
                          -- and recurse
@@ -144,9 +183,10 @@ genericUnroll f stm = do St.modify incrScope'
                          
 
 
+checkScopeDepth :: Scope -> OutMonad ()
 checkScopeDepth scope
-    | length scope > cMAXSCOPE = throwErr 42 $ "Function recursion deeper than"
-                                           << cMAXSCOPE
+    | length scope > cMAXSCOPE = Left $ Err 42 $ "Function recursion deeper than"
+                                                 << cMAXSCOPE
     | otherwise                = return ()
 
 
@@ -262,23 +302,24 @@ transIntUnOp  op = case op of
 
 --unrollStms =  unrollFor
 
-{-
--- unroll a for-loop
-unrollFor :: Stm -> [Stm]
-unrollFor for@(SFor _ lo hi s) = let 
 
-concat $ unfoldr unroll1 (for, lo)
+-- unroll a for-loop
+-- this is very brittle, only works for a particular for of loop
+-- limits expressions
+unrollFor :: Stm -> [Stm]
+unrollFor for@(SFor _ (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
+    concat $ unfoldr unroll1 (for, lo)
           -- unrolled enough when loop counter exceeds 'hi'
     where unroll1 (_, cur)  | cur > hi               = Nothing
           -- substitute in the value of the loop counter, and then recursively unroll
-          unroll1 (for@(SFor var _ _ stm) , cur)   =
-              let substed  = (subst var (EInt cur)) stmts
+          unroll1 (for@(SFor var _ _ stms) , cur)   =
+              let substed  = map (subst var (ELit $ LInt cur)) stms
                   unrolled = concatMap unrollFor substed
               in Just (unrolled, (for,cur+1))
-          unroll1 (for@(SFor _ _ _ stm) , cur)                  =
-              Just    ([stm], (for,cur+1))
+--           unroll1 (for@(SFor _ _ _ stm) , cur)                  =
+--               Just    ([stm], (for,cur+1))
+unrollFor (SFor _ _ _ _) = error "Bad for statement"
 unrollFor stm                                = [stm]
--}
 
 
 -- substitute a value for a variable into a statement

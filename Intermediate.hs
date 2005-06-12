@@ -22,7 +22,8 @@ data EntType = Type | Var deriving (Eq,Ord,Show)
 -- - return Typ
 -- - list of formal params
 -- - the list of statements
-data Func = Func Ident VarSet Typ [Var] [Stm] deriving (Eq,Ord)
+data Func = Func Ident VarSet Typ [Var] [Stm]
+            deriving (Eq,Ord,Show)
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -63,7 +64,7 @@ type Ident = String
 
 data Prog =
    Prog Ident ProgTables
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
 
 
@@ -81,11 +82,11 @@ data Typ =
  | FuncT Typ [Typ]
  | RedIntT Integer              -- RedIntT =def IntT . ELit . LInt
  | RedArrayT Typ Integer        -- similar
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
 data TypedName =
    TypedName Typ Ident
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
 
 -- I would ideally not have an SBlock here, but it conveys variable scoping
@@ -97,7 +98,7 @@ data Stm =
  | SFor Var Exp Exp [Stm]
  | SIf     Exp [Stm]
  | SIfElse Exp [Stm] [Stm]
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
 
 
@@ -119,7 +120,7 @@ data Exp =
  | ExpT Typ Exp                 -- a type annotation
  | ESeq [Stm] Exp               -- several assignment statements,
                                 -- followed by an expression.
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
 
 -- some expressions have to be static, hence not annotated with EStatic:
@@ -137,7 +138,7 @@ data Var =
   | VScoped Scope Var           -- during unrolling, everything ends
                                 -- up in one scope; thus add a
                                 -- list of the pre-unroll scope id's
-    deriving (Eq,Ord)
+    deriving (Eq,Ord,Show)
 
 -- CONVENTION: VScoped goes on the outside of VFlagged (as illustrated in
 -- vflags), and they don't recurse further (that'd be a mess!)
@@ -181,7 +182,7 @@ incrScope scope = modifyListHead (+1) scope
 data Lit =                      -- literals
     LInt Integer                -- TODO: change to Integer
   | LBool Bool
-   deriving (Eq,Ord)
+   deriving (Eq,Ord,Show)
              
 
 data BinOp =
@@ -214,7 +215,7 @@ data UnOp =
 -- and internal:
   | Log2
   | Bitsize
-   deriving (Eq,Show,Ord)
+   deriving (Eq,Ord,Show)
 
 
 data Points a = P0 |
@@ -481,7 +482,7 @@ docBinOp o = case o of
                     And -> text "&&" 
                     Or -> text "||"
 
-
+{-
 instance Show Stm where
     showsPrec i = showsPrec i . docStm
 
@@ -505,3 +506,4 @@ instance Show Func where
 
 instance Show Lit where
     showsPrec i = showsPrec i . docLit
+-}

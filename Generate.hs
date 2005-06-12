@@ -129,6 +129,8 @@ run v p s =
                                                       putStrLn "Unrolled main:"
                                                       case Ur.unrollProg prog_flat of
                                                         (Left err)      -> print err
+--                                                        (Right stms)    -> mapM_ putStrLn
+--                                                                                 (map show stms)
                                                         (Right stms)    -> print (PP.vcat (map Im.docStm stms))
                                                       
 
