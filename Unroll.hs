@@ -81,34 +81,6 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 
 
 
--- using the Identity monad version of unrollFor
-{-
-unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
-    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-        stmss = runIdentity $ mapM unrollForId stms
-    in Right $ concat stmss
--}
-
-
-{-
--- using the "log of Errors" version of unrollFor
-unrollProg :: Prog -> ([Stm], [MyError])
-unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
-    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-        (stmss, errs) = runWriter (mapM unrollForErr stms)
-    in (concat stmss, errs)
--}
-
-
-{-
--- using the State-only version of unrollFor
-unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
-    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-        startState = 0
-        (stmss,count) = St.runState (mapM unrollForSt stms) startState
-    in Right $ concat stmss
--}
-
 
 -- scope invariants:
 -- unroll is called with the correct scope depth, but with the top-level scope
@@ -307,49 +279,6 @@ transIntUnOp  op = case op of
 --unrollStms =  unrollFor
 
 
--- unroll a for-loop
--- this is very brittle, only works for a particular for of loop
--- limits expressions
-
-unrollForId :: Stm -> Identity [Stm]
-unrollForId for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
-    do let stmss = replicate (fromInteger (hi-lo)) stms
-           substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
-           stmss' = zipWith map substs stmss
-           stms' = concat stmss'
-       stmss_unrolled <- mapM unrollForId stms'
-       return $ concat stmss_unrolled
-unrollForId (SFor _ _ _ _) = error "Bad for statement"
-unrollForId stm            = return [stm]
-
-
-
-unrollForErr :: Stm -> Writer [MyError] [Stm]
-unrollForErr for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
-    do let stmss = replicate (fromInteger (hi-lo)) (strictList stms)
-           substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
-           stmss' = zipWith map substs stmss
-           stms' = concat stmss'
-       stmss_unrolled <- mapM unrollForErr stms'
-       return $ concat stmss_unrolled
-unrollForErr s@(SFor _ _ _ _) = do logError 42 $ "Bad for statement " << s
-                                   return [s]
-unrollForErr stm                = return [stm]
-
-
-unrollForSt :: Stm -> St.State Int [Stm]
-unrollForSt for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
-    do let stmss = replicate (fromInteger (hi-lo)) stms
-           substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
-           stmss' = zipWith map substs (strictList stmss)
-           stms' = concat stmss'
-       St.modify (+1)
-       stmss_unrolled <- mapM unrollForSt stms'
-       return $ concat stmss_unrolled
-unrollForSt (SFor _ _ _ _) = error "Bad for statement"
-unrollForSt stm                = return [stm]
-
-
 
 
 -- substitute a value for a variable into a statement
@@ -370,37 +299,3 @@ substExp var val exp = mapExp f exp
 
 
 testExp = (BinOp Plus (var "x") (ELit $ LInt 5))
-
-
-
-
-{-
--- unroll a for-loop
-unroll for@(SFor _ lo_exp hi_exp _) =
-    do St.modify incrScope'
-       scope <- St.gets getsScope
-       lift $ checkScopeDepth scope
-
-       lo <- lift $ evalStatic lo_exp
-       hi <- lift $ evalStatic hi_exp
-       let unroll1 (_, cur)  | cur > hi               = return Nothing
-       -- substitute in the value of the loop counter, and then recursively unroll
-           unroll1 (for@(SFor countVar _ _ stms) , cur)   =
-              do let countVar' = addScope scope countVar
-                     stms'  = map (subst countVar' (ELit (LInt cur))) stms
-                 -- recurse
-                 St.modify pushScope'
-                 stmss <- stms' `seq` mapM unroll stms'
-                 St.modify popScope'
-                 return $ Just (concat stmss, (for,cur+1))
-
-       stmss <- unfoldrM unroll1 (for, lo)
-       return $ concat stmss
--}
-
-
-
-{-
-unroll (SFor id lo hi stms) = do stmss <- mapM unroll stms
-                                 return [SFor id lo hi (concat stmss)]
--}
