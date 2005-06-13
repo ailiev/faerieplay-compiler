@@ -119,20 +119,29 @@ run v p s =
          Ok  tree -> do putStrLn "\nParse Successful!"
                         putStrV v "Unrolling for's"
                         case tree of
-                          prog@(Prog _ _) -> case typeCheck prog of
-                                               (Left err)        -> print $ "Error! " << err
-                                               (Right prog)      ->
-                                                   do print prog
-                                                      let prog_flat = Ho.flattenProg prog
-                                                      putStrLn "Flattened program:"
-                                                      print prog_flat
-                                                      putStrLn "Unrolled main:"
-                                                      case Ur.unrollProg prog_flat of
-                                                        (Left err)      -> print err
---                                                        (Right stms)    -> mapM_ putStrLn
---                                                                                 (map show stms)
-                                                        (Right stms)    -> print (PP.vcat (map Im.docStm stms))
-                                                      
+                          prog@(Prog _ _) ->
+                            case typeCheck prog of
+                              (Left err)        -> print $ "Error! " << err
+                              (Right prog)      ->
+                                  do print prog
+                                     let prog_flat = Ho.flattenProg prog
+                                     putStrLn "Flattened program:"
+                                     print prog_flat
+                                     putStrLn "Unrolled main:"
+                                     case Ur.unrollProg prog_flat of
+                                       (Left err)       -> print $ "Error! " << err
+                                       (Right stms)     -> print (PP.vcat (map Im.docStm stms))
+{-
+                                                        (stms,errs') ->
+--                                                          errs' = strictList errs
+                                                            do print (PP.vcat (map Im.docStm stms))
+                                                               print errs'
+{-
+                                                      if not $ null errs'
+                                                         then putStrLn "Failed!" -- >> print errs'
+                                                         else return ()
+-}
+-}
 
 printMap m = mapM_ print $ Map.fold (:) [] m
 

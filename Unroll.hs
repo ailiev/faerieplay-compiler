@@ -5,6 +5,8 @@ import Debug.Trace
 
 import Control.Monad.Error (Error, noMsg, strMsg, throwError)
 import Control.Monad.Identity (Identity, runIdentity)
+import Control.Monad.Writer (Writer, runWriter, tell)
+
 import Data.Bits
 import qualified Control.Monad.State as St
 import Control.Monad.Trans (lift)
@@ -23,14 +25,15 @@ import qualified TypeChecker as Tc
 
 
 -- This is the type of our type error representation.
-data TypeError = Err {line::Int, reason::String} deriving (Show)
+data MyError = Err {line::Int, reason::String} deriving (Show)
 
 -- We make it an instance of the Error class
-instance Error TypeError where
+instance Error MyError where
   noMsg    = Err 0 "Type error"
   strMsg s = Err 0 s
 
-type OutMonad = Either TypeError
+type ErrMonad = Either MyError
+
 
 
 type MyStateT = (ProgTables , Scope)
@@ -52,7 +55,7 @@ getsScope = snd
 cMAXSCOPE = 32
 
 
-type StateWithErr = St.StateT MyStateT OutMonad
+type StateWithErr = St.StateT MyStateT ErrMonad
 
 
 -- to throw an error inside the StateWithErr monad
@@ -60,11 +63,14 @@ throwErr :: Int -> String -> StateWithErr a
 throwErr p msg = lift $ throwError $ Err p msg
 
 
+logError line msg = tell [Err line msg]
 
-unrollProg :: Prog -> OutMonad [Stm]
 
-{-
+
+
+
 -- the full version, usign both State and Error
+unrollProg :: Prog -> ErrMonad [Stm]
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
         startScope = pushScope []
@@ -72,7 +78,7 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     in case out of
                 Left err        -> Left err
                 Right (stmss,_) -> Right (concat stmss)
--}
+
 
 
 -- using the Identity monad version of unrollFor
@@ -84,11 +90,14 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 -}
 
 
--- using the Error-only version of unrollFor
+{-
+-- using the "log of Errors" version of unrollFor
+unrollProg :: Prog -> ([Stm], [MyError])
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
-    do let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-       stmss <- mapM unrollForErr stms
-       return $ concat stmss
+    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+        (stmss, errs) = runWriter (mapM unrollForErr stms)
+    in (concat stmss, errs)
+-}
 
 
 {-
@@ -110,27 +119,24 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 unroll :: Stm -> StateWithErr [Stm]
 -- :::::::::::::::::::::
 
-unroll s@(SAss lv e@(EFunCall nm args)) = return [s]
-{-
+-- unroll s@(SAss lv e@(EFunCall nm args)) = return [s]
 unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
               do (Func name locals t form_args stms) <- extractFunc nm
                  -- replace all local variables with Scoped ones, in stms
-                 let stms'  = map (scopeVars locals scope) stms
+                 let stms'      = map (scopeVars locals scope) stms
+                     form_args' = map (addScope scope) form_args
                  -- substitute actual values for all the formal params, in all
                  -- stms
                  -- substs is a list of subst partial applications:
                  -- substs :: [Stm -> Stm]
-                     form_args' = map (addScope scope) form_args
-                     substs = [subst farg arg | farg <- form_args', arg <- args]
-                     stms'' = map (\stm -> foldl (flip ($)) stm substs) stms'
+                     substs     = [subst farg arg | farg <- form_args', arg <- args]
+                     stms''     = map (\stm -> foldl (flip ($)) stm substs) stms'
                      -- append an assignment to the target var
                      stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
                  return stms3
--}
 
--- this is a problem. it should only scope vars which are local to
--- this block. how do we know this? mark it during typecheck?
+
 
 unroll s@(SBlock _ _) = genericUnroll unrollBlock s
     where unrollBlock scope (SBlock locals stms) =
@@ -138,7 +144,7 @@ unroll s@(SBlock _ _) = genericUnroll unrollBlock s
                  let stms' = map (scopeVars locals scope) stms
                  return stms'
 
-{-
+
 unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
     where unrollFor scope (SFor countVar lo_exp hi_exp stms) =
               do lo <- lift $ evalStatic lo_exp
@@ -156,39 +162,13 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                      substs = [subst countVar' (ELit (LInt val)) | val <- [lo..hi]]
                      stmss' = zipWith map substs stmss
                  return $ concat stmss'
--}
-
-{-
--- unroll a for-loop
-unroll for@(SFor _ lo_exp hi_exp _) =
-    do St.modify incrScope'
-       scope <- St.gets getsScope
-       lift $ checkScopeDepth scope
-
-       lo <- lift $ evalStatic lo_exp
-       hi <- lift $ evalStatic hi_exp
-       let unroll1 (_, cur)  | cur > hi               = return Nothing
-       -- substitute in the value of the loop counter, and then recursively unroll
-           unroll1 (for@(SFor countVar _ _ stms) , cur)   =
-              do let countVar' = addScope scope countVar
-                     stms'  = map (subst countVar' (ELit (LInt cur))) stms
-                 -- recurse
-                 St.modify pushScope'
-                 stmss <- stms' `seq` mapM unroll stms'
-                 St.modify popScope'
-                 return $ Just (concat stmss, (for,cur+1))
-
-       stmss <- unfoldrM unroll1 (for, lo)
-       return $ concat stmss
--}
 
 
+unroll s@(SIf test stms) = do stmss' <- mapM unroll stms
+                              return [SIf test (concat stmss')]
 
-{-
-unroll (SFor id lo hi stms) = do stmss <- mapM unroll stms
-                                 return [SFor id lo hi (concat stmss)]
--}
-                   
+
+-- this will only be used for SAss without an EFunCall on the right                   
 unroll s = return [s]
 
 
@@ -206,7 +186,7 @@ genericUnroll f stm = do St.modify incrScope'
                          
 
 
-checkScopeDepth :: Scope -> OutMonad ()
+checkScopeDepth :: Scope -> ErrMonad ()
 checkScopeDepth scope
     | length scope > cMAXSCOPE = Left $ Err 42 $ "Function recursion deeper than"
                                                  << cMAXSCOPE
@@ -259,18 +239,19 @@ extractFunc name = do ProgTables {funcs=fs} <- St.gets getsPT
 
 
 
-evalStatic :: Exp -> OutMonad Integer
+evalStatic :: Exp -> ErrMonad Integer
 evalStatic e = case e of
                       (ELit l)          -> evalLit l
                       (ExpT _ e)        -> evalStatic e
-                      _                 -> Left $ Err 42 "Not static!"
+                      (EStatic e)       -> evalStatic e
+                      _                 -> throwError $ Err 42 "Not static!"
 
 
 evalLit (LInt i)  = return i
 evalLit (LBool b) = return $ toInteger $ fromEnum b
 
 {-
--- evalStatic :: Exp -> OutMonad Exp
+-- evalStatic :: Exp -> ErrMonad Exp
 evalStatic = mapExpM f
     where f e =
               case e of
@@ -343,7 +324,7 @@ unrollForId stm            = return [stm]
 
 
 
-unrollForErr :: Stm -> OutMonad [Stm]
+unrollForErr :: Stm -> Writer [MyError] [Stm]
 unrollForErr for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
     do let stmss = replicate (fromInteger (hi-lo)) (strictList stms)
            substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
@@ -351,19 +332,20 @@ unrollForErr for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) s
            stms' = concat stmss'
        stmss_unrolled <- mapM unrollForErr stms'
        return $ concat stmss_unrolled
-unrollForErr (SFor _ _ _ _) = throwError $ Err 42 "Bad for statement"
+unrollForErr s@(SFor _ _ _ _) = do logError 42 $ "Bad for statement " << s
+                                   return [s]
 unrollForErr stm                = return [stm]
 
 
 unrollForSt :: Stm -> St.State Int [Stm]
 unrollForSt for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
-    do let stmss = replicate (fromInteger (hi-lo)) (strictList stms)
+    do let stmss = replicate (fromInteger (hi-lo)) stms
            substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
            stmss' = zipWith map substs (strictList stmss)
-           stms' = concat (strictList stmss')
+           stms' = concat stmss'
        St.modify (+1)
-       stmss_unrolled <- mapM unrollForSt (strictList stms')
-       return $ concat (strictList stmss_unrolled)
+       stmss_unrolled <- mapM unrollForSt stms'
+       return $ concat stmss_unrolled
 unrollForSt (SFor _ _ _ _) = error "Bad for statement"
 unrollForSt stm                = return [stm]
 
@@ -388,3 +370,37 @@ substExp var val exp = mapExp f exp
 
 
 testExp = (BinOp Plus (var "x") (ELit $ LInt 5))
+
+
+
+
+{-
+-- unroll a for-loop
+unroll for@(SFor _ lo_exp hi_exp _) =
+    do St.modify incrScope'
+       scope <- St.gets getsScope
+       lift $ checkScopeDepth scope
+
+       lo <- lift $ evalStatic lo_exp
+       hi <- lift $ evalStatic hi_exp
+       let unroll1 (_, cur)  | cur > hi               = return Nothing
+       -- substitute in the value of the loop counter, and then recursively unroll
+           unroll1 (for@(SFor countVar _ _ stms) , cur)   =
+              do let countVar' = addScope scope countVar
+                     stms'  = map (subst countVar' (ELit (LInt cur))) stms
+                 -- recurse
+                 St.modify pushScope'
+                 stmss <- stms' `seq` mapM unroll stms'
+                 St.modify popScope'
+                 return $ Just (concat stmss, (for,cur+1))
+
+       stmss <- unfoldrM unroll1 (for, lo)
+       return $ concat stmss
+-}
+
+
+
+{-
+unroll (SFor id lo hi stms) = do stmss <- mapM unroll stms
+                                 return [SFor id lo hi (concat stmss)]
+-}

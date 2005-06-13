@@ -21,9 +21,14 @@ program Test2 {
 		k = k * j;
 	}
 */
-	for (i = 0 to 1000)
-	    for (j = 0 to 2000)
-		k = k + i - j;
+	if (k < 16) {
+	    for (i = 0 to 500)
+		k = f(k);
+	}
+	else {
+	    for (i = 500 to 1000)
+		k = k + i;
+	}
 
 
     }
