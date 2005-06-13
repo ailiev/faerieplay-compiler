@@ -3,7 +3,8 @@ module Unroll where
 
 import Debug.Trace
 
-import Control.Monad.Error (Error, noMsg, strMsg)
+import Control.Monad.Error (Error, noMsg, strMsg, throwError)
+import Control.Monad.Identity (Identity, runIdentity)
 import Data.Bits
 import qualified Control.Monad.State as St
 import Control.Monad.Trans (lift)
@@ -11,7 +12,7 @@ import Maybe (fromJust)
 import List  (unfoldr)
 import qualified Data.Map as Map
 
-import SashoLib (maybeLookup, (<<), ilog2, unfoldrM)
+import SashoLib (maybeLookup, (<<), ilog2, unfoldrM, strictList)
 import qualified Container as Cont
 
 import Intermediate
@@ -54,11 +55,16 @@ cMAXSCOPE = 32
 type StateWithErr = St.StateT MyStateT OutMonad
 
 
+-- to throw an error inside the StateWithErr monad
 throwErr :: Int -> String -> StateWithErr a
-throwErr p msg = lift $ Left $ Err p msg
+throwErr p msg = lift $ throwError $ Err p msg
+
+
+
+unrollProg :: Prog -> OutMonad [Stm]
 
 {-
-unrollProg :: Prog -> OutMonad [Stm]
+-- the full version, usign both State and Error
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
         startScope = pushScope []
@@ -69,13 +75,30 @@ unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
 -}
 
 
--- a version using the simplified unrollFor
-unrollProg :: Prog -> OutMonad [Stm]
+-- using the Identity monad version of unrollFor
+{-
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-        stmss = map unrollFor stms
-    in Right (concat stmss)
+        stmss = runIdentity $ mapM unrollForId stms
+    in Right $ concat stmss
+-}
 
+
+-- using the Error-only version of unrollFor
+unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
+    do let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+       stmss <- mapM unrollForErr stms
+       return $ concat stmss
+
+
+{-
+-- using the State-only version of unrollFor
+unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
+    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+        startState = 0
+        (stmss,count) = St.runState (mapM unrollForSt stms) startState
+    in Right $ concat stmss
+-}
 
 
 -- scope invariants:
@@ -135,7 +158,7 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                  return $ concat stmss'
 -}
 
-
+{-
 -- unroll a for-loop
 unroll for@(SFor _ lo_exp hi_exp _) =
     do St.modify incrScope'
@@ -157,7 +180,7 @@ unroll for@(SFor _ lo_exp hi_exp _) =
 
        stmss <- unfoldrM unroll1 (for, lo)
        return $ concat stmss
-
+-}
 
 
 
@@ -306,20 +329,45 @@ transIntUnOp  op = case op of
 -- unroll a for-loop
 -- this is very brittle, only works for a particular for of loop
 -- limits expressions
-unrollFor :: Stm -> [Stm]
-unrollFor for@(SFor _ (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
-    concat $ unfoldr unroll1 (for, lo)
-          -- unrolled enough when loop counter exceeds 'hi'
-    where unroll1 (_, cur)  | cur > hi               = Nothing
-          -- substitute in the value of the loop counter, and then recursively unroll
-          unroll1 (for@(SFor var _ _ stms) , cur)   =
-              let substed  = map (subst var (ELit $ LInt cur)) stms
-                  unrolled = concatMap unrollFor substed
-              in Just (unrolled, (for,cur+1))
---           unroll1 (for@(SFor _ _ _ stm) , cur)                  =
---               Just    ([stm], (for,cur+1))
-unrollFor (SFor _ _ _ _) = error "Bad for statement"
-unrollFor stm                                = [stm]
+
+unrollForId :: Stm -> Identity [Stm]
+unrollForId for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
+    do let stmss = replicate (fromInteger (hi-lo)) stms
+           substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
+           stmss' = zipWith map substs stmss
+           stms' = concat stmss'
+       stmss_unrolled <- mapM unrollForId stms'
+       return $ concat stmss_unrolled
+unrollForId (SFor _ _ _ _) = error "Bad for statement"
+unrollForId stm            = return [stm]
+
+
+
+unrollForErr :: Stm -> OutMonad [Stm]
+unrollForErr for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
+    do let stmss = replicate (fromInteger (hi-lo)) (strictList stms)
+           substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
+           stmss' = zipWith map substs stmss
+           stms' = concat stmss'
+       stmss_unrolled <- mapM unrollForErr stms'
+       return $ concat stmss_unrolled
+unrollForErr (SFor _ _ _ _) = throwError $ Err 42 "Bad for statement"
+unrollForErr stm                = return [stm]
+
+
+unrollForSt :: Stm -> St.State Int [Stm]
+unrollForSt for@(SFor var (ExpT _ (ELit (LInt lo))) (ExpT _ (ELit (LInt hi))) stms) =
+    do let stmss = replicate (fromInteger (hi-lo)) (strictList stms)
+           substs = [subst var (ELit (LInt val)) | val <- [lo..hi]]
+           stmss' = zipWith map substs (strictList stmss)
+           stms' = concat (strictList stmss')
+       St.modify (+1)
+       stmss_unrolled <- mapM unrollForSt (strictList stms')
+       return $ concat (strictList stmss_unrolled)
+unrollForSt (SFor _ _ _ _) = error "Bad for statement"
+unrollForSt stm                = return [stm]
+
+
 
 
 -- substitute a value for a variable into a statement
