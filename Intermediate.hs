@@ -103,7 +103,6 @@ data Stm =
    SBlock VarSet [Stm]
  | SAss Exp Exp
  | SFor Var Exp Exp [Stm]
- | SIf     Exp (VarSet, [Stm])
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord)
 
@@ -276,7 +275,6 @@ stmChildren s =
       (SBlock vars ss)          -> ( ss,     [],         (\ss []        -> (SBlock vars ss)) )
       (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
       (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
-      (SIf test (locs,ifs))     -> ( ifs ,   [test],     (\ss  [test]   -> (SIf test (locs,ss))) )
 
 
 -- some recursive structure for Stm's and Exp's. Make it monadic for
@@ -416,13 +414,11 @@ docStm (SFor counter lo hi stms) = sep [text "for",
                                                      ]] $$
                                    nest 4 (vcat (map docStm stms))
 
-docStm (SIf test (_,stms))       = sep [text "if",
-                                        parens $ docExp test] $$
-                                   nest 4 (vcat (map docStm stms))
-
-docStm (SIfElse test (locs1,s1s) (_,s2s)) = vcat [docStm (SIf test (locs1,s1s)),
-                                                  text "else",
-                                                  nest 4 (vcat (map docStm s2s))]
+docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
+                                              parens $ docExp test,
+                                              nest 4 $ vcat (map docStm s1s),
+                                              text "else",
+                                              nest 4 $ vcat (map docStm s2s)]
 
 
 docExp e = case e of
@@ -437,7 +433,7 @@ docExp e = case e of
     (BinOp op e1 e2)    -> cat [docExp e1, docBinOp op, docExp e2]
     (EGetBit x b)       -> docExp (EArr x b)
     (EStatic e)         -> docExp e
-    (ExpT t e)          -> docExp e
+    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
     (ESeq stms e)       -> brackets $
                            cat ((punctuate comma (map docStm stms))) <>
                            text ": " <>
@@ -447,16 +443,16 @@ docExp e = case e of
 docTyp :: Typ -> Doc
 docTyp t =
     case t of
-      (IntT i)          -> cat [text "Int", text "<", docExp i, text "`>"]
-      (GenIntT)         -> cat [text "Int", text "<`>"]
-      (BoolT)           -> text "void"
+      (IntT i)          -> cat [text "Int", braces (docExp i)]
+      (GenIntT)         -> cat [text "Int"]
+      (BoolT)           -> text "bool"
       (VoidT)           -> text "void"
       (StructT fields)  -> sep [text "struct",
                                      braces $ sep $
                                      punctuate (text ",") $
                                      map docTypedName fields]
       (EnumT nm size)   -> cat [text "enum",
-                                text "<", int size, text ">",
+                                braces (int size),
                                 space, text nm]
       (ArrayT t size)   -> cat [docTyp t, brackets (docExp size)]
       (SimpleT name)    -> text name
@@ -474,7 +470,7 @@ docVar v =
       -- the scope list is reversed so we see the outermost scope (which is at
       -- the list end) first
       (VScoped scopes v)-> cat $ punctuate (text "/") (map int (reverse scopes)) ++ [text "/", docVar v]
-      (VFlagged flags v)-> docVar v <> (text "\\") <> cat (map docVarFlag flags)
+      (VFlagged flags v)-> docVar v <> (text "#") <> cat (map docVarFlag flags)
 
 
 docVarFlag f = char (case f of
@@ -518,7 +514,8 @@ docBinOp o = text (case o of
                     BXor -> "^" 
                     BOr -> "|" 
                     And -> "&&" 
-                    Or -> "||")
+                    Or          -> "||"
+                    Max         -> "`m`")
 
 
 instance Show Stm where

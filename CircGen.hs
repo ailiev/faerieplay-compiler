@@ -1,7 +1,12 @@
 -- code to generate a circuit from an unrolled list of statements,
--- consisiting only of SAss, and SIf.
+-- consisiting only of SAss, and SIfElse.
 
-module CircGen where
+module CircGen (
+                genCircuit,
+                extractInputs,
+                showCct
+               ) where
+
 
 import Monad (foldM)
 import Maybe (fromJust, isJust)
@@ -30,7 +35,7 @@ data Op =
   | ReadDynArray                -- read from a dynamic array (2
                                 -- inputs: array and index)
   | WriteDynArray               -- update array; 3 inputs
-  | Input Typ                   -- an input gate, and its simple type,
+  | Input                       -- an input gate
                                 -- ie. IntT or BoolT
   | Select                      -- select one of two values based on a
                                 -- test; the input wires are to be:
@@ -46,6 +51,7 @@ data Op =
 -- whereas in standard graphs the order of edges is immaterial. For
 -- now I do include the input gate numbers
 data Gate = Gate Int            -- the gate number
+                 Typ            -- the output type of the gate
                  Op             -- gate operation (+,*, & etc)
                  [Int]          -- numbers of the input gates, in the
                                 -- right order. may do away with this
@@ -56,32 +62,34 @@ data Gate = Gate Int            -- the gate number
 type GateDoc = Maybe Var
 
 
-{-
--- we will have Forward edges denoting the flow of data through the
--- circuit, and Back edges so a vertex (Gate) can see where its inputs are
-data EdgeKind = Forward | Back
--}
 
 -- NOTE: the gate number is the same as the Node value in the Graph
 -- (which is also an Int)
 -- helper to make a labelled Node from a Gate
 gate2node :: Gate -> Gr.LNode Gate
-gate2node g@(Gate i _ _ _) = (i,g)
+gate2node g@(Gate i _ _ _ _) = (i,g)
 
 
 -- needed to lookup a variable's current gate number
 type VarTable = Map.Map Var Int
 
-type MyState = ([VarTable],
-                Int)
+-- the state in these computations:
+type MyState = ([VarTable],     -- stack of table Var->Node
+                Int)            -- a counter to number the gates
+                                -- sequentially
+
 
 -- type OutMonad a = St.State MyState a
 type OutMonad = St.State MyState
 
 
+-- nodes are labelled with a Gate, and the edges are for now unlabelled
 type Circuit = TreeGr.Gr Gate ()
+type CircuitCtx = Gr.Context Gate ()
 
 
+
+-- the main function here
 genCircuit :: [Stm] ->          -- the Unroll'd [Stm]
               [TypedName] ->    -- parameters of main()
               Circuit           -- the resulting circuit
@@ -93,9 +101,12 @@ genCircuit stms args = let startState = ([Map.empty], 0)
 
 
 
+
+
+-- and the stateful computation
 genCircuitM :: [Stm] -> [TypedName] -> OutMonad Circuit
-genCircuitM stms args = do inputs <- genInputs args
-                           foldM genStm inputs stms
+genCircuitM stms args = do input_gates <- genInputs args
+                           foldM genStm input_gates stms
 
 
 genInputs :: [TypedName] -> OutMonad Circuit
@@ -112,17 +123,25 @@ createInputGates (TypedName typ@(IntT _) name)
          -- this is a formal parameter, of main()
          let var = add_vflags [FormalParam] (VSimple name)
          modifyVars $ modtop $ Map.insert var i
-         return [Gate i (Input typ) [] (Just var)]
+         return [Gate i typ Input [] (Just var)]
 
 
 genStm :: Circuit -> Stm -> OutMonad Circuit
 genStm circ stm =
     case stm of
       -- TODO: the lval expression may not be an EVar, could be EArr etc.
-      (SAss (EVar var) exp)     -> do (circ', gateNum) <- genExp circ exp
-                                      let circ'' = addGateDoc gateNum circ' var
-                                      modifyVars $ modtop $ Map.insert var gateNum
-                                      return circ''
+      (SAss (EVar var) exp)     ->
+          do (circ', res) <- genExp' circ exp
+             let (node, c'') = case res of
+                                 (Left ctx) ->
+                                    -- we got a Context back, so
+                                    -- add the doc to the gate
+                                     let ctx' = addGateDoc var ctx
+                                     in  (getCtxNode ctx', ctx' & circ')
+                                 (Right node) ->
+                                         (node, circ')
+             modifyVars $ modtop $ Map.insert var node
+             return c''
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
       (SIfElse (EVar testVar)
                (locs1, stms1)
@@ -145,10 +164,9 @@ genStm circ stm =
                                                (parentScope, ifScope, elseScope)
                                                (locs1, locs2)
              return circ''
-    where addGateDoc gate circ var
-              = updateLabel (\(Gate i op srcs _) -> Gate i op srcs (Just var))
-                            circ
-                            gate
+    where addGateDoc var ctx@(c1, c2, Gate g1 g2 g3 g4 _,          c3) =
+                             (c1, c2, Gate g1 g2 g3 g4 (Just var), c3)
+          getCtxNode (c1, node, c3, c4) = node
 
 
 -- update the label for a given node in a graph. will call error if
@@ -199,7 +217,8 @@ genCondExit testGate
                    let srcs = [testGate,
                                gate_true,
                                gate_false]
-                       ctx = mkCtx i Select srcs (Just var)
+                       t = mkSelType gate_true gate_false c
+                       ctx = mkCtx (Gate i t Select srcs (Just var))
     -- update the location of 'var'. this is a bit of a hack - it calls
     -- Map.adjust on all the VarTable's in the stack, but will end up
     -- updating just the one where the Var actually is
@@ -207,34 +226,70 @@ genCondExit testGate
                    return (ctx & c)
 
 
+-- figure out the type of a Select gate, based on the type of its two
+-- inputs
+mkSelType node1 node2 gr =
+    case map (getType . fromJust . Gr.lab gr) [node1, node2] of
+      [Im.BoolT, Im.BoolT]      -> Im.BoolT
+      [Im.IntT i1, Im.IntT i2]  -> Im.IntT $ Im.BinOp Max i1 i2
+    where getType (Gate _ t _ _ _) = t
+
+
+
 -- adds the needed gates to the circuit, and returns at which gate/node
 -- number the result is
 genExp :: Circuit -> Exp -> OutMonad (Circuit, Gr.Node)
-genExp c exp =
+genExp c e = do (c', res) <- genExp' c e
+                case res of
+                  -- extend the graph with the new context, and return it
+                  (Left ctx@(_,node,_,_))       -> return (ctx & c' , node)
+                  -- just pass on the graph and node
+                  (Right gateNum)               -> return (c'       , gateNum)
+                  
+
+-- this one is a little nasty - it returns the expanded circuit, and
+-- either the context for this expression, which can be processed and
+-- added by the caller, or the gate number where this expression can
+-- be found (in case it was already in the circuit)
+
+genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either CircuitCtx Gr.Node))
+genExp' c exp =
     case exp of
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1', gate1) <- genExp c   e1
                               (c2', gate2) <- genExp c1' e2
-                              let ctx = mkCtx i (Bin op) [gate1, gate2] Nothing
-                              return (ctx & c2', i)
+                              let ctx = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] Nothing
+                              return (c2', Left ctx)
       (UnOp op e1)      -> do i <- nextInt
                               (c1', gate1) <- genExp c   e1
-                              let ctx = mkCtx i (Un op) [gate1] Nothing
-                              return (ctx & c1', i)
+                              let ctx = mkCtx $ Gate i VoidT (Un op) [gate1] Nothing
+                              return (c1', Left ctx)
       (EVar var)        -> do mb_gate <- getsVars $ maybeLookup var
                               case mb_gate of
-                                (Just gate)     -> return (c, gate)
+                                (Just gate)     -> return (c, Right gate)
     -- an uninitialized reference! FIXME: for now just init to literal
     -- zero (ie. 42) and return the new gate number
                                 Nothing         -> do i <- nextInt
-                                                      let ctx = mkCtx i (Lit (LInt 42)) [] (Just var)
+                                                      let ctx = mkCtx $ Gate i
+                                                                             Im.VoidT
+                                                                             (Lit (LInt 42))
+                                                                             []
+                                                                             (Just var)
                                                       modifyVars $ modtop $ Map.insert var i
-                                                      return (ctx & c, i)
+                                                      return (c, Left ctx)
       (ELit l)          -> do i <- nextInt
-                              let ctx = mkCtx i (Lit l) [] Nothing
-                              return (ctx & c, i)
-      (ExpT _ e)        -> genExp c e
-      (EStatic e)       -> genExp c e
+                              let ctx = mkCtx (Gate i VoidT (Lit l) [] Nothing)
+                              return (c, Left ctx)
+      -- here we try to update the Typ annotation on the Gate
+      -- generated recursively
+      (ExpT typ e)      -> do (c', res) <- genExp' c e
+                              case res of
+                                (Left          (x, node, Gate i _   op srcs doc, z)) ->
+                                    let ctx' = (x, node, Gate i typ op srcs doc, z)
+                                    in  return (c', Left ctx')
+                                (Right node)    ->
+                                        return (c', Right node)
+      (EStatic e)       -> genExp' c e
 -- TODO: EArr and EStruct
                               
              
@@ -243,12 +298,11 @@ uAdj n = ((), n)
 
 
 -- make a graph Context for this operator, node number and source gates
-mkCtx node op srcs doc = let g   = Gate node op srcs doc
-                             ctx = (map uAdj srcs,
-                                    node,
-                                    g,
-                                    []) -- no outgoing edges
-                         in ctx
+mkCtx g@(Gate node t op srcs doc) = let ctx = (map uAdj srcs,
+                                               node,
+                                               g,
+                                               []) -- no outgoing edges
+                                    in ctx
 
 
 -- extract the params of main() from a Prog
@@ -298,14 +352,16 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing! " << msg
 
 
 instance Show Gate where
-    show (Gate i op srcs doc) = i << ": " << op << (case doc of
-                                                             Just var   -> " (" << var << ")"
-                                                             Nothing    -> "")
+    show (Gate i typ op srcs doc) = i << ": "
+                                      << op << " [" << typ << "] "
+                                      << (case doc of
+                                            Just var   -> "(" << var << ")"
+                                            Nothing    -> "")
 
 instance Show Op where
     show (Bin op) = show op
     show (Un  op) = show op
-    show (Input t) = "in " << t
+    show Input = "in"
     show Select   = "sel"
     show (Lit l)        = "Lit " << l
 

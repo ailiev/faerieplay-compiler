@@ -93,14 +93,7 @@ flatten s =
                                                                     lo_new
                                                                     hi_new
                                                                     (concat forss))]
-      (SIf test (locs,ss))     -> do (test_stms,test_new) <- extrStms test
-                                     ss_new <- mapM flatten ss
-                                     i <- nextInt
-                                     let t_i = (tempVar i)
-                                     return $ test_stms ++
-                                                [SAss t_i test_new,
-                                                 SIfElse t_i (locs, concat ss_new)
-                                                             (Cont.empty, [])]
+
       (SIfElse t (locs1,s1s)
                  (locs2,s2s))  -> do (t_stms,t_new) <- extrStms t
                                      s2ss_new  <- mapM flatten s2s
@@ -189,10 +182,10 @@ combHoistedL cons component_es = let (stmss, new_es) = unzip $ map splitEseq com
 
 combHoisted :: Exp -> Exp
 combHoisted e
-    | P1 cons e1      <- classe = combHoistedL (\[e] -> cons e)         [e1]
-    | P2 cons (e1,e2) <- classe = combHoistedL (\[e1,e2] -> cons e1 e2) [e1,e2]
-    | PList cons es   <- classe = combHoistedL cons es
-    | P0              <- classe = e
+    | P1 cons e1      <- classe    = combHoistedL (\[e] -> cons e)         [e1]
+    | P2 cons (e1,e2) <- classe    = combHoistedL (\[e1,e2] -> cons e1 e2) [e1,e2]
+    | PList cons es   <- classe    = combHoistedL cons es
+    | P0              <- classe    = e
     where classe = classifyExp e
 
 

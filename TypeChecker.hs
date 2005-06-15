@@ -206,17 +206,17 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
                                    
 
 checkStm s@(T.SIf cond stm) =
-    do new_cond@(Im.ExpT t c) <- checkExp cond
+    do new_cond@(Im.ExpT t _) <- checkExp cond
        case t of
               (Im.BoolT) -> return ()
               _          -> throwErr 42 $ "In if statement " << s << ", " << cond
                                       << " is not boolean"
        new_stm <- checkStm stm
-       return $ Im.SIf new_cond (extractLocals new_stm, [new_stm])
+       return $ Im.SIfElse new_cond (extractLocals new_stm, [new_stm]) (Cont.empty, [])
 
 -- reuse the above code a bit...
 checkStm s@(T.SIfElse cond stm1 stm2) =
-    do (Im.SIf new_cond (locals1,new_stm1s)) <- checkStm (T.SIf cond stm1)
+    do (Im.SIfElse new_cond (locals1,new_stm1s) _) <- checkStm (T.SIf cond stm1)
        new_stm2 <- checkStm stm2
        let locals2 = extractLocals new_stm2
        return $ Im.SIfElse new_cond (locals1, new_stm1s)

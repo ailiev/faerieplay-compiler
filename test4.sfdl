@@ -18,13 +18,17 @@ program Test4 {
         k2 = k + 10;
 
 	if (k < 16) {
-	    k3 = k2;
+	    for (i = 1 to 5) {
+		k3 = k3 + k2;
+	    }
 	}
+/*	
 	else {
 	    k3 = k;
 	    for (i = 1 to 5)
 		k3 = f(k3);
 	}
+*/
 
 	k4 = k3 + 7;
     }

@@ -2,7 +2,7 @@ module Main where
 
 
 -- repeat this many times at every recursion level
-repCount = 70
+repCount = 150
 -- what to repeat
 input = 3
 -- how many recursion levels
@@ -20,6 +20,6 @@ unrollPair level i = let is = replicate repCount i
 
 
 main = do let (is,count) = unrollPair gLEVELS input
-          print (sum is)
+          print (reverse is)
           putStrLn "Count:"
-          print count
+--          print count

@@ -55,25 +55,26 @@ run v p s =
                         putStrLn s
          Ok  tree ->
            do putStrLn "\nParse Successful!"
-              putStrV v "Unrolling for's"
               case tree of
                 prog@(Prog _ _) ->
                   case typeCheck prog of
                     (Left err)        -> print $ "Error! " << err
                     (Right prog)      ->
-                       do print prog
+                       do putStrLn "After typechecking:"
+                          print prog
                           let prog_flat = Ho.flattenProg prog
                           putStrLn "Flattened program:"
                           print prog_flat
-                          putStrLn "Unrolled main:"
                           case Ur.unrollProg prog_flat of
                             (Left err)       -> print $ "Error! " << err
                             (Right stms)     ->
-                                do print (PP.vcat (map Im.docStm stms))
-                                   putStrLn "And the circuit!"
+                                do putStrLn "Unrolled main:"
+                                   print (PP.vcat (map Im.docStm stms))
+                                   let cctFile = "cct.gviz"
+                                   putStrLn $ "And now generating the circuit into " ++ cctFile
                                    let args = CG.extractInputs prog
                                        cct  = CG.genCircuit stms args
-                                   writeFile "cct.gviz" (CG.showCct cct)
+                                   writeFile cctFile(CG.showCct cct)
 
 {-
                                                         (stms,errs') ->
