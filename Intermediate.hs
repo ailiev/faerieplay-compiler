@@ -11,19 +11,30 @@ import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
 
-import SashoLib (myLiftM, pop, push, modifyListHead)
+import SashoLib (myLiftM, pop, push)
 import qualified Container as Cont
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
 
+
+-- We'll attach one of these to every scope-creating object
+-- (which are Func and SBlock)
+-- 
+-- NOTE: VarSet is only accessed by Container class "methods", thus we
+-- should only need to change this definition here (and recompile) to
+-- use, for example, a (Data.Set Var) instead of a [Var]
+type VarSet = [Var]
+
+
 -- Func takes:
 -- - name
+-- - set of local variables in the function
 -- - return Typ
 -- - list of formal params
 -- - the list of statements
 data Func = Func Ident VarSet Typ [Var] [Stm]
-            deriving (Eq,Ord,Show)
+            deriving (Eq,Ord)
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -47,10 +58,6 @@ type FuncTable = Map.Map EntName Func
 type VarTable = Map.Map EntName (Typ,Var)
 
 
--- Also we'll attach one of these to every scope-creating object
--- (which are Func and SBlock)
-type VarSet = [Var]
-
 
 data ProgTables = ProgTables { types  :: TypeTable,
                                funcs  :: FuncTable }
@@ -64,7 +71,7 @@ type Ident = String
 
 data Prog =
    Prog Ident ProgTables
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 
 
@@ -82,11 +89,11 @@ data Typ =
  | FuncT Typ [Typ]
  | RedIntT Integer              -- RedIntT =def IntT . ELit . LInt
  | RedArrayT Typ Integer        -- similar
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 data TypedName =
    TypedName Typ Ident
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 
 -- I would ideally not have an SBlock here, but it conveys variable scoping
@@ -98,7 +105,7 @@ data Stm =
  | SFor Var Exp Exp [Stm]
  | SIf     Exp [Stm]
  | SIfElse Exp [Stm] [Stm]
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 
 
@@ -120,7 +127,7 @@ data Exp =
  | ExpT Typ Exp                 -- a type annotation
  | ESeq [Stm] Exp               -- several assignment statements,
                                 -- followed by an expression.
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord)
 
 
 -- some expressions have to be static, hence not annotated with EStatic:
@@ -138,51 +145,15 @@ data Var =
   | VScoped Scope Var           -- during unrolling, everything ends
                                 -- up in one scope; thus add a
                                 -- list of the pre-unroll scope id's
-    deriving (Eq,Ord,Show)
+    deriving (Eq,Ord)
 
 -- CONVENTION: VScoped goes on the outside of VFlagged (as illustrated in
 -- vflags), and they don't recurse further (that'd be a mess!)
 
-
--- quick helper to get the flags
-vflags (VFlagged fl _)                  = fl
-vflags (VScoped _ (VFlagged fl _))      = fl
-vflags _                                = []
-
-
--- ScopeId, by example:
--- -       1
---   -     1,1
---   -     1,2
---     -   1,2,1
---     -   1,2,2
---   -     1,3
--- -       2
--- -       3
-
-type Scope = [Int]
-
-
--- enter a new scope depth (eg. upon entering a function call)
--- uses the Stack class functions
-pushScope :: Scope -> Scope
-pushScope scope = push scope 0
-popScope  :: Scope -> Scope
-popScope        = pop
-
-
--- enter the next scope at the same depth (eg. from one function call to the
--- next)
--- for some reason, without the type signature the type of 1 was inferred as
--- Integer
--- incrScope :: Scope -> Scope
-incrScope scope = modifyListHead (+1) scope
-
-
 data Lit =                      -- literals
     LInt Integer                -- TODO: change to Integer
   | LBool Bool
-   deriving (Eq,Ord,Show)
+   deriving (Eq,Ord)
              
 
 data BinOp =
@@ -205,7 +176,7 @@ data BinOp =
   | Or
 --  and internal ones
   | Max
-   deriving (Eq,Ord,Show)
+   deriving (Eq,Ord)
 
 
 data UnOp =
@@ -215,7 +186,61 @@ data UnOp =
 -- and internal:
   | Log2
   | Bitsize
-   deriving (Eq,Ord,Show)
+   deriving (Eq,Ord)
+
+
+
+-----------------------
+-- Var scopes
+-----------------------
+
+-- a new scope depth is generated (during unrolling) by a statement block,
+-- for-loop body, and function body
+--
+-- every consecutive scope-creating object at the same depth uses an
+-- incremented value for its scope depth
+--
+-- example (where a dash is a scope-creating object):
+-- -       1
+--   -     1,1
+--   -     1,2
+--     -   1,2,1
+--     -   1,2,2
+--   -     1,3
+-- -       2
+-- -       3
+
+type Scope = [Int]
+
+
+
+
+
+
+------------------------
+-- helpers for Var
+------------------------
+
+-- quick helper to get the flags
+vflags (VFlagged fl _)                  = fl
+vflags (VScoped _ (VFlagged fl _))      = fl
+vflags _                                = []
+
+-- remove the scope from a Var
+stripScope (VScoped sc v)             = v
+stripScope v                          = v
+
+-- if already scoped, just overwrite the old scope
+addScope sc (VScoped scope_old v)     = (VScoped sc v)
+addScope sc v                         = (VScoped sc v)
+               
+
+strip_vflags v = case stripScope v of
+                                   (VFlagged _ v)       -> v
+                                   v                    -> v
+
+
+
 
 
 data Points a = P0 |
@@ -455,34 +480,34 @@ docLit (LInt i)          = integer i
 docLit (LBool b)         = text $ show b
 
 
-docUnOp o = case o of
-                   Not  -> text "!"
-                   BNot -> text "~"
-                   Neg  -> text "-"
-                   Log2 -> text "log2"
-                   Bitsize -> text "bitsize"
+docUnOp o = text (case o of
+                   Not  -> "!"
+                   BNot -> "~"
+                   Neg  -> "-"
+                   Log2 -> "log2"
+                   Bitsize -> "bitsize")
 
 
-docBinOp o = case o of
-                    Times -> text "*" 
-                    Div -> text "/" 
-                    Plus -> text "+" 
-                    Minus -> text "-" 
-                    SL -> text "<<" 
-                    SR -> text ">>" 
-                    Lt -> text "<" 
-                    Gt -> text ">" 
-                    LtEq -> text "<=" 
-                    GtEq -> text ">=" 
-                    Eq -> text "==" 
-                    Neq -> text "!=" 
-                    BAnd -> text "&" 
-                    BXor -> text "^" 
-                    BOr -> text "|" 
-                    And -> text "&&" 
-                    Or -> text "||"
+docBinOp o = text (case o of
+                    Times -> "*" 
+                    Div -> "/" 
+                    Plus -> "+" 
+                    Minus -> "-" 
+                    SL -> "<<" 
+                    SR -> ">>" 
+                    Lt -> "<" 
+                    Gt -> ">" 
+                    LtEq -> "<=" 
+                    GtEq -> ">=" 
+                    Eq -> "==" 
+                    Neq -> "!=" 
+                    BAnd -> "&" 
+                    BXor -> "^" 
+                    BOr -> "|" 
+                    And -> "&&" 
+                    Or -> "||")
 
-{-
+
 instance Show Stm where
     showsPrec i = showsPrec i . docStm
 
@@ -506,4 +531,9 @@ instance Show Func where
 
 instance Show Lit where
     showsPrec i = showsPrec i . docLit
--}
+
+instance Show BinOp where
+    showsPrec i = showsPrec i . docBinOp
+
+instance Show UnOp where
+    showsPrec i = showsPrec i . docUnOp

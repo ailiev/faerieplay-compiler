@@ -14,9 +14,10 @@ import SFDL.ErrM
 
 import qualified Data.Map as Map
 
-import qualified Intermediate as Im
-import qualified HoistStms as Ho
-import qualified Unroll as Ur
+import qualified Intermediate   as Im
+import qualified HoistStms      as Ho
+import qualified Unroll         as Ur
+import qualified CircGen        as CG
 
 import TypeChecker
 
@@ -25,70 +26,6 @@ import SashoLib
 import qualified Text.PrettyPrint.HughesPJ as PP
 
 
-{-
-unrollStms = concatMap unrollFor
-
-
--- unroll a for-loop
-unrollFor :: Stm -> [Stm]
-unrollFor for@(SFor _ (EInt lo) (EInt hi) (SBlock _ _)) = concat $ unfoldr unroll1 (for, lo)
-          -- unrolled enough when loop counter exceeds 'hi'
-    where unroll1 (_, cur)  | cur > hi               = Nothing
-          -- substitute in the value of the loop counter, and then recursively unroll
-          unroll1 (for@(SFor var _ _ (SBlock _ stmts)) , cur)   = let substed  = map (subst var (EInt cur)) stmts
-                                                                      unrolled = concatMap unrollFor substed
-                                                                  in Just (unrolled, (for,cur+1))
-          unroll1 (for@(SFor _ _ _ stm) , cur)                  = Just    ([stm], (for,cur+1))
-unrollFor for@(SFor _ _ _ stm)               = [stm]
-unrollFor stm                                = [stm] -- non-for statements not unrolled
-
--- substitute a value for a variable into a statement
-
-subst :: Ident -> Exp -> Stm -> Stm
--- subst var _   (SAss var2 _  )   | var == var2 = error "Assigning to loop variable"
-subst var _   (SFor var2 _ _ _) | var == var2 = error "Outer loop var reused as inner loop var"
---subst var _   (VarDecl _ var2)    | var == var2 = error "Redeclaring loop variable in loop"
-subst var val (SFor var2 elo ehi stm)       = SFor var2
-                                                   (substExp var val elo)
-                                                   (substExp var val ehi)
-                                                   (subst var val stm)
-subst var val (SIf test stm)                = SIf (substExp var val test)
-                                                    (subst var val stm)
-subst var val (SIfElse test stm1 stm2)      = SIfElse (substExp var val test)
-                                                      (subst var val stm1)
-                                                      (subst var val stm2)
-subst var val (SAss var2 exp)                 = SAss var2 (substExp var val exp)
-subst var val (SBlock d stms)                 = SBlock d (map (subst var val) stms)
--- subst _   _   stm                             = stm
-
-
--- substitue a value for a var into an exp
---          var    val    exp    result
-substExp :: Ident -> Exp -> Exp -> Exp
-substExp var val (EVar var2) | var == var2  = val
--- one entry for binary operations, with the help of extrBinOp
--- this whole rigmarole is because Haskell will not take:
--- substExp var val (eBinOp e1 e2)              = (eBinOp  (substExp var val e1) (substExp var val e2))
--- ie. a variable for the data constructor
--- substExp var val exp | isJust fields = let (op, e1, e2) = fromJust fields
---                                        in  op (substExp var val e1) (substExp var val e2)
---                      where fields = extrBinOpFields exp
--- and using GHC pattern guards:
-substExp var val exp
-    | Just (op, e1, e2) <- extrBinOpFields exp = op (substExp var val e1) (substExp var val e2)
-substExp var val (EArr e idx)               = EArr (substExp var val e) (substExp var val idx)
-substExp var val (EStruct e efield)         = EStruct (substExp var val e) (substExp var val efield)
-
-substExp _   _   exp                        = exp
-
--}
-
-extrBinOpFields :: Exp -> Maybe ( (Exp -> Exp -> Exp), Exp, Exp )
-extrBinOpFields (ETimes e1 e2) = Just (ETimes, e1, e2)
-extrBinOpFields (EPlus  e1 e2) = Just (EPlus, e1, e2)
-extrBinOpFields (ELt    e1 e2) = Just (ELt, e1, e2)
-extrBinOpFields (EEq    e1 e2) = Just (EEq, e1, e2)
-extrBinOpFields _              = Nothing
 
 
 main = hGetContents stdin >>= run 2 pProg
@@ -116,21 +53,28 @@ run v p s =
                         putStrV v "Tokens:"
                         putStrV v $ show ts
                         putStrLn s
-         Ok  tree -> do putStrLn "\nParse Successful!"
-                        putStrV v "Unrolling for's"
-                        case tree of
-                          prog@(Prog _ _) ->
-                            case typeCheck prog of
-                              (Left err)        -> print $ "Error! " << err
-                              (Right prog)      ->
-                                  do print prog
-                                     let prog_flat = Ho.flattenProg prog
-                                     putStrLn "Flattened program:"
-                                     print prog_flat
-                                     putStrLn "Unrolled main:"
-                                     case Ur.unrollProg prog_flat of
-                                       (Left err)       -> print $ "Error! " << err
-                                       (Right stms)     -> print (PP.vcat (map Im.docStm stms))
+         Ok  tree ->
+           do putStrLn "\nParse Successful!"
+              putStrV v "Unrolling for's"
+              case tree of
+                prog@(Prog _ _) ->
+                  case typeCheck prog of
+                    (Left err)        -> print $ "Error! " << err
+                    (Right prog)      ->
+                       do print prog
+                          let prog_flat = Ho.flattenProg prog
+                          putStrLn "Flattened program:"
+                          print prog_flat
+                          putStrLn "Unrolled main:"
+                          case Ur.unrollProg prog_flat of
+                            (Left err)       -> print $ "Error! " << err
+                            (Right stms)     ->
+                                do print (PP.vcat (map Im.docStm stms))
+                                   putStrLn "And the circuit!"
+                                   let args = CG.extractInputs prog
+                                       cct  = CG.genCircuit stms args
+                                   writeFile "cct.gviz" (CG.showCct cct)
+
 {-
                                                         (stms,errs') ->
 --                                                          errs' = strictList errs

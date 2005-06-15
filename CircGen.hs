@@ -6,22 +6,21 @@ module CircGen where
 import Monad (foldM)
 import Maybe (fromJust)
 
+import Debug.Trace      (trace)
+
 import Data.Graph.Inductive.Graph               ((&))
 import qualified Data.Graph.Inductive.Graph     as Gr
-
+import qualified Data.Graph.Inductive.Graphviz  as Graphviz
 import qualified Data.Graph.Inductive.Tree      as TreeGr
 import qualified Data.Map                       as Map
 import qualified Control.Monad.State            as St
 
-import SashoLib (projSnd, projFst, modifyListHead, Stack(..), maybeLookup)
+import SashoLib (projSnd, projFst, modifyListHead, Stack(..), maybeLookup, (<<))
 
 import Intermediate as Im hiding (VarTable)
 
 
 
--- number of inputs, and the list of outputs, one for every input in binary numerical order
--- (CHECK)
--- contains 2^{#inputs} entries, most likely 4 or 8
 data Op =
     Bin Im.BinOp                -- binary operator
   | Un  Im.UnOp                 -- unary operator
@@ -33,6 +32,7 @@ data Op =
   | Select                      -- select one of two values based on a
                                 -- test; the input wires are to be:
                                 -- [test, src_true, src_false]
+  | Lit Im.Lit                  -- a literal
 
 
 --          
@@ -123,27 +123,40 @@ genStm circ stm =
                                       return circ'
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
       (SIf (EVar testVar) stms)     ->
-          do testGate           <- getsVars (fromJust . maybeLookup testVar)
+          do testGate           <- getsVars $ fromJustMsg "finding conditional test gate" . maybeLookup testVar
              pushScope
              circ'              <- foldM genStm circ stms
-             ifScope            <- popScope
+             thisScope          <- popScope
              parentScope        <- getVars
-             circ''             <- genCondExit testGate circ' parentScope ifScope
+             circ''             <- genCondExit testGate circ' parentScope thisScope
              return circ''
 
+
+-- generate the gates needed when exiting a conditional block---to
+-- conditionally update free variables updated in this scope
+-- 
 -- here we need to be able to tell which variables are local and which
 -- are not - the non-local ones need to be propagated to outside this
 -- conditional scope, by means of Select gates keyed on the conditional
 -- 
 -- solution! the non-local vars will be found in lower layers of the
--- scope stack. if they're not, they must be local!
+-- scope stack (parentScopeVars). if they're not, they must be local!
 genCondExit testGate circ parentScopeVars thisScopeVars =
     let vars = Map.toList thisScopeVars
-    in  do foldM handleVar circ vars
-    where handleVar c (var,gate) = case maybeLookup var parentScopeVars of
+    in  foldM handleVar circ (trace ("scope vars " << vars) vars)
+          
+    where -- deal with one locally updated variable (free or not)
+          -- FIXME: shadowing of vars is not currently handled!
+          -- the only way to tell that a var updated here is shadowing
+          -- another var in a outside scope (and thus its value should
+-- not be propagated outside this scope) is by the var declaration,
+          -- so looks like that info (ie. local var info) has to be propagated all the way
+          -- from the TypeChecker
+          handleVar c (var,gate) = case maybeLookup var (trace ("parent vars: " << parentScopeVars) parentScopeVars) of
                                      Nothing            -> return c
                                      (Just parentGate)  -> addSelect c var gate parentGate
-                                                              
+          -- add a Select gate for a free variable, and update its
+          -- wire location, to the new Select gate
           addSelect c var gate parentGate
               = do i <- nextInt
                    let srcs = [testGate,
@@ -157,7 +170,36 @@ genCondExit testGate circ parentScopeVars thisScopeVars =
                    return (ctx & c)
 
 
-genExp circ exp = undefined
+-- adds the needed gates to the circuit, and returns at which gate/node
+-- number the result is
+genExp :: Circuit -> Exp -> OutMonad (Circuit, Gr.Node)
+genExp c exp =
+    case exp of
+      (BinOp op e1 e2)  -> do i <- nextInt
+                              (c1', gate1) <- genExp c   e1
+                              (c2', gate2) <- genExp c1' e2
+                              let ctx = mkCtx i (Bin op) [gate1, gate2]
+                              return (ctx & c2', i)
+      (UnOp op e1)      -> do i <- nextInt
+                              (c1', gate1) <- genExp c   e1
+                              let ctx = mkCtx i (Un op) [gate1]
+                              return (ctx & c1', i)
+      (EVar var)        -> do mb_gate <- getsVars $ maybeLookup (strip_vflags var)
+                              case mb_gate of
+                                (Just gate)     -> return (c, gate)
+    -- an uninitialized reference! FIXME: for now just init to literal
+    -- zero (ie. 42) and return the new gate number
+                                Nothing         -> do i <- nextInt
+                                                      let ctx = mkCtx i (Lit (LInt 42)) []
+                                                      modifyVars $ modtop $ Map.insert var i
+                                                      return (ctx & c, i)
+      (ELit l)          -> do i <- nextInt
+                              let ctx = mkCtx i (Lit l) []
+                              return (ctx & c, i)
+      (ExpT _ e)        -> genExp c e
+      (EStatic e)       -> genExp c e
+-- TODO: EArr and EStruct
+                              
              
 -- make an unlabelled edge
 uAdj n = ((), n)
@@ -168,8 +210,19 @@ mkCtx node op srcs = let g = Gate node op srcs
                          ctx = (map uAdj srcs,
                                 node,
                                 g,
-                                [])
+                                []) -- no outgoing edges
                      in ctx
+
+
+-- extract the params of main() from a Prog
+-- FIXME: Func does not now hang on to the types of the function
+-- parameters, which we do need here.
+-- for now invent a type :)
+extractInputs (Prog pname (ProgTables {funcs=fs})) =
+    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+    in  map (var2TN . strip_vflags) form_args
+    where var2TN (VSimple name) = TypedName (IntT 32) name
+
 
 --------------------
 -- state access functions
@@ -199,3 +252,23 @@ pushScope = modifyVars $ push Map.empty
 popScope  = do scope <- getsVars peek
                modifyVars pop
                return scope
+
+
+fromJustMsg msg (Just x) = x
+fromJustMsg msg Nothing  = error $ "fromJust Nothing! " << msg
+
+
+
+instance Show Gate where
+    show (Gate i op srcs) = i << ": " << op
+
+instance Show Op where
+    show (Bin op) = show op
+    show (Un  op) = show op
+    show (Input t) = "in " << t
+    show Select   = "sel"
+    show (Lit l)        = "Lit " << l
+
+
+showCct c = Graphviz.graphviz' c
+ 

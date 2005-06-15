@@ -2,22 +2,39 @@
 -- in this case we hoist just function calls (which can have
 -- side-effects)
 
--- NOTABENE: This is also where we convert SIfElse into two SIf:
+
+-- Post Conditions:
+-- have only "if" conditionals, with simple-variable conditions, ie.
+--                        no complex expressions
+-- all function calls are alone on the right side of a SAss
+-- there are a lot of new temporary variables :)
+
+
+-- Operations:
+-- we convert SIfElse into two SIf:
 -- if (p) s1 else s2
 -- becomes:
 -- temp = p;
 -- if (temp) then s1;
 -- if (!temp) then s2;
+-- 
+-- convert
+-- if (p_exp) s
+-- to
+-- temp = p_exp
+-- if (temp) s
+-- so that conditional tests are always simple variables
+
 
 module HoistStms where
 
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import SashoLib (Stack, push, pop, peek)
+import SashoLib (Stack, push, pop, peek, mapTuple2)
 import qualified Container as Cont
 
-import Intermediate hiding (pushScope, popScope)
+import Intermediate
 
 
 -- the state for these computations:
@@ -82,31 +99,28 @@ flatten s =
                                                                     (concat forss))]
       (SIf test ss)     -> do (test_stms,test_new) <- extrStms test
                               ss_new <- mapM flatten ss
-                              return $ test_stms ++ [(SIf test_new (concat ss_new))]
-      (SIfElse t s1s s2s)->do (t_stms,t_new) <- extrStms t
-                              s2ss_new <- mapM flatten s2s
-                              s1ss_new <- mapM flatten s1s
                               i <- nextInt
                               let t_i = (tempVar i)
+                              return $ test_stms ++
+                                       [SAss t_i test_new,
+                                        SIf t_i (concat ss_new)]
+      (SIfElse t s1s s2s)->do (t_stms,t_new) <- extrStms t
+                              s2ss_new  <- mapM flatten s2s
+                              s1ss_new  <- mapM flatten s1s
+                              i1        <- nextInt
+                              i2        <- nextInt
+                              let (t_i, t_i') = mapTuple2 tempVar (i1, i2)
                               return $ t_stms ++
                                        [(SAss t_i t_new),
-                                        (SIf t_i (concat s1ss_new)),
-                                        (SIf (UnOp Not t_i) (concat s2ss_new))]
+                                        (SAss t_i' (UnOp Not t_i)),
+                                        (SIf t_i  (concat s1ss_new)),
+                                        (SIf t_i' (concat s2ss_new))]
 
     where extrStms :: Exp -> St.State MyState ([Stm],Exp)
           extrStms e = do e_subbed <- subFunCalls e
                           let e_h = hoist e_subbed
                           return $ splitEseq e_h
 
-
-{-
-f_e   = hoist . subFunCalls
-
-f_s s = case s of
-        (SAss lval val)         -> do let (stms,val_new) = splitEseq val
-                                      return $ smts ++ [(SAss lval val_new)]
-        (SFor id lo hi s)       -> do 
--}
 
 
 -- hoist: take an expression (with component ESeq's), and produce one
@@ -161,7 +175,7 @@ nextInt = do i <- St.gets getsInt
              return i
 
 
-pushScope =    St.modify $ modifyVarSet $ (`push` Cont.empty)
+pushScope =    St.modify $ modifyVarSet $ (push Cont.empty)
 popScope  = do top <- St.gets (peek . getsVarSet)
                St.modify $ modifyVarSet $ pop
                return top
@@ -184,3 +198,6 @@ combHoisted e
     | PList cons es   <- classe = combHoistedL cons es
     | P0              <- classe = e
     where classe = classifyExp e
+
+
+

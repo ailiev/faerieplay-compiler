@@ -17,3 +17,16 @@ Sun Jun  5 17:37:53 2005
 
 Current implementation of HoistStms will not handle a function call in an
 l-value. this seems fairly sensible to prohibit.
+
+
+Mon Jun 13 20:16:32 2005
+
+notes on Graph:
+
+type Adj b = [(b, Node)]
+Labeled links to or from a Node.
+
+type Context a b = (Adj b, Node, a, Adj b)
+Links to the Node, the Node itself, a label, links from the Node.
+
+> a is the type of vertex labels, and b is the type of edge labels

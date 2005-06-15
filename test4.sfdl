@@ -1,0 +1,31 @@
+// -*- c -*-
+
+program Test4 {
+
+    type Key = Int<16`>;
+    
+    function Int<16`> f (Int<16`> x) {
+        f = x * 2;
+    };
+
+
+
+    function void main (Int<16`> k) {
+        var Int<16`> k2, k3, k4;
+
+	k3 = 0;
+	
+        k2 = k + 10;
+
+	if (k < 16) {
+	    k3 = k2;
+	}
+	else {
+	    k3 = f(k2);
+	}
+
+	k4 = k3 + 7;
+    }
+    
+
+}

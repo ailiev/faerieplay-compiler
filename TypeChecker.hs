@@ -12,7 +12,7 @@ import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
 import Control.Monad.Trans (lift)
 
 
-import SashoLib -- ((<<), Stack, push, pop, ilog2)
+import SashoLib (Stack(..), (<<), ilog2, maybeLookup)
 import qualified Container as Cont
 
 
@@ -536,7 +536,7 @@ mkVarSet = Cont.fromList . (map (snd . snd)) . Map.toAscList
 
 
 -- push and pop a SymbolTable scope
-pushScope = St.modify $ projFromVars $ (`push` Map.empty)
+pushScope = St.modify $ projFromVars $ (push Map.empty)
 -- want to return the scope here
 popScope  = do ms@(TCS {vars = vs}) <- St.get
                let scope = peek vs
@@ -584,7 +584,7 @@ addToVars typ flags name = let v' = (Im.VSimple name)
                                     else (Im.VFlagged flags v')
                            in St.modify $
                               projFromVars $
-                              modifyListHead $
+                              modtop $
                               Map.insert name (typ,v)
 
 

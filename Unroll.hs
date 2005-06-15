@@ -14,7 +14,7 @@ import Maybe (fromJust)
 import List  (unfoldr)
 import qualified Data.Map as Map
 
-import SashoLib (maybeLookup, (<<), ilog2, unfoldrM, strictList)
+import SashoLib (maybeLookup, (<<), ilog2, unfoldrM, Stack(..))
 import qualified Container as Cont
 
 import Intermediate
@@ -121,6 +121,9 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
     where unrollFor scope (SFor countVar lo_exp hi_exp stms) =
               do lo <- lift $ evalStatic lo_exp
                  hi <- lift $ evalStatic hi_exp
+                 -- the only new local variable in a for-loop body is
+                 -- the counter variable, so create a VarSet
+                 -- containing just that
                  let stms' = map (scopeVars (Cont.singleton (stripScope countVar))
                                             scope)
                                  stms
@@ -140,8 +143,8 @@ unroll s@(SIf test stms) = do stmss' <- mapM unroll stms
                               return [SIf test (concat stmss')]
 
 
--- this will only be used for SAss without an EFunCall on the right                   
-unroll s = return [s]
+-- all that remains is SAss without an EFunCall on the right                   
+unroll s@(SAss _ _) = return [s]
 
 
 
@@ -171,6 +174,7 @@ checkScopeDepth scope
 
 -- set the scope of variables which are local in this block, as indicated by the
 -- set 'locals'
+scopeVars :: VarSet -> Scope -> Stm -> Stm
 scopeVars locals scope s = mapStm f_s f_e s
                            
     where f_e (EVar v)
@@ -189,14 +193,6 @@ scopeVars locals scope s = mapStm f_s f_e s
 
                                
 
--- remove the scope from a Var
-stripScope (VScoped sc v)             = v
-stripScope v                          = v
-
--- if already scoped, just overwrite the old scope
-addScope sc (VScoped scope_old v)     = (VScoped sc v)
-addScope sc v                         = (VScoped sc v)
-               
 
 -- to reconstruct the return variable of a function in a given scope
 -- FIXME: rather awkward, may be better if a Func carried its return var around
@@ -296,6 +292,24 @@ substExp :: Var -> Exp -> Exp -> Exp
 substExp var val exp = mapExp f exp
     where f (EVar var2) | var2 == var   = val
           f e                           = e
+
+
+------------------
+-- Scope utilities
+------------------
+
+-- enter a new scope depth (eg. upon entering a function call)
+-- uses the Stack class functions
+pushScope :: Scope -> Scope
+pushScope = push 0
+popScope  :: Scope -> Scope
+popScope        = pop
+
+
+-- enter the next scope at the same depth (eg. from one function call to the
+-- next)
+incrScope = modtop (+1)
+
 
 
 testExp = (BinOp Plus (var "x") (ELit $ LInt 5))
