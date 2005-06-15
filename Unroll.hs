@@ -139,9 +139,10 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                  return $ concat stmss'
 
 
-unroll s@(SIf test stms) = do stmss' <- mapM unroll stms
-                              return [SIf test (concat stmss')]
-
+unroll s@(SIfElse test (locs1,stms1) (locs2,stms2)) =
+    do stmss1'  <- mapM unroll stms1
+       stmss2'  <- mapM unroll stms2
+       return [SIfElse test (locs1, concat stmss1') (locs2, concat stmss2')]
 
 -- all that remains is SAss without an EFunCall on the right                   
 unroll s@(SAss _ _) = return [s]

@@ -103,8 +103,8 @@ data Stm =
    SBlock VarSet [Stm]
  | SAss Exp Exp
  | SFor Var Exp Exp [Stm]
- | SIf     Exp [Stm]
- | SIfElse Exp [Stm] [Stm]
+ | SIf     Exp (VarSet, [Stm])
+ | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord)
 
 
@@ -233,6 +233,11 @@ stripScope v                          = v
 -- if already scoped, just overwrite the old scope
 addScope sc (VScoped scope_old v)     = (VScoped sc v)
 addScope sc v                         = (VScoped sc v)
+
+add_vflags fl (VScoped sc (VFlagged fl' v)) = (VScoped sc (VFlagged (fl'++fl) v))
+add_vflags fl (VFlagged fl' v) = (VFlagged (fl' ++ fl) v)
+add_vflags fl v = (VFlagged fl v)
+
                
 
 strip_vflags v = case stripScope v of
@@ -271,7 +276,7 @@ stmChildren s =
       (SBlock vars ss)          -> ( ss,     [],         (\ss []        -> (SBlock vars ss)) )
       (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
       (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
-      (SIf test ifs)            -> ( ifs ,   [test],     (\ss  [test]   -> (SIf test ss)) )
+      (SIf test (locs,ifs))     -> ( ifs ,   [test],     (\ss  [test]   -> (SIf test (locs,ss))) )
 
 
 -- some recursive structure for Stm's and Exp's. Make it monadic for
@@ -303,10 +308,18 @@ mapExp f e = runIdentity (mapExpM (myLiftM f) e)
 -- f_s: function on a statement
 -- f_e: function on an expression (passed on to mapExpM)
 mapStmM :: (Monad m) => (Stm -> m Stm) -> (Exp -> m Exp) -> Stm -> m Stm
+mapStmM f_s f_e (SIfElse test (locs1,stms1)
+                              (locs2,stms2)) =
+    do new_stms1 <- mapM (mapStmM f_s f_e) stms1
+       new_stms2 <- mapM (mapStmM f_s f_e) stms2
+       new_test  <- mapExpM f_e test
+       f_s (SIfElse new_test (locs1,new_stms1) (locs2,new_stms2))
+
 mapStmM f_s f_e s = do let (ss, es, scons) = stmChildren s
                        new_es <- mapM (mapExpM f_e) es
                        new_ss <- mapM (mapStmM f_s f_e) ss
                        f_s (scons new_ss new_es)
+
 
 mapStm :: (Stm -> Stm) -> (Exp -> Exp) -> Stm -> Stm
 mapStm f_s f_e s = runIdentity (mapStmM (myLiftM f_s) (myLiftM f_e) s)
@@ -403,13 +416,13 @@ docStm (SFor counter lo hi stms) = sep [text "for",
                                                      ]] $$
                                    nest 4 (vcat (map docStm stms))
 
-docStm (SIf test stms)       = sep [text "if",
-                                    parens $ docExp test] $$
-                               nest 4 (vcat (map docStm stms))
+docStm (SIf test (_,stms))       = sep [text "if",
+                                        parens $ docExp test] $$
+                                   nest 4 (vcat (map docStm stms))
 
-docStm (SIfElse test s1s s2s)= vcat [docStm (SIf test s1s),
-                                     text "else",
-                                     nest 4 (vcat (map docStm s2s))]
+docStm (SIfElse test (locs1,s1s) (_,s2s)) = vcat [docStm (SIf test (locs1,s1s)),
+                                                  text "else",
+                                                  nest 4 (vcat (map docStm s2s))]
 
 
 docExp e = case e of

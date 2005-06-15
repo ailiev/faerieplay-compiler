@@ -8,11 +8,12 @@ import List (find)
 
 import qualified Data.Map as Map (Map, insert, empty, lookup, member, toAscList)
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
+import Control.Monad.Writer (Writer, runWriter, tell)
 import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
 import Control.Monad.Trans (lift)
 
 
-import SashoLib (Stack(..), (<<), ilog2, maybeLookup)
+import SashoLib (Stack(..), (<<), ilog2, maybeLookup, myLiftM)
 import qualified Container as Cont
 
 
@@ -211,13 +212,15 @@ checkStm s@(T.SIf cond stm) =
               _          -> throwErr 42 $ "In if statement " << s << ", " << cond
                                       << " is not boolean"
        new_stm <- checkStm stm
-       return (Im.SIf new_cond [new_stm])
+       return $ Im.SIf new_cond (extractLocals new_stm, [new_stm])
 
 -- reuse the above code a bit...
 checkStm s@(T.SIfElse cond stm1 stm2) =
-    do (Im.SIf new_cond new_stm1s) <- checkStm (T.SIf cond stm1)
+    do (Im.SIf new_cond (locals1,new_stm1s)) <- checkStm (T.SIf cond stm1)
        new_stm2 <- checkStm stm2
-       return (Im.SIfElse new_cond new_stm1s [new_stm2])
+       let locals2 = extractLocals new_stm2
+       return $ Im.SIfElse new_cond (locals1, new_stm1s)
+                                    (locals2, [new_stm2])
 
 
 
@@ -422,6 +425,19 @@ checkLoopCounter ctx name =
          _                                        -> return ()
          
 
+extractLocals :: Im.Stm -> Im.VarSet
+extractLocals stm = let (_, varsets) = runWriter (extractLocals' stm)
+                    in  foldr Cont.union Cont.empty varsets
+
+extractLocals' :: Im.Stm -> Writer [Im.VarSet] Im.Stm
+extractLocals' = Im.mapStmM f_s f_e
+    where f_s s@(Im.SBlock vars _) = do tell [vars]
+                                        return s
+          f_s s                 = return s
+
+          f_e                   = myLiftM id
+
+
 -- at the global scope, the VarTable has only one level
 atGlobalScope = do TCS {vars=vs} <- St.get
                    return (length vs == 1)
@@ -526,7 +542,7 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
 
 
 mkVarSet :: Im.VarTable -> Im.VarSet
--- toAscList gives a list of (key,value), and the values are
+-- toAscList gives a sorted list of (key,value), and the values are
 -- (typ,var), thus (snd . snd) to extract the var
 mkVarSet = Cont.fromList . (map (snd . snd)) . Map.toAscList
 

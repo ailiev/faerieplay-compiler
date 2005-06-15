@@ -21,7 +21,9 @@ program Test4 {
 	    k3 = k2;
 	}
 	else {
-	    k3 = f(k2);
+	    k3 = k;
+	    for (i = 1 to 5)
+		k3 = f(k3);
 	}
 
 	k4 = k3 + 7;

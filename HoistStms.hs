@@ -4,19 +4,13 @@
 
 
 -- Post Conditions:
--- have only "if" conditionals, with simple-variable conditions, ie.
+-- have only if-else conditionals with simple-variable conditions, ie.
 --                        no complex expressions
 -- all function calls are alone on the right side of a SAss
 -- there are a lot of new temporary variables :)
 
 
 -- Operations:
--- we convert SIfElse into two SIf:
--- if (p) s1 else s2
--- becomes:
--- temp = p;
--- if (temp) then s1;
--- if (!temp) then s2;
 -- 
 -- convert
 -- if (p_exp) s
@@ -24,6 +18,8 @@
 -- temp = p_exp
 -- if (temp) s
 -- so that conditional tests are always simple variables
+--
+-- convert SIf into an SIfElse with an empty else-clause
 
 
 module HoistStms where
@@ -97,24 +93,24 @@ flatten s =
                                                                     lo_new
                                                                     hi_new
                                                                     (concat forss))]
-      (SIf test ss)     -> do (test_stms,test_new) <- extrStms test
-                              ss_new <- mapM flatten ss
-                              i <- nextInt
-                              let t_i = (tempVar i)
-                              return $ test_stms ++
-                                       [SAss t_i test_new,
-                                        SIf t_i (concat ss_new)]
-      (SIfElse t s1s s2s)->do (t_stms,t_new) <- extrStms t
-                              s2ss_new  <- mapM flatten s2s
-                              s1ss_new  <- mapM flatten s1s
-                              i1        <- nextInt
-                              i2        <- nextInt
-                              let (t_i, t_i') = mapTuple2 tempVar (i1, i2)
-                              return $ t_stms ++
-                                       [(SAss t_i t_new),
-                                        (SAss t_i' (UnOp Not t_i)),
-                                        (SIf t_i  (concat s1ss_new)),
-                                        (SIf t_i' (concat s2ss_new))]
+      (SIf test (locs,ss))     -> do (test_stms,test_new) <- extrStms test
+                                     ss_new <- mapM flatten ss
+                                     i <- nextInt
+                                     let t_i = (tempVar i)
+                                     return $ test_stms ++
+                                                [SAss t_i test_new,
+                                                 SIfElse t_i (locs, concat ss_new)
+                                                             (Cont.empty, [])]
+      (SIfElse t (locs1,s1s)
+                 (locs2,s2s))  -> do (t_stms,t_new) <- extrStms t
+                                     s2ss_new  <- mapM flatten s2s
+                                     s1ss_new  <- mapM flatten s1s
+                                     i         <- nextInt
+                                     let t_i = tempVar i
+                                     return $ t_stms ++
+                                                [SAss t_i t_new,
+                                                 SIfElse t_i (locs1, concat s1ss_new)
+                                                             (locs2, concat s2ss_new)]
 
     where extrStms :: Exp -> St.State MyState ([Stm],Exp)
           extrStms e = do e_subbed <- subFunCalls e

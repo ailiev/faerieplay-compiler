@@ -4,7 +4,8 @@
 module CircGen where
 
 import Monad (foldM)
-import Maybe (fromJust)
+import Maybe (fromJust, isJust)
+import List
 
 import Debug.Trace      (trace)
 
@@ -15,7 +16,9 @@ import qualified Data.Graph.Inductive.Tree      as TreeGr
 import qualified Data.Map                       as Map
 import qualified Control.Monad.State            as St
 
-import SashoLib (projSnd, projFst, modifyListHead, Stack(..), maybeLookup, (<<))
+import SashoLib (projSnd, projFst, modifyListHead, Stack(..),
+                 maybeLookup, (<<), mapTuple2)
+import qualified Container as Cont
 
 import Intermediate as Im hiding (VarTable)
 
@@ -48,6 +51,10 @@ data Gate = Gate Int            -- the gate number
                                 -- right order. may do away with this
                                 -- if the graph can mainatain
                                 -- edge-order
+                 GateDoc        -- some documentation, eg. a var name
+
+type GateDoc = Maybe Var
+
 
 {-
 -- we will have Forward edges denoting the flow of data through the
@@ -59,7 +66,7 @@ data EdgeKind = Forward | Back
 -- (which is also an Int)
 -- helper to make a labelled Node from a Gate
 gate2node :: Gate -> Gr.LNode Gate
-gate2node g@(Gate i _ _) = (i,g)
+gate2node g@(Gate i _ _ _) = (i,g)
 
 
 -- needed to lookup a variable's current gate number
@@ -68,6 +75,7 @@ type VarTable = Map.Map Var Int
 type MyState = ([VarTable],
                 Int)
 
+-- type OutMonad a = St.State MyState a
 type OutMonad = St.State MyState
 
 
@@ -94,15 +102,6 @@ genInputs :: [TypedName] -> OutMonad Circuit
 genInputs names = do gatess <- mapM createInputGates names
                      return (Gr.mkGraph (map gate2node (concat gatess)) [])
 
-{-
-genInputs names = do let gates' = concatMap createInputGates names
-                         gr     = Gr.empty
-                         nodes  = Gr.newNodes (length gates) gr
-                         gates  = zipWith completeGate gates' nodes
-                     mapM addVar gates
-                     return $ Gr.mkGraph gates []
-    where completeGate (Gate _ op inps) i = (i, Gate i op inps)
--}
 
 
 -- create the input gates for this argument to main(), and add the vars
@@ -110,8 +109,10 @@ genInputs names = do let gates' = concatMap createInputGates names
 -- will make this return a [Gate], for when we deal with arrays etc
 createInputGates (TypedName typ@(IntT _) name)
     = do i <- nextInt
-         modifyVars $ modtop $ Map.insert (VSimple name) i
-         return [Gate i (Input typ) []]
+         -- this is a formal parameter, of main()
+         let var = add_vflags [FormalParam] (VSimple name)
+         modifyVars $ modtop $ Map.insert var i
+         return [Gate i (Input typ) [] (Just var)]
 
 
 genStm :: Circuit -> Stm -> OutMonad Circuit
@@ -119,50 +120,86 @@ genStm circ stm =
     case stm of
       -- TODO: the lval expression may not be an EVar, could be EArr etc.
       (SAss (EVar var) exp)     -> do (circ', gateNum) <- genExp circ exp
+                                      let circ'' = addGateDoc gateNum circ' var
                                       modifyVars $ modtop $ Map.insert var gateNum
-                                      return circ'
+                                      return circ''
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
-      (SIf (EVar testVar) stms)     ->
-          do testGate           <- getsVars $ fromJustMsg "finding conditional test gate" . maybeLookup testVar
+      (SIfElse (EVar testVar)
+               (locs1, stms1)
+               (locs2, stms2))  ->
+          do testGate           <- getsVars $ fromJustMsg "finding conditional test gate" .
+                                              maybeLookup testVar
+             -- do the recursive generation for both branches, and
+             -- save the resulting var scopes
              pushScope
-             circ'              <- foldM genStm circ stms
-             thisScope          <- popScope
-             parentScope        <- getVars
-             circ''             <- genCondExit testGate circ' parentScope thisScope
-             return circ''
+             circ1'             <- foldM genStm circ stms1
+             ifScope            <- popScope
+             pushScope
+             circ2'             <- foldM genStm circ1' stms2
+             elseScope          <- popScope
 
+             parentScope        <- getVars
+             -- generate the conditional exit gates
+             circ''             <- genCondExit testGate
+                                               circ2'
+                                               (parentScope, ifScope, elseScope)
+                                               (locs1, locs2)
+             return circ''
+    where addGateDoc gate circ var
+              = updateLabel (\(Gate i op srcs _) -> Gate i op srcs (Just var))
+                            circ
+                            gate
+
+
+-- update the label for a given node in a graph. will call error if
+-- this node is not in the graph
+updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
+updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
+                            (e_in, node', lab, e_out)   = fromJust mctx
+                        in  (e_in, node', f lab, e_out) & gr'
+                            
 
 -- generate the gates needed when exiting a conditional block---to
 -- conditionally update free variables updated in this scope
--- 
--- here we need to be able to tell which variables are local and which
--- are not - the non-local ones need to be propagated to outside this
--- conditional scope, by means of Select gates keyed on the conditional
--- 
--- solution! the non-local vars will be found in lower layers of the
--- scope stack (parentScopeVars). if they're not, they must be local!
-genCondExit testGate circ parentScopeVars thisScopeVars =
-    let vars = Map.toList thisScopeVars
-    in  foldM handleVar circ (trace ("scope vars " << vars) vars)
+--
+-- NOTE: the vars in the locals VarSets (ifLocs and elseLocs)
+-- are without scopes
+genCondExit testGate
+            circ
+            (parentScope, ifScope, elseScope)
+            (ifLocs, elseLocs) =
+    let vars    = List.nub $
+                  filter nonLocal $
+                  map (\(var,gate) -> var) $
+                  concatMap Map.toList [ifScope, elseScope]
+        sources = map varSources $ trace ("non-local scope vars: " << vars) vars
+    in  foldM addSelect circ $ zip vars sources
           
-    where -- deal with one locally updated variable (free or not)
-          -- FIXME: shadowing of vars is not currently handled!
-          -- the only way to tell that a var updated here is shadowing
-          -- another var in a outside scope (and thus its value should
--- not be propagated outside this scope) is by the var declaration,
-          -- so looks like that info (ie. local var info) has to be propagated all the way
-          -- from the TypeChecker
-          handleVar c (var,gate) = case maybeLookup var (trace ("parent vars: " << parentScopeVars) parentScopeVars) of
-                                     Nothing            -> return c
-                                     (Just parentGate)  -> addSelect c var gate parentGate
+    where -- a var is non-local if was not declared in this scope,
+          -- *and* it appears in the parent scope (needed in the case of
+          -- generated vars)
+          nonLocal var = (not $ any (Cont.member (stripScope var))
+                                    [ifLocs, elseLocs])            &&
+                         (isJust $ maybeLookup var parentScope)
+                          
+          -- return the gate number where this var can be found, if the cond
+          -- is true, and if it's false. This depends on which branch
+          -- (or both) it was updated in
+          varSources var = mapTuple2 (gate var)
+                                    (case map (Map.member var) [ifScope, elseScope] of
+                                       [True,  True]       -> ([ifScope],   [elseScope])
+                                       [True,  False]      -> ([ifScope],   parentScope)
+                                       [False, True]       -> (parentScope, [elseScope]))
+          gate var scopes = fromJust $ maybeLookup var scopes
+
           -- add a Select gate for a free variable, and update its
           -- wire location, to the new Select gate
-          addSelect c var gate parentGate
+          addSelect c (var, (gate_true, gate_false))
               = do i <- nextInt
                    let srcs = [testGate,
-                               gate,       -- if test == True
-                               parentGate] -- False
-                       ctx = mkCtx i Select srcs
+                               gate_true,
+                               gate_false]
+                       ctx = mkCtx i Select srcs (Just var)
     -- update the location of 'var'. this is a bit of a hack - it calls
     -- Map.adjust on all the VarTable's in the stack, but will end up
     -- updating just the one where the Var actually is
@@ -178,23 +215,23 @@ genExp c exp =
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1', gate1) <- genExp c   e1
                               (c2', gate2) <- genExp c1' e2
-                              let ctx = mkCtx i (Bin op) [gate1, gate2]
+                              let ctx = mkCtx i (Bin op) [gate1, gate2] Nothing
                               return (ctx & c2', i)
       (UnOp op e1)      -> do i <- nextInt
                               (c1', gate1) <- genExp c   e1
-                              let ctx = mkCtx i (Un op) [gate1]
+                              let ctx = mkCtx i (Un op) [gate1] Nothing
                               return (ctx & c1', i)
-      (EVar var)        -> do mb_gate <- getsVars $ maybeLookup (strip_vflags var)
+      (EVar var)        -> do mb_gate <- getsVars $ maybeLookup var
                               case mb_gate of
                                 (Just gate)     -> return (c, gate)
     -- an uninitialized reference! FIXME: for now just init to literal
     -- zero (ie. 42) and return the new gate number
                                 Nothing         -> do i <- nextInt
-                                                      let ctx = mkCtx i (Lit (LInt 42)) []
+                                                      let ctx = mkCtx i (Lit (LInt 42)) [] (Just var)
                                                       modifyVars $ modtop $ Map.insert var i
                                                       return (ctx & c, i)
       (ELit l)          -> do i <- nextInt
-                              let ctx = mkCtx i (Lit l) []
+                              let ctx = mkCtx i (Lit l) [] Nothing
                               return (ctx & c, i)
       (ExpT _ e)        -> genExp c e
       (EStatic e)       -> genExp c e
@@ -206,12 +243,12 @@ uAdj n = ((), n)
 
 
 -- make a graph Context for this operator, node number and source gates
-mkCtx node op srcs = let g = Gate node op srcs
-                         ctx = (map uAdj srcs,
-                                node,
-                                g,
-                                []) -- no outgoing edges
-                     in ctx
+mkCtx node op srcs doc = let g   = Gate node op srcs doc
+                             ctx = (map uAdj srcs,
+                                    node,
+                                    g,
+                                    []) -- no outgoing edges
+                         in ctx
 
 
 -- extract the params of main() from a Prog
@@ -236,6 +273,7 @@ getVars :: OutMonad [VarTable]
 getVars = getsVars id
 
 -- modify the various parts of the state with some function
+-- modifyInt f = St.modify (projSnd f)
 modifyInt  = St.modify . projSnd
 modifyVars = St.modify . projFst
 
@@ -260,7 +298,9 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing! " << msg
 
 
 instance Show Gate where
-    show (Gate i op srcs) = i << ": " << op
+    show (Gate i op srcs doc) = i << ": " << op << (case doc of
+                                                             Just var   -> " (" << var << ")"
+                                                             Nothing    -> "")
 
 instance Show Op where
     show (Bin op) = show op
