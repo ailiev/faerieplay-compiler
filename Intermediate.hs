@@ -112,7 +112,7 @@ data Exp =
    -- variables just need a name, and the scope stack will take care of
    -- making sure we get the correct instance of that name
    EVar Var
- | EStruct Exp String           -- Structure and field
+ | EStruct Exp Int              -- Structure and field index
  | EArr Exp Exp                 -- array
  | ELit Lit                     -- literal
  | EFunCall Ident [Exp]
@@ -423,7 +423,7 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
 
 docExp e = case e of
     (EVar v)            -> parens $ docVar v
-    (EStruct str field) -> cat [docExp str, text ".", text field]
+    (EStruct str idx)   -> cat [docExp str, text ".", int idx]
     (EArr arr idx)      -> cat [docExp arr, text "[", docExp idx, text "]"]
     (ELit l)            -> docLit l
     (EFunCall f args)   -> cat [text f, text "(",

@@ -139,6 +139,8 @@ genStm circ stm =
                                      let ctx' = addGateDoc var ctx
                                      in  (getCtxNode ctx', ctx' & circ')
                                  (Right node) ->
+                                    -- no new gate generated, so no
+                                    -- doc to add
                                          (node, circ')
              modifyVars $ modtop $ Map.insert var node
              return c''
@@ -164,9 +166,11 @@ genStm circ stm =
                                                (parentScope, ifScope, elseScope)
                                                (locs1, locs2)
              return circ''
-    where addGateDoc var ctx@(c1, c2, Gate g1 g2 g3 g4 _,          c3) =
+    where addGateDoc var ctx@(c1, c2, Gate g1 g2 g3 g4 _         , c3) =
                              (c1, c2, Gate g1 g2 g3 g4 (Just var), c3)
           getCtxNode (c1, node, c3, c4) = node
+
+
 
 
 -- update the label for a given node in a graph. will call error if
@@ -226,6 +230,7 @@ genCondExit testGate
                    return (ctx & c)
 
 
+
 -- figure out the type of a Select gate, based on the type of its two
 -- inputs
 mkSelType node1 node2 gr =
@@ -249,8 +254,8 @@ genExp c e = do (c', res) <- genExp' c e
 
 -- this one is a little nasty - it returns the expanded circuit, and
 -- either the context for this expression, which can be processed and
--- added by the caller, or the gate number where this expression can
--- be found (in case it was already in the circuit)
+-- added to the circuit by the caller, or the gate number where this
+-- expression can be found (in case it was already in the circuit)
 
 genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either CircuitCtx Gr.Node))
 genExp' c exp =

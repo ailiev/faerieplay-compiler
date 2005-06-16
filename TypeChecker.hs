@@ -3,8 +3,9 @@
 
 module TypeChecker where
 
-import Monad (foldM, msum)
-import List (find)
+import Monad    (foldM, msum)
+import List     (find, findIndex)
+import Maybe    (fromJust)
 
 import qualified Data.Map as Map (Map, insert, empty, lookup, member, toAscList)
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
@@ -326,8 +327,12 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
          -- ** check: return the expression's type and value
          -- find the field in this struct's definition
     where check (Im.StructT fields) new_str =
-              do case lookup fieldname $ map typedName2Pair fields of
-                          (Just t) -> return (t, Im.EStruct new_str fieldname)
+              do let fieldPairs = map typedName2Pair fields
+                 case lookup fieldname fieldPairs of
+                          (Just t) -> do let idx = fromJust $
+                                                   findIndex ((== fieldname) . fst)
+                                                             fieldPairs
+                                         return (t, Im.EStruct new_str idx)
                           _        -> throwErr 42 $ "in " << e << ", struct has no field "
                                                       << fieldname
 
