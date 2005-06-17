@@ -59,7 +59,9 @@ run v p s =
                 prog@(Prog _ _) ->
                   case typeCheck prog of
                     (Left err)        -> print $ "Error! " << err
-                    (Right prog)      ->
+                    (Right prog@(Im.Prog pname
+                                         Im.ProgTables {Im.types=ts,
+                                                        Im.funcs=fs}))      ->
                        do putStrLn "After typechecking:"
                           print prog
                           let prog_flat = Ho.flattenProg prog
@@ -73,7 +75,7 @@ run v p s =
                                    let cctFile = "cct.gviz"
                                    putStrLn $ "And now generating the circuit into " ++ cctFile
                                    let args = CG.extractInputs prog
-                                       cct  = CG.genCircuit stms args
+                                       cct  = CG.genCircuit ts stms args
                                    writeFile cctFile(CG.showCct cct)
 
 {-

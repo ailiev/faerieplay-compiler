@@ -74,6 +74,7 @@ data Prog =
   deriving (Eq,Ord)
 
 
+type TypedName = (Ident, Typ)
 
 data Typ =
    IntT Exp
@@ -88,12 +89,14 @@ data Typ =
  | SimpleT Ident
  | FuncT Typ [Typ]
  | RedIntT Integer              -- RedIntT =def IntT . ELit . LInt
- | RedArrayT Typ Integer        -- similar
+ | RedArrayT Typ Int            -- similar
   deriving (Eq,Ord)
 
+{-
 data TypedName =
    TypedName Typ Ident
   deriving (Eq,Ord)
+-}
 
 
 -- I would ideally not have an SBlock here, but it conveys variable scoping
@@ -109,23 +112,25 @@ data Stm =
 
 
 data Exp =
-   -- variables just need a name, and the scope stack will take care of
-   -- making sure we get the correct instance of that name
    EVar Var
- | EStruct Exp Int              -- Structure and field index
+   -- Structure and field offset and size  (in number of primitive
+   -- units, ie. IntT and BoolT and EnumT)
+ | EStruct Exp (Int,Int)
  | EArr Exp Exp                 -- array
  | ELit Lit                     -- literal
  | EFunCall Ident [Exp]
  | UnOp UnOp Exp
  | BinOp BinOp Exp Exp
  | EGetBit Exp Exp              -- EGetBit i exp = i-th bit of exp
--- | EBitsize Exp                 -- bitsize of an int expression
  | EStatic Exp                  -- a static expression, computable at
                                 -- compile time. use to mark all
                                 -- static expressions
  | ExpT Typ Exp                 -- a type annotation
  | ESeq [Stm] Exp               -- several assignment statements,
                                 -- followed by an expression.
+ | EComplexInit Int             -- this is just to communicate to the circuit
+                                -- generator that a struct or array of this size
+                                --is to be prepared-for
   deriving (Eq,Ord)
 
 
@@ -136,6 +141,9 @@ data Exp =
 -- helpers for variables (without flags)
 var = EVar . VSimple
 tempVar = EVar . VTemp
+
+-- variables just need a name, and the scope stack will take care of
+-- making sure we get the correct instance of that name
 
 data Var =
     VSimple Ident
@@ -154,6 +162,10 @@ data Lit =                      -- literals
   | LBool Bool
    deriving (Eq,Ord)
              
+-- some helpers
+lint = ELit . LInt
+lbool = ELit . LBool
+
 
 data BinOp =
     Times 
@@ -258,7 +270,8 @@ classifyExp e =
     case e of
          (BinOp op e1 e2)  -> P2 (BinOp op) (e1,e2)
          (UnOp op e1)      -> P1 (UnOp op) e1
-         (EStruct str fld) -> P1 (`EStruct` fld) str
+         (EStruct str fld)
+                           -> P1 (`EStruct` fld) str
          (EArr arr idx)    -> P2 EArr (arr , idx)
          (EGetBit base bit)-> P2 EGetBit (base,bit)
          (EStatic e)       -> P1 EStatic e
@@ -423,7 +436,8 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
 
 docExp e = case e of
     (EVar v)            -> parens $ docVar v
-    (EStruct str idx)   -> cat [docExp str, text ".", int idx]
+    (EStruct str (off,len))
+                        -> cat [docExp str, text ".", int off, brackets (int len)]
     (EArr arr idx)      -> cat [docExp arr, text "[", docExp idx, text "]"]
     (ELit l)            -> docLit l
     (EFunCall f args)   -> cat [text f, text "(",
@@ -438,6 +452,7 @@ docExp e = case e of
                            cat ((punctuate comma (map docStm stms))) <>
                            text ": " <>
                            docExp e
+    (EComplexInit size) -> text "ComplexInit" <> parens (int size)
 
 
 docTyp :: Typ -> Doc
@@ -461,7 +476,7 @@ docTyp t =
                                 docTyp t]
 
 
-docTypedName (TypedName t name) = sep [docTyp t, text name]
+docTypedName (name,t) = sep [docTyp t, text name]
 
 docVar v =
     case v of
@@ -532,9 +547,6 @@ instance Show Var where
 
 instance Show Prog where
     showsPrec i = showsPrec i . docProg
-
-instance Show TypedName where
-    showsPrec i = showsPrec i . docTypedName
 
 instance Show Func where
     showsPrec i = showsPrec i . docFunc

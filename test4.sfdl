@@ -4,24 +4,33 @@ program Test4 {
 
     type Key = Int<16`>;
     
+    type Point = struct {
+	Int<16`> x,
+	Int<16`> y
+    };
+
     function Int<16`> f (Int<16`> x) {
         f = x * 2;
     };
 
 
 
-    function void main (Int<16`> k) {
+    function void main (Key k) {
         var Int<16`> k2, k3, k4;
 
-	k3 = 0;
-	
-        k2 = k + 10;
+        var Point pt;
 
-	if (k < 16) {
-	    for (i = 1 to 5) {
-		k3 = k3 + k2;
-	    }
-	}
+        k3 = 0;
+	
+        pt.x = 47;
+        
+        if (k < 16) {
+            for (i = 1 to 5) {
+                k3 = k3 + k2;
+            }
+
+            pt.y = pt.x * 3;
+        }
 /*	
 	else {
 	    k3 = k;
@@ -30,7 +39,7 @@ program Test4 {
 	}
 */
 
-	k4 = k3 + 7;
+        k4 = k3 + 7;
     }
     
 

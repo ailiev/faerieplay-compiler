@@ -3,18 +3,21 @@
 
 module TypeChecker where
 
-import Monad    (foldM, msum)
+import Monad    (foldM, msum, liftM, zipWithM)
 import List     (find, findIndex)
 import Maybe    (fromJust)
 
-import qualified Data.Map as Map (Map, insert, empty, lookup, member, toAscList)
+import Debug.Trace      (trace)
+
+import qualified Data.Map as Map
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
 import Control.Monad.Trans (lift)
 
 
-import SashoLib (Stack(..), (<<), ilog2, maybeLookup, myLiftM)
+import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
+                 myLiftM, concatMapM)
 import qualified Container as Cont
 
 
@@ -37,8 +40,8 @@ instance Error TypeError where
 -- For our monad type constructor, we use Either TypeError
 -- which represents failure using Left TypeError, or a
 -- successful result of type a using Right a.
--- note that we now have a type "OutMonad a", synonym for "Either TypeError a"
-type OutMonad = Either TypeError
+-- note that we now have a type "ErrMonad a", synonym for "Either TypeError a"
+type ErrMonad = Either TypeError
 
 
 
@@ -66,7 +69,7 @@ data TCState = TCS { vars   :: [Im.VarTable],
 type MyStateT = TCState
 
 
-type StateWithErr = St.StateT MyStateT OutMonad
+type StateWithErr = St.StateT MyStateT ErrMonad
 
 
 throwErr :: Int -> String -> StateWithErr a
@@ -77,7 +80,7 @@ throwErr p msg = lift $ Left $ Err p msg
 
 
 
-typeCheck :: T.Prog -> OutMonad Im.Prog
+typeCheck :: T.Prog -> ErrMonad Im.Prog
 typeCheck p = let startState = TCS { vars   = [Map.empty],
                                                consts = Map.empty,
                                                funcs  = Map.empty,
@@ -136,21 +139,33 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        -- Map to the top of the SymbolTable stack
        pushScope
        -- check the formal args
-       im_args <- mapM checkTypedName args 
+       im_args <- mapM checkTypedName args
        -- add the formal argument variables to the scope
-       mapM_ addArgVar im_args 
+       mapM_ addArgVar im_args
+       -- grab the table with just args
+       arg_tab <- peekScope
        -- add the function name as a variable
        addToVars im_t [Im.RetVar] name
        mapM checkDec decs
        im_stms <- mapM checkStm stms
        var_tab <- popScope
        -- add this function's type
-       addToTypes name (Im.FuncT im_t (map extractTyp im_args))
+       addToTypes name (Im.FuncT im_t (map snd im_args))
+       -- for the local-var initialization (mkVarInits), we need to
+       -- pass the function scope without the arg variables, hence the
+       -- Map.difference call
+       init_stms <- mkVarInits (Map.difference var_tab arg_tab)
        -- and add the actual function
-       addToFuncs name (Im.Func name (mkVarSet var_tab) im_t (map tn2var im_args) im_stms)
-    where extractTyp (Im.TypedName typ _)    = typ
-          addArgVar  (Im.TypedName typ name) = addToVars typ [Im.FormalParam] name
-          tn2var     (Im.TypedName _ name)   = (Im.VFlagged [Im.FormalParam] (Im.VSimple name))
+       addToFuncs name (Im.Func name
+                                (mkVarSet var_tab)
+                                im_t
+                                (map tn2var im_args)
+                                (init_stms ++ im_stms))
+
+    where addArgVar  (name,typ) = addToVars typ [Im.FormalParam] name
+          tn2var     (name,_)   = (Im.VFlagged [Im.FormalParam] (Im.VSimple name))
+
+
 
 -- special treatment for an Enum type declaration
 checkDec (T.TypeDecl (T.Ident name) t@(T.EnumT ids)) =
@@ -182,7 +197,10 @@ checkStm (T.SBlock decs stms) = do pushScope
                                    mapM checkDec decs
                                    new_stms <- mapM checkStm stms
                                    var_tab <- popScope
-                                   return $ Im.SBlock (mkVarSet var_tab) new_stms
+                                   init_stms <- mkVarInits var_tab
+                                   return $ Im.SBlock (mkVarSet var_tab)
+                                                      (init_stms ++ new_stms)
+
 
 checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
@@ -327,12 +345,14 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
          -- ** check: return the expression's type and value
          -- find the field in this struct's definition
     where check (Im.StructT fields) new_str =
-              do let fieldPairs = map typedName2Pair fields
-                 case lookup fieldname fieldPairs of
-                          (Just t) -> do let idx = fromJust $
-                                                   findIndex ((== fieldname) . fst)
-                                                             fieldPairs
-                                         return (t, Im.EStruct new_str idx)
+              do case lookup fieldname fields of
+                          (Just t) -> do size   <- typeLength t
+                                         
+                                         offset <-    liftM sum $
+                                                      mapM (typeLength . snd) $
+                                                      takeWhile ( (/= fieldname) . fst ) $
+                                                      fields
+                                         return (t, Im.EStruct new_str (offset,size))
                           _        -> throwErr 42 $ "in " << e << ", struct has no field "
                                                       << fieldname
 
@@ -347,7 +367,6 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
 
           check typ _              = throwErr 42 $ str << " in " << e << " is not a struct, it is " << typ
 
-          typedName2Pair (Im.TypedName t nm) = (nm, t)
 
 
 checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not a simple name"
@@ -385,10 +404,25 @@ checkExp e
 
 
 
+-- return the length, in simple types (ie Int and Bool), of a type
+typeLength :: Im.Typ -> StateWithErr Int
+typeLength t =
+    case t of
+      (Im.StructT fields)       -> mapM (typeLength . snd) fields >>=
+                                   return . sum
+      (Im.SimpleT name)         -> lookupType name >>=
+                                   typeLength
+      (Im.RedArrayT typ len)    -> typeLength typ >>=
+                                   return . (* len)
+      _                         -> return 1
+--      (ArrayT typ len_e)  = typeLength typ
+      
+                                          
+                 
 
-checkTypedName :: T.TypedName -> StateWithErr Im.TypedName
+checkTypedName :: T.TypedName -> StateWithErr (Im.Ident, Im.Typ)
 checkTypedName (T.TypedName t (T.Ident name)) = do t_new <- checkTyp t
-                                                   return (Im.TypedName t_new name)
+                                                   return (name, t_new)
 
 
 
@@ -430,6 +464,40 @@ checkLoopCounter ctx name =
          _                                        -> return ()
          
 
+-- create initialization statements for local variables
+-- needs to be in StateWithErr because of (typeLength)
+mkVarInits :: Im.VarTable -> StateWithErr [Im.Stm]
+mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
+                            concatMapM mkInit $ map (\(t,v) -> (t,Im.EVar v)) locs
+          -- create Init statements for an lval of the given type
+    where mkInit (t,lval) = trace ("mkInit " << lval << "::" << t) $
+                            case t of
+                              (Im.IntT i)          -> return [ass lval 0 t]
+                              (Im.BoolT)           -> return [ass lval (Im.lbool False) t]
+          -- for a struct, we first add an SAss for the whole struct,
+          -- using Im.EComplexInit,
+          -- and then individual SAss for each member, recursively
+                              (Im.StructT flds)    ->
+                                  do lens <-   mapM (typeLength . snd) flds
+                                     let offsets = init $ scanl (+) 0 lens
+                                     inits <- zipWithM (mkStruct lval)
+                                                       flds
+                                                       (zip offsets lens)
+                                     return $ (ass lval (Im.EComplexInit (sum lens)) t) :
+                                              concat inits
+                              (Im.SimpleT tname)  ->
+                                  do typ <- lookupType tname
+                                     mkInit (typ, lval)
+                              _  -> return []
+          ass lval val t = Im.SAss lval (Im.ExpT t val)
+          -- create a field-init statement for struct 'str', for the
+          -- given field (ie. its type, offset and length)
+          mkStruct str (_, t) (offset,len) = mkInit (t, (Im.EStruct str (offset,len)))
+
+
+
+-- extract the local variables declared below the given statement,
+-- (ie. declared in SBlock blocks)
 extractLocals :: Im.Stm -> Im.VarSet
 extractLocals stm = let (_, varsets) = runWriter (extractLocals' stm)
                     in  foldr Cont.union Cont.empty varsets
@@ -441,6 +509,7 @@ extractLocals' = Im.mapStmM f_s f_e
           f_s s                 = return s
 
           f_e                   = myLiftM id
+
 
 
 -- at the global scope, the VarTable has only one level
@@ -563,6 +632,9 @@ popScope  = do ms@(TCS {vars = vs}) <- St.get
                let scope = peek vs
                St.put (ms {vars = pop vs})
                return scope
+-- return the current top scope
+peekScope = do TCS {vars = vs} <- St.get
+               return $ peek vs
 
                
 ------------------------------

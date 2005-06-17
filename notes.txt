@@ -30,3 +30,37 @@ type Context a b = (Adj b, Node, a, Adj b)
 Links to the Node, the Node itself, a label, links from the Node.
 
 > a is the type of vertex labels, and b is the type of edge labels
+
+
+
+Thu Jun 16 23:52:00 2005
+
+recursive types are causing a hassle with the circuit generator var table being
+keyed on Var. We can only keep the gate locations of Var. but what about:
+struct Point = { int x, int y }
+struct Shoes = { int number, bool torn, Color col }
+struct Globals = { Point center, Shoes shoes, int age }
+// ...
+var Globals g;
+var Point p1;
+// ...
+g.center = p1;
+g.center.x = 0;
+
+
+POINT: var tables should be keyed on +/- what appears as an lval:
+EVar
+EStruct
+EArr
+or (stripped down) Exp in general?
+
+
+g = ...
+// ...
+
+if () {
+   var Globals g;
+   // ...
+   g.center.x = 0;
+}
+
