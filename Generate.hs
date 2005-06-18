@@ -76,6 +76,7 @@ run v p s =
                                    putStrLn $ "And now generating the circuit into " ++ cctFile
                                    let args = CG.extractInputs prog
                                        cct  = CG.genCircuit ts stms args
+--                                   mapM_ print cct
                                    writeFile cctFile(CG.showCct cct)
 
 {-

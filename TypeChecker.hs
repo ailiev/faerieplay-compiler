@@ -159,7 +159,7 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        addToFuncs name (Im.Func name
                                 (mkVarSet var_tab)
                                 im_t
-                                (map tn2var im_args)
+                                im_args
                                 (init_stms ++ im_stms))
 
     where addArgVar  (name,typ) = addToVars typ [Im.FormalParam] name
@@ -296,6 +296,7 @@ intlitType = Im.IntT . Im.ELit . Im.LInt
 bitsize :: (Integral a, Integral b) => a -> b
 bitsize = (max 1) . ilog2
 
+
 -- for all these Exp's, want to figure out which are const and 
 checkExp e@(T.EIdent (T.Ident nm)) =
     do ent <- extractEnt e nm
@@ -303,13 +304,19 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                 -- same as a literal int!
                 EntConst i         -> checkExp (T.EInt i)
                 -- a var is usually variable, but loop counters will be static
-                EntVar (typ,v) -> return $ annot typ $ if elem Im.LoopCounter (Im.vflags v)
-                                                       then Im.EStatic (Im.EVar v)
-                                                       else Im.EVar v
-                _                  -> throwErr 42 $ "Identifier " << nm << " is illegal in expression " << e
+                EntVar (typ,v)
+                    | elem Im.RetVar (Im.vflags v) ->
+                        throwErr 42 $ "Cannot take value of return variable " << v
+                    | otherwise ->
+                        return $ annot typ $ if elem Im.LoopCounter (Im.vflags v)
+                                             then Im.EStatic (Im.EVar v)
+                                             else Im.EVar v
+                _                  ->
+                    throwErr 42 $ "Identifier " << nm << " is illegal in expression " << e
 
 
-checkExp e@(T.EInt i)          = return $ annot (intlitType (bitsize i))
+
+checkExp e@(T.EInt i)        = return $ annot (intlitType (bitsize i))
                                                 (fromInteger i)
 
 checkExp T.ETrue             = return $ annot Im.BoolT (Im.ELit $ Im.LBool True)
@@ -375,10 +382,11 @@ checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not
 -- to check a function call:
 -- - check and get types for all the args
 -- - compare those to the function's formal params
--- TODO: not finished with the checking here!
+-- TODO: not finished with the checking here! need to check that the
+-- actual args in the call have the correct types
 checkExp e@(T.EFunCall (T.Ident fcnName) args) =
-    do (Im.Func _ _ t _ _) <- extractFunc e fcnName
-       im_args <- mapM (checkExp . extrExp) args
+    do (Im.Func _ _ t _ _)      <- extractFunc e fcnName
+       im_args                  <- mapM (checkExp . extrExp) args
        return (Im.ExpT t (Im.EFunCall fcnName im_args))
     where extrExp (T.FunArg e) = e
 

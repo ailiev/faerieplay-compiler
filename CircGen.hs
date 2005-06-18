@@ -9,7 +9,7 @@ module CircGen (
 
 
 import Monad (foldM)
-import Maybe (fromJust, isJust)
+import Maybe (fromJust, isJust, fromMaybe)
 import List
 
 import Debug.Trace      (trace)
@@ -18,17 +18,18 @@ import Data.Graph.Inductive.Graph               ((&))
 import qualified Data.Graph.Inductive.Graph     as Gr
 import qualified Data.Graph.Inductive.Graphviz  as Graphviz
 import qualified Data.Graph.Inductive.Tree      as TreeGr
+import qualified Data.Graph.Inductive.Query.DFS as GrDFS
 import qualified Data.Map                       as Map
 import qualified Control.Monad.State            as St
 
-import SashoLib (projSnd, projFst, modifyListHead, Stack(..),
-                 maybeLookup, (<<), mapTuple2, (...), replicateM,
-                 maybeAdjust, mapOne, concatMapM)
+import SashoLib
+
 import qualified Container as Cont
 
 import Intermediate as Im hiding (VarTable)
 
 
+data GateFlags = Output
 
 data Op =
     Bin Im.BinOp                -- binary operator
@@ -60,17 +61,27 @@ data Gate = Gate Int            -- the gate number
                                 -- right order. may do away with this
                                 -- if the graph can mainatain
                                 -- edge-order
+                 [GateFlags]
                  GateDoc        -- some documentation, eg. a var name
 
-type GateDoc = Maybe Exp
+type GateDoc = Maybe [Exp]
 
+
+setFlags newfl (Gate g1 g2 g3 g4 fl    g6) =
+               (Gate g1 g2 g3 g4 newfl g6)
+
+setGateType newt        (Gate g1 typ  g3 g4 g5 g6) =
+                        (Gate g1 newt g3 g4 g5 g6)
 
 
 -- NOTE: the gate number is the same as the Node value in the Graph
 -- (which is also an Int)
 -- helper to make a labelled Node from a Gate
-gate2node :: Gate -> Gr.LNode Gate
-gate2node g@(Gate i _ _ _ _) = (i,g)
+gate2lnode :: Gate -> Gr.LNode Gate
+gate2lnode g@(Gate i _ _ _ _ _) = (i,g)
+
+-- just the node number of a Gate
+gateNode = fst . gate2lnode
 
 
 
@@ -97,16 +108,19 @@ type CircuitCtx = Gr.Context Gate ()
 
 
 -- the main function here
+{-
 genCircuit :: TypeTable ->      -- the type table
               [Stm] ->          -- the Unroll'd [Stm]
               [TypedName] ->    -- parameters of main()
               Circuit           -- the resulting circuit
+-}
 
 genCircuit type_table stms args =
     let startState = ([Map.empty], 0)
-        (out, st) = St.runState (genCircuitM type_table stms args)
-                                startState
-    in out
+        (circ, st) = St.runState (genCircuitM type_table stms args)
+                                 startState
+        top_circ   = GrDFS.topsort' circ
+    in circ
 
 
 
@@ -121,7 +135,7 @@ genCircuitM type_table stms args =
 
 genInputs :: TypeTable -> [TypedName] -> OutMonad Circuit
 genInputs type_table names = do gatess <- mapM (createInputGates type_table True) names
-                                return (Gr.mkGraph (map gate2node (concat gatess)) [])
+                                return (Gr.mkGraph (map gate2lnode (concat gatess)) [])
 
 
 -- fully expand a type, recursing into complex types
@@ -142,31 +156,38 @@ expandType type_table t =
 -- we'll only insert mappings into the VarTable at the top level, not
 -- in recursive calls (then we'd be inserting struct field names as
 -- actual vars)
-createInputGates type_table toplevel (name, typ) =
-    let recurse = createInputGates type_table
+
+createInputGates :: TypeTable -> Bool -> TypedName -> OutMonad [Gate]
+createInputGates type_table addvars (name, typ) =
+    let recurse         = createInputGates type_table
+        var             = add_vflags [FormalParam] (VSimple name)
     in  case typ of
       (StructT fields)
-                -> concatMapM (recurse False) fields
+                -> do gates <- concatMapM (recurse False) fields
+                      let is = map gateNode gates
+                      if addvars then insertVar var is else return ()
+                      return gates
 
-      (SimpleT name)
-                -> let typ' = fromJust $ Map.lookup name type_table
+      (SimpleT tname)
+                -> let typ' = fromJust $ Map.lookup tname type_table
                    in  recurse True (name, typ')
 
       -- IntT, BoolT, ArrayT (for dynamic arrays)
       _         -> do i <- nextInt
-                   -- this is a formal parameter, of main()
-                      let var = add_vflags [FormalParam] (VSimple name)
-                      if toplevel then insertVar var [i] else return ()
-                      return [Gate i
-                                   (expandType type_table typ)
-                                   Input
-                                   []
-                                   (Just $ EVar var)]
+                      if addvars
+                        then trace ("inserting " << var) $ insertVar var [i]
+                        else return ()
+                      return [mkGate type_table i typ [EVar var]]
+
+    where mkGate type_table i typ doc_exp = Gate i
+                                                 (expandType type_table typ)
+                                                 Input
+                                                 []
+                                                 []
+                                                 (Just $ doc_exp)
 
 
 
-createStructFieldInput (name, typ) =
-    createInputGates 
 
 
 -- this just adds a dummy entry of the correct size in the var table for this
@@ -185,22 +206,46 @@ listUpdate (offset,len) news l = (take offset l) ++
                                  (drop (offset + len) l)
 
 
-genExpWithDoc c e e_doc = do (c', res) <- genExp' c e
-                             let (c'', nodes) = case res of
-                                                  (Left ctx) ->
-                                                  -- we got a Context back, so
-                                                  -- add the doc to the gate
-                                                      let ctx' = addGateDoc e_doc ctx
-                                                      in  (ctx' & c', [getCtxNode ctx'])
-                                                  (Right nodes) ->
-                                                  -- no new gate generated, so no
-                                                  -- doc to add
-                                                      (c', nodes)
-                             return (c'', nodes)
+-- get the gates corresponding to expression 'e', if necessary adding
+-- new gates to the circuit, and add e_doc as the annotation of that
+-- gate, if it is newly generated
+-- returns the new circuit, and the gates where 'e' is
+-- also have the gates pass through a 'ghook' which may update them, eg. add
+-- flags
+genExpWithDoc c ghook e e_doc =
+    do (c', res) <- genExp' c e
+       let (c'', nodes) = case res of
+                            (Left ctx) ->
+                            -- we got a Context back, so
+                            -- add the doc to the gate, and apply the
+                            -- hook
+                                let gate = Gr.lab' ctx
+                                    gate' = processGate gate
+                                    ctx' = updateCtxLab ctx gate'
+                                in  (ctx' & c', [Gr.node' ctx'])
 
-    where addGateDoc var ctx@(c1, c2, Gate g1 g2 g3 g4 _         , c3) =
-                             (c1, c2, Gate g1 g2 g3 g4 (Just var), c3)
-          getCtxNode (c1, node, c3, c4) = node
+                            (Right nodes) ->
+                                -- no new gate generated, but we will
+                                -- update the doc and apply the hook
+                                -- FIXME: if ghook is a noop this will
+                                -- do a lot of graph reconstruction for nothing
+                                let c'' = foldl (updateLabel processGate)
+                                                c'
+                                                nodes
+                                              
+                                in  (c'', nodes)
+       return (c'', nodes)
+
+    where addGateDoc exp (Gate g1 g2 g3 g4 g5 doc) =
+                          Gate g1 g2 g3 g4 g5 new_doc
+              where new_doc = applyToMaybe (push exp) [exp] doc
+          processGate g = let g'  = g `fromMaybe` (ghook g)
+                              g'' = addGateDoc e_doc g'
+                          in  g''
+
+
+updateCtxLab (ins,node,label,    outs)  new_label = 
+             (ins,node,new_label,outs)
 
 
 -- get the offset of an expression, relative to the simple variable
@@ -223,14 +268,22 @@ genStm circ stm =
       s@(SAss lval (ExpT _ (EComplexInit size))) -> do genComplexInit lval size
                                                        return circ
 
-      -- TODO: the lval expression could be EArr.
-      (SAss lval@(EVar var) exp)     -> do (c', nodes) <- genExpWithDoc circ exp lval
-                                           insertVar var nodes
-                                           return c'
+      (SAss lval@(EVar var) exp) ->
+          do (c', nodes) <- genExpWithDoc circ
+                                          (addOutputFlag var)
+                                          exp
+                                          lval
+             insertVar var nodes
+             return c'
 
       s@(SAss lval@(EStruct str_e (off,len)) val) ->
-          do (c', gates) <- genExpWithDoc circ val lval
-             let (rv, off_e) = getRootvarOffset str_e
+             -- get the gates for this 'val', and mark them as holding
+             -- this lval from now
+          do let (rv, off_e) = getRootvarOffset str_e
+             (c', gates) <- genExpWithDoc circ
+                                          (addOutputFlag rv)
+                                          val
+                                          lval
              updateVar (listUpdate (off_e + off,len) gates) rv
              return c'
 
@@ -238,6 +291,7 @@ genStm circ stm =
       (SAss (ExpT _ lval) val) -> genStm circ (SAss lval val)
              
 
+      -- TODO: the lval expression could be EArr.
 
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
       (SIfElse test@(EVar testVar)
@@ -263,8 +317,11 @@ genStm circ stm =
              return circ''
 
       s -> error $ "Unknow genStm on " << s
-
-
+    where addOutputFlag var gate =
+              case strip_var var of
+                (VSimple "main") -> trace ("adding outflag in stm " << stm) $
+                                    Just $ setFlags [Output] gate
+                _                -> Nothing
 
 
 
@@ -272,8 +329,9 @@ genStm circ stm =
 -- this node is not in the graph
 updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
 updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
-                            (e_in, node', lab, e_out)   = fromJust mctx
+                            (e_in, node', lab, e_out)   = fromJustMsg "updateLabel" mctx
                         in  (e_in, node', f lab, e_out) & gr'
+
                             
 
 -- generate the gates needed when exiting a conditional block---to
@@ -335,7 +393,7 @@ genCondExit testGate
 
           mkCtx' i t (true_gate,false_gate) =
               let src_gates = [testGate, true_gate, false_gate]
-              in  mkCtx (Gate i t Select src_gates Nothing)
+              in  mkCtx (Gate i t Select src_gates [] Nothing)
 
 
 -- take a list of pairs, and where a pair is equal, pass on that value, but
@@ -361,7 +419,7 @@ getSelType gr (node1, node2)
         [Im.BoolT,   Im.BoolT  ]  -> Im.BoolT
         [Im.IntT i1, Im.IntT i2]  -> Im.IntT $ Im.BinOp Max i1 i2
 
-    where getType (Gate _ t _ _ _) = t
+    where getType (Gate _ t _ _ _ _) = t
 
 
 
@@ -390,37 +448,29 @@ genExp' c exp =
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1', [gate1]) <- genExp c   e1
                               (c2', [gate2]) <- genExp c1' e2
-                              let ctx = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] Nothing
+                              let ctx = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] [] Nothing
                               return (c2', Left ctx)
+
       (UnOp op e1)      -> do i <- nextInt
                               (c1', [gate1]) <- genExp c   e1
-                              let ctx = mkCtx $ Gate i VoidT (Un op) [gate1] Nothing
+                              let ctx = mkCtx $ Gate i VoidT (Un op) [gate1] [] Nothing
                               return (c1', Left ctx)
-      (EVar var)        -> do mb_gates <- getsVars $ maybeLookup var
-                              case mb_gates of
-                                (Just gates)    -> return (c, Right gates)
-    -- an uninitialized reference! FIXME: for now just init to literal
-    -- zero (ie. 42) and return the new gate number
-                                Nothing         -> error "Unitialized var!"
-{-
-do i <- nextInt
-                                                      let ctx = mkCtx $ Gate i
-                                                                             Im.VoidT
-                                                                             (Lit (LInt 42))
-                                                                             []
-                                                                             (Just var)
-                                                      insertVar var [i]
-                                                      return (c, Left ctx)
--}
+
+      (EVar var)        -> do gates <- getsVars $
+                                       fromJustMsg "CircGen: Lookup EVar" .
+                                       maybeLookup var
+                              return (c, Right gates)
+
       (ELit l)          -> do i <- nextInt
-                              let ctx = mkCtx (Gate i VoidT (Lit l) [] Nothing)
+                              let ctx = mkCtx (Gate i VoidT (Lit l) [] [] Nothing)
                               return (c, Left ctx)
+
       -- here we try to update the Typ annotation on the Gate
       -- generated recursively
       (ExpT typ e)      -> do (c', res) <- genExp' c e
                               case res of
-                                (Left          (x, node, Gate i _   op srcs doc, z)) ->
-                                    let ctx' = (x, node, Gate i typ op srcs doc, z)
+                                (Left          (c1, c2, gate,                 c3)) ->
+                                    let ctx' = (c1, c2, setGateType typ gate, c3)
                                     in  return (c', Left ctx')
                                 (Right node)    ->
                                         return (c', Right node)
@@ -438,10 +488,10 @@ uAdj n = ((), n)
 
 
 -- make a graph Context for this operator, node number and source gates
-mkCtx g@(Gate node t op srcs doc) = let ctx = (map uAdj srcs,
-                                               node,
-                                               g,
-                                               []) -- no outgoing edges
+mkCtx g@(Gate node _ _ srcs _ _) = let ctx = (map uAdj srcs,
+                                              node,
+                                              g,
+                                              []) -- no outgoing edges
                                     in ctx
 
 
@@ -451,8 +501,8 @@ mkCtx g@(Gate node t op srcs doc) = let ctx = (map uAdj srcs,
 -- for now invent a type :)
 extractInputs (Prog pname (ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-    in  map (var2TN . strip_vflags) form_args
-    where var2TN (VSimple name) = ( name, (IntT 32) )
+    in  form_args
+
 
 
 --------------------
@@ -495,16 +545,25 @@ popScope  = do scope <- getsVars peek
 
 
 fromJustMsg msg (Just x) = x
-fromJustMsg msg Nothing  = error $ "fromJust Nothing! " << msg
+fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 
 
 instance Show Gate where
-    show (Gate i typ op srcs doc) = i << ": "
-                                      << op << " [" << typ << "] "
-                                      << (case doc of
-                                            Just var   -> "(" << var << ")"
-                                            Nothing    -> "")
+    show (Gate i typ op srcs flags doc) = i << (if not (null flags) then "#" << show flags else "") 
+                                            << ": "
+                                            << op << " [" << typ << "] "
+                                            << srcs
+                                            << (case doc of
+                                                  Just exps  -> " ~" << exps << "~"
+                                                  Nothing    -> "")
+
+instance Show GateFlags where
+    show Output = "o"
+
+instance Show [GateFlags] where
+    show flags = concatMap show flags
+
 
 instance Show Op where
     show (Bin op) = show op

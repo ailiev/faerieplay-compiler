@@ -15,16 +15,18 @@ program Test4 {
 
 
 
-    function void main (Key k) {
+    function Point main (Point p) {
         var Int<16`> k2, k3, k4;
 
         var Point pt;
+
+	pt = p;
 
         k3 = 0;
 	
         pt.x = 47;
         
-        if (k < 16) {
+        if (p.x < 16) {
             for (i = 1 to 5) {
                 k3 = k3 + k2;
             }
@@ -38,8 +40,10 @@ program Test4 {
 		k3 = f(k3);
 	}
 */
+	k3 = pt.x + pt.y;
+	
+        main = pt;
 
-        k4 = k3 + 7;
     }
     
 

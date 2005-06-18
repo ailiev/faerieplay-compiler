@@ -97,12 +97,13 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
               do (Func name locals t form_args stms) <- extractFunc nm
                  -- replace all local variables with Scoped ones, in stms
                  let stms'      = map (scopeVars locals scope) stms
-                     form_args' = map (addScope scope) form_args
+                     form_vars  = map (\(name,typ) -> addScope scope $ VSimple name)
+                                      form_args
                  -- substitute actual values for all the formal params, in all
                  -- stms
                  -- substs is a list of subst partial applications:
                  -- substs :: [Stm -> Stm]
-                     substs     = [subst farg arg | farg <- form_args', arg <- args]
+                     substs     = [subst fvar arg | fvar <- form_vars, arg <- args]
                      stms''     = map (\stm -> foldl (flip ($)) stm substs) stms'
                      -- append an assignment to the target var
                      stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]

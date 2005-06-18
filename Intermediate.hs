@@ -33,8 +33,13 @@ type VarSet = [Var]
 -- - return Typ
 -- - list of formal params
 -- - the list of statements
-data Func = Func Ident VarSet Typ [Var] [Stm]
+data Func = Func Ident          -- func name
+                 VarSet         -- local vars
+                 Typ            -- return type
+                 [TypedName]    -- arguments
+                 [Stm]          -- and the function body
             deriving (Eq,Ord)
+
 
 -- and the full name for an entity: its original name and an optional qualifier
 type EntName = String
@@ -255,6 +260,9 @@ strip_vflags v = case stripScope v of
                                    (VFlagged _ v)       -> v
                                    v                    -> v
 
+-- complete strip
+strip_var = strip_vflags . stripScope
+
 
 
 
@@ -402,13 +410,16 @@ docProg (Prog id (ProgTables {funcs=fs,
                                                       vcat (map (docPair docTyp) typList),
                                                       text "",
                                                       text "Functions:",
-                                                      vcat (intersperse (text "") $ map docFunc funcList)]
+                                                      vcat (intersperse (text "") $
+                                                            map docFunc funcList)]
     where collect key val accum = ((key,val) : accum)
           docPair sf (n,t)      = sep [text n, equals, sf t]
           docVar (t,flags)      = sep [docTyp t, parens (text $ show flags)]
 
 docFunc (Func name vars t args stms) = vcat [text "function" <+> (text name) <+>
-                                             (parens $ cat $ punctuate comma (map docVar args)),
+                                             (parens $ cat $
+                                                       punctuate comma
+                                                                 (map docTypedName args)),
                                              nest 2 (vcat (docVarSet vars :
                                                            text "-------------" :
                                                            (map docStm stms))),
