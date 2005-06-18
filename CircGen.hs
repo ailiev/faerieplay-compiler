@@ -8,7 +8,7 @@ module CircGen (
                ) where
 
 
-import Monad (foldM)
+import Monad (foldM, mplus)
 import Maybe (fromJust, isJust, fromMaybe)
 import List
 
@@ -207,11 +207,16 @@ listUpdate (offset,len) news l = (take offset l) ++
 
 
 -- get the gates corresponding to expression 'e', if necessary adding
--- new gates to the circuit, and add e_doc as the annotation of that
--- gate, if it is newly generated
+-- new gates to the circuit, and add e_doc as the last annotation of
+-- that gate
 -- returns the new circuit, and the gates where 'e' is
--- also have the gates pass through a 'ghook' which may update them, eg. add
+-- also have the gates pass through a hook which may update them, eg. add
 -- flags
+genExpWithDoc :: Circuit ->
+                 Maybe (Gate -> Gate) ->
+                 Exp ->
+                 Exp ->
+                 OutMonad (Circuit, [Gr.Node])
 genExpWithDoc c ghook e e_doc =
     do (c', res) <- genExp' c e
        let (c'', nodes) = case res of
@@ -239,11 +244,11 @@ genExpWithDoc c ghook e e_doc =
     where addGateDoc exp (Gate g1 g2 g3 g4 g5 doc) =
                           Gate g1 g2 g3 g4 g5 new_doc
               where new_doc = applyToMaybe (push exp) [exp] doc
-          processGate g = let g'  = g `fromMaybe` (ghook g)
+          processGate g = let g'  = maybeApply ghook g
                               g'' = addGateDoc e_doc g'
                           in  g''
 
-
+-- update the label of a graph Context
 updateCtxLab (ins,node,label,    outs)  new_label = 
              (ins,node,new_label,outs)
 
@@ -322,15 +327,15 @@ genStm circ stm =
              return circ''
 
       s -> error $ "Unknow genStm on " << s
-    where addOutputFlag var gate =
+    where addOutputFlag var =
               case strip_var var of
-                (VSimple "main") -> trace ("adding outflag in stm " << stm) $
-                                    Just $ setFlags [Output] gate
+                (VSimple "main") -> Just (\gate -> setFlags [Output] gate)
                 _                -> Nothing
 
 
 -- see if this var is an output var, and if so remove the Output flag
 -- on its current gates
+-- Called when the location of a var is about to be updated
 -- optionally an offset and length to limit the flag removal to some
 -- of the gates, in case only part of a complex output var is being
 -- modified.
