@@ -305,8 +305,11 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                 EntConst i         -> checkExp (T.EInt i)
                 -- a var is usually variable, but loop counters will be static
                 EntVar (typ,v)
+{-
+-- this causes a problem when checkExp is called in an lval context                    
                     | elem Im.RetVar (Im.vflags v) ->
                         throwErr 42 $ "Cannot take value of return variable " << v
+-}
                     | otherwise ->
                         return $ annot typ $ if elem Im.LoopCounter (Im.vflags v)
                                              then Im.EStatic (Im.EVar v)

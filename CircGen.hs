@@ -263,33 +263,38 @@ getRootvarOffset (EArr _ _) = error "getRootvarOffset (EArr ) unimplemented"
 genStm :: Circuit -> Stm -> OutMonad Circuit
 genStm circ stm =
     case stm of
+      -- do away with lval type annotations for now
+      (SAss (ExpT _ lval) val) -> genStm circ (SAss lval val)
+             
       -- this is a message from the typechecker that a Struct or such
       -- will be coming along just now.
-      s@(SAss lval (ExpT _ (EComplexInit size))) -> do genComplexInit lval size
-                                                       return circ
+      (SAss lval (ExpT _ (EComplexInit size))) ->
+          do genComplexInit lval size
+             return circ
 
       (SAss lval@(EVar var) exp) ->
-          do (c', nodes) <- genExpWithDoc circ
+          do circ' <- checkOutputVars circ var Nothing
+             (c', nodes) <- genExpWithDoc circ'
                                           (addOutputFlag var)
                                           exp
                                           lval
              insertVar var nodes
              return c'
 
-      s@(SAss lval@(EStruct str_e (off,len)) val) ->
+      (SAss lval@(EStruct str_e (off,len)) val) ->
              -- get the gates for this 'val', and mark them as holding
              -- this lval from now
           do let (rv, off_e) = getRootvarOffset str_e
-             (c', gates) <- genExpWithDoc circ
+                 this_off    = off_e + off
+             c2 <- checkOutputVars circ rv (Just (this_off,len))
+             (c', gates) <- genExpWithDoc c2
                                           (addOutputFlag rv)
                                           val
                                           lval
-             updateVar (listUpdate (off_e + off,len) gates) rv
+             updateVar (listUpdate (this_off,len) gates) rv
              return c'
 
-      -- do away with lval type annotations for now
-      (SAss (ExpT _ lval) val) -> genStm circ (SAss lval val)
-             
+
 
       -- TODO: the lval expression could be EArr.
 
@@ -324,13 +329,38 @@ genStm circ stm =
                 _                -> Nothing
 
 
+-- see if this var is an output var, and if so remove the Output flag
+-- on its current gates
+-- optionally an offset and length to limit the flag removal to some
+-- of the gates, in case only part of a complex output var is being
+-- modified.
+checkOutputVars :: Circuit -> Var -> Maybe (Int,Int) -> OutMonad Circuit
+checkOutputVars c var mb_gate_loc
+    | strip_var var == VSimple "main" =
+        -- remove the output flags there
+        do vgates <- getsVars $
+                     fromJustMsg "CircGen: genStm: lookup main" .
+                     maybeLookup var
+           -- take a slice of the gates if mb_gate_loc is not Nothing
+           let vgates' = vgates `fromMaybe`
+                         (do (off,len) <- mb_gate_loc
+                             return $ take len $ drop off vgates)
+               c' = foldl (updateLabel (setFlags []))
+                          c
+                          vgates'
+           return c'
+    | otherwise =
+        return c
 
--- update the label for a given node in a graph. will call error if
--- this node is not in the graph
+
+-- update the label for a given node in a graph, if this label is present
 updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
 updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
-                            (e_in, node', lab, e_out)   = fromJustMsg "updateLabel" mctx
-                        in  (e_in, node', f lab, e_out) & gr'
+                        in  case mctx of
+                              Nothing                           -> gr
+                              Just (e_in, node', lab  , e_out)  ->
+                                   (e_in, node', f lab, e_out) & gr'
+
 
                             
 
@@ -480,6 +510,8 @@ genExp' c exp =
                               return (c', Right $ take len $ drop offset gates)
 
       (EStatic e)       -> genExp' c e
+
+      e                 -> error $ "CircGen: unknown expression " << e
 -- TODO: EArr
                               
              

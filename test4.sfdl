@@ -42,7 +42,7 @@ program Test4 {
 */
 	k3 = pt.x + pt.y;
 	
-        main = pt;
+        main.x = pt.x;
 
     }
     
