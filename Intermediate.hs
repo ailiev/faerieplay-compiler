@@ -7,12 +7,16 @@ import Text.PrettyPrint
 
 import List (intersperse)
 
+import Data.Bits ((.&.), (.|.), complement)
+import Control.Monad.Error (Error, throwError)
 import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
 
-import SashoLib (myLiftM, pop, push)
+import SashoLib
 import qualified Container as Cont
+
+import Common (ErrMonad, MyError(..))
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -93,7 +97,7 @@ data Typ =
  | ArrayT Typ Exp
  | SimpleT Ident
  | FuncT Typ [Typ]
- | RedIntT Integer              -- RedIntT =def IntT . ELit . LInt
+ | RedIntT Int                  -- RedIntT =def IntT . ELit . LInt
  | RedArrayT Typ Int            -- similar
   deriving (Eq,Ord)
 
@@ -262,6 +266,91 @@ strip_vflags v = case stripScope v of
 
 -- complete strip
 strip_var = strip_vflags . stripScope
+
+
+
+
+
+-----------------------------------
+-- evaluation of static expressions
+-----------------------------------
+
+evalStatic :: Exp -> ErrMonad Integer
+evalStatic e = case e of
+                      (BinOp op e1 e2)  -> do [i1,i2] <- mapM evalStatic [e1,e2]
+                                              let realop = transIntOp op
+                                              return $ i1 `realop` i2
+
+                      (UnOp  op e1)     -> do i1 <- evalStatic e1
+                                              let realop = transIntUnOp op
+                                              return $ realop i1
+
+                      (ELit l)          -> evalLit l
+                      (ExpT _ e)        -> evalStatic e
+                      (EStatic e)       -> evalStatic e
+                      _                 -> throwError $ Err 42 $ e << " is not static!"
+
+
+evalLit (LInt i)  = return i
+evalLit (LBool b) = return $ toInteger $ fromEnum b
+
+{-
+-- evalStatic :: Exp -> ErrMonad Exp
+evalStatic = mapExpM f
+    where f e =
+              case e of
+                (BinOp op (ELit l1) (ELit l2))  -> evalBinOp op l1 l2
+                (UnOp  op (ELit l1))            -> evalUnOp op l1
+                (ELit l)                        -> e
+                (EGetBit (ELit (LInt x))
+                         (ELit (LInt i)))       -> fromIntegral $ testBit x i
+                EStatic e                       -> e
+                ExpT e                          -> e
+                e                               -> throwErr 42 $ "Static expression " << e
+                                                                 << " is not static"
+
+          evalBinOp op (LInt i1)  (LInt i2)     = (transIntOp op) i1 i2
+          evalBinOp op (LBool b1) (LBool b2)    = (transBoolOp op) b1 b2
+          evalUnOp  op (LBool b1)               = (transBoolUnOp op) b1
+
+-}
+
+transIntOp op = case op of
+                        Plus    -> (+)
+                        Minus   -> (-)
+                        Times   -> (*)
+                        BAnd    -> (.&.)
+                        BOr     -> (.|.)
+{-
+                        Eq      -> (==)
+                        Gt     -> (>)
+                        Lt     -> (<)
+                        GtEq   -> (>=)
+-}
+                        Max     -> max
+
+-- FIXME: this is confused - these operators do return Bool, but not
+-- all of them take only Bool
+transBoolOp op = case op of
+                         Or     -> (||)
+                         And    -> (&&)
+                         Eq     -> (==)
+                         Gt     -> (>)
+                         Lt     -> (<)
+                         GtEq   -> (>=)
+
+transBoolUnOp op = case op of
+                           Not  -> not
+
+transIntUnOp  op = case op of
+                           BNot -> complement
+                           Neg  -> negate
+                           Log2 -> ilog2
+                           Bitsize -> (max 1) . ilog2
+
+
+
+
 
 
 

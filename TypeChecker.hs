@@ -15,6 +15,7 @@ import Control.Monad.Writer (Writer, runWriter, tell)
 import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
 import Control.Monad.Trans (lift)
 
+import Common (MyError(..), ErrMonad)
 
 import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
                  myLiftM, concatMapM)
@@ -28,20 +29,7 @@ import qualified SFDL.Print as Print
 import qualified Intermediate as Im
 
 
--- This is the type of our type error representation.
-data TypeError = Err {line::Int, reason::String} deriving (Show)
-
--- We make it an instance of the Error class
-instance Error TypeError where
-  noMsg    = Err 0 "Type error"
-  strMsg s = Err 0 s
-
-
--- For our monad type constructor, we use Either TypeError
--- which represents failure using Left TypeError, or a
--- successful result of type a using Right a.
--- note that we now have a type "ErrMonad a", synonym for "Either TypeError a"
-type ErrMonad = Either TypeError
+type TypeError = MyError
 
 
 
@@ -246,6 +234,10 @@ checkStm s@(T.SIfElse cond stm1 stm2) =
 ---------------
 -- checkTyp translates to Im.Typ, and does cursory checking to make
 -- sure referenced type names are defined already
+-- computes the sizes of Int and Array, which should be statically
+-- computable at this stage
+-- TODO: when we consider .bitSize etc. expressions, will need to
+-- delay the computation of type sizes till Unroll
 ---------------
 checkTyp :: T.Typ -> StateWithErr Im.Typ
 
@@ -254,18 +246,22 @@ checkTyp (T.StructT fields)     = do im_fields <- mapM checkTypedName fields
                                     
 checkTyp (T.ArrayT t sizeExp)   = do im_t <- checkTyp t
                                      im_size <- checkExp sizeExp
-                                     return (Im.ArrayT im_t im_size)
+                                     int_size <- lift $ Im.evalStatic im_size
+                                     return (Im.ArrayT im_t (Im.lint int_size))
 
 checkTyp (T.SimpleT (T.Ident name)) = do lookupType name
                                          return (Im.SimpleT name)
                                           
 checkTyp (T.IntT i)             = do new_i <- checkExp i
-                                     return (Im.IntT new_i)
--- FIXME: this should only occur in the context of function parameters:
+                                     int_i <- lift $ Im.evalStatic new_i
+                                     return $ intlitType int_i
+-- FIXME: this should only occur in the context of function
+-- parameters, should check it:
 checkTyp (T.GenIntT)            = return Im.GenIntT
 checkTyp T.BoolT                = return Im.BoolT
 checkTyp T.VoidT                = return Im.VoidT
--- do a partial processing of EnumT, without sticking its name in there
+-- do a partial processing of EnumT, without sticking its name in
+-- there, this will be done by the parent checkDec
 checkTyp (T.EnumT ids)          = return (Im.EnumT "" (bitsize $ length ids))
 
 
@@ -280,6 +276,14 @@ expandTyp t                     = return t
 
 
 
+-- type of a literal int
+intlitType = Im.IntT . Im.lint
+
+-- the bitsize of an integer is at least one
+bitsize :: (Integral a, Integral b) => a -> b
+bitsize = (max 1) . ilog2
+
+
 ----------
 -- checkExp will always return an annotated Exp (constructed with ExpT),
 -- which can then be matched on
@@ -288,13 +292,6 @@ expandTyp t                     = return t
 -- ::::::::::::::::
 checkExp :: T.Exp -> StateWithErr Im.Exp
 -- ::::::::::::::::
-
--- type of a literal int
-intlitType = Im.IntT . Im.ELit . Im.LInt
-
--- the bitsize of an integer is at least one
-bitsize :: (Integral a, Integral b) => a -> b
-bitsize = (max 1) . ilog2
 
 
 -- for all these Exp's, want to figure out which are const and 

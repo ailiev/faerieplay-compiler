@@ -17,22 +17,13 @@ import qualified Data.Map as Map
 import SashoLib (maybeLookup, (<<), ilog2, unfoldrM, Stack(..))
 import qualified Container as Cont
 
+import Common
 import Intermediate
 import HoistStms hiding (popScope, pushScope)
 
 import qualified TypeChecker as Tc
 
 
-
--- This is the type of our type error representation.
-data MyError = Err {line::Int, reason::String} deriving (Show)
-
--- We make it an instance of the Error class
-instance Error MyError where
-  noMsg    = Err 0 "Type error"
-  strMsg s = Err 0 s
-
-type ErrMonad = Either MyError
 
 
 
@@ -208,70 +199,6 @@ extractFunc name = do ProgTables {funcs=fs} <- St.gets getsPT
                             _           -> throwErr 42 $ "Unroll.extractFunc failed!"
 
 
-
-evalStatic :: Exp -> ErrMonad Integer
-evalStatic e = case e of
-                      (ELit l)          -> evalLit l
-                      (ExpT _ e)        -> evalStatic e
-                      (EStatic e)       -> evalStatic e
-                      _                 -> throwError $ Err 42 "Not static!"
-
-
-evalLit (LInt i)  = return i
-evalLit (LBool b) = return $ toInteger $ fromEnum b
-
-{-
--- evalStatic :: Exp -> ErrMonad Exp
-evalStatic = mapExpM f
-    where f e =
-              case e of
-                (BinOp op (ELit l1) (ELit l2))  -> evalBinOp op l1 l2
-                (UnOp  op (ELit l1))            -> evalUnOp op l1
-                (ELit l)                        -> e
-                (EGetBit (ELit (LInt x))
-                         (ELit (LInt i)))       -> fromIntegral $ testBit x i
-                EStatic e                       -> e
-                ExpT e                          -> e
-                e                               -> throwErr 42 $ "Static expression " << e
-                                                                 << " is not static"
-
-          evalBinOp op (LInt i1)  (LInt i2)     = (transIntOp op) i1 i2
-          evalBinOp op (LBool b1) (LBool b2)    = (transBoolOp op) b1 b2
-          evalUnOp  op (LBool b1)               = (transBoolUnOp op) b1
-
-
-transIntOp op = case op of
-                        Plus    -> (+)
-                        Minus   -> (-)
-                        Times   -> (*)
-                        BAnd    -> (.&.)
-                        BOr     -> (.|.)
-                        Eq      -> (==)
-                        Gt     -> (>)
-                        Lt     -> (<)
-                        GtEq   -> (>=)
-                        Max     -> max
-
-transBoolOp op = case op of
-                         Or     -> (||)
-                         And    -> (&&)
-                         Eq     -> (==)
-                         Gt     -> (>)
-                         Lt     -> (<)
-                         GtEq   -> (>=)
-
-transBoolUnOp op = case op of
-                           Not  -> not
-
-transIntUnOp  op = case op of
-                           BNot -> complement
-                           Neg  -> negate
-                           Log2 -> ilog2
-                           Bitsize -> (max 1) . ilog2
-                         
-
-
--}
 
 
 --unrollStms =  unrollFor

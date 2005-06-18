@@ -3,6 +3,8 @@
 program Test4 {
 
     type Key = Int<16`>;
+
+    const PI = 4;
     
     type Point = struct {
 	Int<16`> x,
@@ -27,7 +29,7 @@ program Test4 {
         pt.x = 47;
         
         if (p.x < 16) {
-            for (i = 1 to 5) {
+            for (i = 1 to 5+PI) {
                 k3 = k3 + k2;
             }
 
