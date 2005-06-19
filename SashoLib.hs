@@ -184,14 +184,14 @@ maybeApply Nothing  x = x
 
 -- NOTE: needs multi-parameter type classes, which is not Haskell 98, but should
 -- be in the next spec apparently
-class Stack s a where
+class Stack s where
     peek :: s a -> a
     pop  :: s a -> s a
     push :: a -> s a -> s a
     modtop :: (a -> a) -> s a -> s a
 
 
-instance Stack [] a where
+instance Stack [] where
     peek = head
     pop  = tail
     push x s = (x:s)

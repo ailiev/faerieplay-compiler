@@ -118,13 +118,14 @@ data Stm =
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord)
 
-
+-- an offset-length pair (in units of "primitive types", ie Int, Enum
+-- and Bool) describing the location of a field in a struct
+type FieldLoc = (Int,Int)
 
 data Exp =
    EVar Var
-   -- Structure and field offset and size  (in number of primitive
-   -- units, ie. IntT and BoolT and EnumT)
- | EStruct Exp (Int,Int)
+   -- Structure and field location
+ | EStruct Exp FieldLoc
  | EArr Exp Exp                 -- array
  | ELit Lit                     -- literal
  | EFunCall Ident [Exp]

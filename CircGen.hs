@@ -368,13 +368,48 @@ genStm circ stm =
                 _                -> Nothing
 
 
+{-
+
+-- extract an array sub-expression from the given Exp
+-- also return the list of field-locations (in bytes) of the array element type
+-- which are affected by the whole expression
+-- return Nothing if there is no array subexpression
+extractEArr :: TypeTable -> Exp -> Maybe ( Exp,
+                                           [(Int,Int)] )
+extractEArr tab e =
+    do (arr_exp, offs_ts)   <- extractEArr' tab e
+       let (offs, ts)       = unzip offs_ts
+
+-- a helper which returns the primitive unit lens (all 1) and offsets,
+-- as well as the types
+extractEArr' :: TypeTable -> Exp -> Maybe ( Exp,
+                                            [(FieldLoc, Typ)] )
+extractEArr' tab (ExpT elem_t exp@(EArr arr_e idx_e)) =
+    Just $ let  t_full      = expandType elem_t
+                offs_ts     = getStructFieldLocs tab t_full
+           in  (exp, offs_ts)
+
+-- get a recursive answer and return just the slice of this field
+extractEArr' tab (EStruct str_e (off,len)) =
+    -- this is in the Maybe monad
+    do (arr_exp, offs_ts)  <- extractEArr' tab str_e
+       return (arr_exp, take len $ drop off offs_ts)
+
+extractEArr' tab (ExpT _ e) = extractEArr' tab e
+
+-- if we hit a primitive expression, there's no array in the exp.
+extractEArr tab e = Nothing
+
+-}
+
+
 -- see if this var is an output var, and if so remove the Output flag
 -- on its current gates
 -- Called when the location of a var is about to be updated
 -- optionally an offset and length to limit the flag removal to some
 -- of the gates, in case only part of a complex output var is being
 -- modified.
-checkOutputVars :: Circuit -> Var -> Maybe (Int,Int) -> OutMonad Circuit
+checkOutputVars :: Circuit -> Var -> Maybe FieldLoc -> OutMonad Circuit
 checkOutputVars c var mb_gate_loc
     | strip_var var == VSimple "main" =
         -- remove the output flags there
@@ -382,9 +417,9 @@ checkOutputVars c var mb_gate_loc
                      fromJustMsg "CircGen: genStm: lookup main" .
                      maybeLookup var
            -- take a slice of the gates if mb_gate_loc is not Nothing
-           let vgates' = vgates `fromMaybe`
-                         (do (off,len) <- mb_gate_loc
-                             return $ take len $ drop off vgates)
+           let vgates' = case mb_gate_loc of
+                           Nothing          -> vgates
+                           (Just (off,len)) -> take len $ drop off vgates
                c' = foldl (updateLabel (setFlags []))
                           c
                           vgates'
@@ -577,8 +612,8 @@ genExp' c exp =
                                                                   (ReadDynArray)
                                                                   [arr_n, idx_n]
                                                                   [] [])
-                                  elem_locs         = getStructFieldLocs type_table
-                                                                         elem_t
+                                  elem_locs         = getStructFieldByteLocs type_table
+                                                                             elem_t
                                   elem_count        = length elem_locs
                               if (elem_count == 1)
                                      then -- easy, just need this gate
@@ -591,8 +626,8 @@ genExp' c exp =
                                                             t
                                                             (Slicer (off,len))
                                                             [readarr_n]
-                                                            [] [] | (i,
-                                                                     (off,len,t)) <- zip is elem_locs]
+                                                            [] [] | i               <- is
+                                                                  | ((off,len),t)   <- elem_locs]
                                                  ctxs2   = map mkCtx slicers
                                                  ctxs    = ctx:ctxs2
                                              return (c2, (Left ctxs))
@@ -614,45 +649,39 @@ mkCtx g@(Gate node _ _ srcs _ _) = let ctx = (map uAdj srcs,
 
 
 
--- make a list of (offset,length,type) for the primitive elements of this
--- struct
--- TODO: we take a rather approximate approach, assigning 4 bytes to
--- any IntT, 1 bytes to BoolT, but at least an accurate amount to
--- EnumT!
-getStructFieldLocs :: TypeTable -> Typ -> [(Int,Int,Typ)]
-getStructFieldLocs tab t =
+
+-- get the ordered list of types in this type (complex or not)
+getStructFieldTypes :: TypeTable -> Typ -> [Typ]
+getStructFieldTypes tab t =
     let t_full = expandType tab t
     in  f t_full
-    where {- f (StructT fields)    = let subendss  = map (f . snd) fields
-                                      starts    = init $ scanl (+) 0 (map last subendss)
-                                   -- subends incremented so their
-                                   -- start points are in order
-                                   -- eg [[4,8,12] , [1,2,3],    [4,8,12]] ->
-                                   --    [[4,8,12] , [13,14,15], [19,23,27]]
-                                      subendss' = zipWith (\ends start -> map (+start) ends)
-                                                          subendss
-                                                          starts 
-                                  in  concat subendss' -}
-          f (StructT fields)    = let -- recurse on the fields
-                                      fldlocss      = map (f . snd) fields
-                                      -- the total length of each field
-                                      sublens       = map (sum . map snd3) fldlocss
-                                      sublens_accum = init $ scanl (+) 0 sublens
-                                      -- add the corresponding shift
-                                      -- to each offset
-                                      fldlocss_shifted = zipWith (map . projFst3 . (+))
-                                                                 sublens_accum
-                                                                 fldlocss
-                                  in  concat fldlocss_shifted
-                                      
-          f t@(IntT _)           = [(0,4,t)]
-          f t@(BoolT)            = [(0,1,t)]
-          f t@(EnumT _ bits)     = [(0, bits `divUp` 8, t)]
-          -- for now we do not allow something like x.y[i].z[j]
-          -- ie, an array appears max once in any complex type
-          f (ArrayT _ _)        = error "Cannot have an array under another array"
+    where f (StructT fields)    = concatMap (f . snd) fields
+          f t                   = [t]
 
-             
+
+-- return the Struct type's list of types and offsets.
+-- WARN: uses GHC extension "parallel list comprehension"
+getStructFieldLocs :: TypeTable -> Typ -> [(Int, Typ)]
+getStructFieldLocs tab t = [ (off, t)  | t    <- getStructFieldTypes tab t
+                                       | off  <- [0..]]
+
+
+-- similar to above but the locations (offset-length) are in bytes
+getStructFieldByteLocs :: TypeTable -> Typ -> [(FieldLoc, Typ)]
+getStructFieldByteLocs tab t =
+    let ts          = getStructFieldTypes tab t
+        tlens       = map tblen ts
+        offs        = init $ scanl (+) 0 tlens
+    in  [ ( (off,len), t )  | t <- ts | off <- offs | len <- tlens ]
+
+
+-- byte-lengths of primitive types    
+tblen (IntT _)          = 4
+tblen (BoolT)           = 1
+tblen (EnumT _ bits)    = bits `divUp` 8
+
+
+
 -- make an unlabelled edge
 uAdj n = ((), n)
 
