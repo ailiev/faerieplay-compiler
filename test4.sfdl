@@ -2,14 +2,22 @@
 
 program Test4 {
 
+	const DIM = 16;
+	
     type Key = Int<16`>;
-
+	type Short = Int<16`>;
+	
     const PI = 4;
     
     type Point = struct {
-	Int<16`> x,
-	Int<16`> y
+		Short x,
+		Short y
     };
+
+    type Input = struct {
+		Point center,
+		Point[DIM] diagonals
+	};
 
     function Int<16`> f (Int<16`> x) {
         f = x * 2;
@@ -17,24 +25,29 @@ program Test4 {
 
 
 
-    function Point main (Point p) {
-        var Int<16`> k2, k3, k4;
-
+    function Point main (Input in) {
+        var Key k2, k3, k4;
+		var Point magic;
+		
         var Point pt;
 
-	pt = p;
+		pt = in.center;
 
         k3 = 0;
 	
         pt.x = 47;
-        
-        if (p.x < 16) {
-            for (i = 1 to 5+PI) {
+
+		magic = in.diagonals[7];
+
+        /*
+        if (pt.x < 16) {
+            for (i = 1 to PI) {
                 k3 = k3 + k2;
             }
 
             pt.y = pt.x * 3;
         }
+		*/
 /*	
 	else {
 	    k3 = k;
@@ -42,9 +55,9 @@ program Test4 {
 		k3 = f(k3);
 	}
 */
-	k3 = pt.x + pt.y;
+		k3 = pt.x + 3;
 	
-        main.x = pt.x;
+        main.x = magic.y;
 
     }
     

@@ -493,10 +493,15 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                                                        (zip offsets lens)
                                      return $ (ass lval (Im.EComplexInit (sum lens)) t) :
                                               concat inits
-                              (Im.SimpleT tname)  ->
+
+                              (Im.ArrayT elem_t len)    ->
+                                  do return [ass lval (Im.EComplexInit 1) t]
+
+                              (Im.SimpleT tname)    ->
                                   do typ <- lookupType tname
                                      mkInit (typ, lval)
-                              _  -> return []
+                              _                     -> return []
+
           ass lval val t = Im.SAss lval (Im.ExpT t val)
           -- create a field-init statement for struct 'str', for the
           -- given field (ie. its type, offset and length)

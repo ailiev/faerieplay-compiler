@@ -4,11 +4,13 @@
 module CircGen (
                 genCircuit,
                 extractInputs,
-                showCct
+                showCct,
+
+                testNextInt
                ) where
 
 
-import Monad (foldM, mplus)
+import Monad (foldM, mplus, liftM)
 import Maybe (fromJust, isJust, fromMaybe)
 import List
 
@@ -29,21 +31,45 @@ import qualified Container as Cont
 import Intermediate as Im hiding (VarTable)
 
 
+-- gate flags
 data GateFlags = Output
 
+-- the gate operations
 data Op =
-    Bin Im.BinOp                -- binary operator
-  | Un  Im.UnOp                 -- unary operator
-  | ReadDynArray                -- read from a dynamic array
-                                -- inputs: [array, index];
-                                -- output is of the array element type
-  | WriteDynArray               -- update array; inputs = [array, index, value]
-                                -- output is the updated array
-  | Input                       -- an input gate
-                                -- ie. IntT or BoolT
-  | Select                      -- select one of two values based on a
-                                -- test; the input wires are to be:
-                                -- [test, src_true, src_false]
+    Bin Im.BinOp
+  | Un  Im.UnOp
+
+  -- read from a dynamic array; inputs: [array, index]; output is of
+  -- the array element type: either a basic type like Int etc, or a
+  -- StructSplit gate to handle a Struct
+  -- The [Int] is used to split a structure into its simple elements: it
+  -- contains the byte-address of the *last* byte of each element
+  | ReadDynArray -- [Int]
+
+  -- update array; inputs = [array, index, value] output is the
+  -- updated array. The value will consist of multiple gates in case
+  -- of a complex type, and the runtime can just concat the values to
+  -- get a lump to write to the array location
+  | WriteDynArray
+
+  -- an input gate for a primitive type, IntT or BoolT
+  | Input
+
+  -- select one of two values based on a test; the input wires are to
+  -- be: [test, src_true, src_false]
+  | Select
+
+  -- split a structure into its elements. The [Int] is the
+  -- byte-address of each element
+  -- NOTE: has been subsumed into ReadDynArray for now
+  --  | StructSplit [Int]
+
+  -- a gate which takes only a part of its input, specified by a
+  -- zero-based offset and a length, in bytes;
+  -- used after a ReadDynArray, to collect the output of ReadDynArray
+  -- into separate gates
+  | Slicer (Int,Int)
+
   | Lit Im.Lit                  -- a literal
 
 
@@ -64,7 +90,7 @@ data Gate = Gate Int            -- the gate number
                  [GateFlags]
                  GateDoc        -- some documentation, eg. a var name
 
-type GateDoc = Maybe [Exp]
+type GateDoc = [Exp]
 
 
 setFlags newfl (Gate g1 g2 g3 g4 fl    g6) =
@@ -83,6 +109,8 @@ gate2lnode g@(Gate i _ _ _ _ _) = (i,g)
 -- just the node number of a Gate
 gateNode = fst . gate2lnode
 
+gateType (Gate _ t _ _ _ _) = t
+
 
 
 -- needed to lookup a variable's current gate number
@@ -90,11 +118,6 @@ gateNode = fst . gate2lnode
 -- a list of gate numbers
 type VarTable = Map.Map Var [Int]
 
-
--- the state in these computations:
-type MyState = ([VarTable],     -- stack of table Var->Node
-                Int)            -- a counter to number the gates
-                                -- sequentially
 
 
 -- type OutMonad a = St.State MyState a
@@ -116,8 +139,8 @@ genCircuit :: TypeTable ->      -- the type table
 -}
 
 genCircuit type_table stms args =
-    let startState = ([Map.empty], 0)
-        (circ, st) = St.runState (genCircuitM type_table stms args)
+    let startState = ([Map.empty], 0, type_table)
+        (circ, st) = St.runState (genCircuitM stms args)
                                  startState
         top_circ   = GrDFS.topsort' circ
     in circ
@@ -127,15 +150,15 @@ genCircuit type_table stms args =
 
 
 -- and the stateful computation
-genCircuitM :: TypeTable -> [Stm] -> [TypedName] -> OutMonad Circuit
-genCircuitM type_table stms args =
-    do input_gates <- genInputs type_table args
+genCircuitM :: [Stm] -> [TypedName] -> OutMonad Circuit
+genCircuitM stms args =
+    do input_gates <- genInputs args
        foldM genStm input_gates stms
 
 
-genInputs :: TypeTable -> [TypedName] -> OutMonad Circuit
-genInputs type_table names = do gatess <- mapM (createInputGates type_table True) names
-                                return (Gr.mkGraph (map gate2lnode (concat gatess)) [])
+genInputs :: [TypedName] -> OutMonad Circuit
+genInputs names     = do gatess     <- mapM (createInputGates True) names
+                         return     (Gr.mkGraph (map gate2lnode (concat gatess)) [])
 
 
 -- fully expand a type, recursing into complex types
@@ -157,34 +180,38 @@ expandType type_table t =
 -- in recursive calls (then we'd be inserting struct field names as
 -- actual vars)
 
-createInputGates :: TypeTable -> Bool -> TypedName -> OutMonad [Gate]
-createInputGates type_table addvars (name, typ) =
-    let recurse         = createInputGates type_table
-        var             = add_vflags [FormalParam] (VSimple name)
-    in  case typ of
-      (StructT fields)
-                -> do gates <- concatMapM (recurse False) fields
+createInputGates :: Bool -> TypedName -> OutMonad [Gate]
+createInputGates addvars (name, typ) =
+    do let var         = add_vflags [FormalParam] (VSimple name)
+       type_table      <- getTypeTable
+       case typ of
+        (StructT fields)
+                -> do gates <- concatMapM (createInputGates False) fields
                       let is = map gateNode gates
                       if addvars then insertVar var is else return ()
                       return gates
 
-      (SimpleT tname)
+        (SimpleT tname)
                 -> let typ' = fromJust $ Map.lookup tname type_table
-                   in  recurse True (name, typ')
+                   in  createInputGates True (name, typ')
 
-      -- IntT, BoolT, ArrayT (for dynamic arrays)
-      _         -> do i <- nextInt
-                      if addvars
-                        then trace ("inserting " << var) $ insertVar var [i]
-                        else return ()
-                      return [mkGate type_table i typ [EVar var]]
+        -- IntT, BoolT, ArrayT (for dynamic arrays):
+        _         -> do i <- nextInt
+                        if addvars
+                          then trace ("inserting input var " << var << " into VarTable")
+                                     (insertVar var [i])
+                          else return ()
+                        -- FIXME: this adds an incorrect doc
+                        -- annotation to the gate - it show struct
+                        -- field names as variable names 
+                        return [mkGate type_table i typ (EVar var)]
 
     where mkGate type_table i typ doc_exp = Gate i
                                                  (expandType type_table typ)
                                                  Input
                                                  []
                                                  []
-                                                 (Just $ doc_exp)
+                                                 [doc_exp]
 
 
 
@@ -220,20 +247,26 @@ genExpWithDoc :: Circuit ->
 genExpWithDoc c ghook e e_doc =
     do (c', res) <- genExp' c e
        let (c'', nodes) = case res of
-                            (Left ctx) ->
-                            -- we got a Context back, so
+                            (Left [ctx]) ->
+                            -- we got Contexts back, so
                             -- add the doc to the gate, and apply the
                             -- hook
-                                let gate = Gr.lab' ctx
-                                    gate' = processGate gate
-                                    ctx' = updateCtxLab ctx gate'
+                                let gate    = Gr.lab' ctx
+                                    gate'   = processGate gate
+                                    ctx'    = updateCtxLab gate' ctx
                                 in  (ctx' & c', [Gr.node' ctx'])
+
+                            (Left ctxs) ->
+                                -- TODO: cannot for now add a doc to
+                                -- multiple contexts
+                                let ctxs' = trace ("genExpWithDoc on ctxs " << map Gr.lab' ctxs)
+                                                  ctxs
+                                in ( foldl (flip (&)) c' ctxs',
+                                     map Gr.node' ctxs' )
 
                             (Right nodes) ->
                                 -- no new gate generated, but we will
-                                -- update the doc and apply the hook
-                                -- FIXME: if ghook is a noop this will
-                                -- do a lot of graph reconstruction for nothing
+                                -- update the gate doc and apply the hook
                                 let c'' = foldl (updateLabel processGate)
                                                 c'
                                                 nodes
@@ -243,14 +276,16 @@ genExpWithDoc c ghook e e_doc =
 
     where addGateDoc exp (Gate g1 g2 g3 g4 g5 doc) =
                           Gate g1 g2 g3 g4 g5 new_doc
-              where new_doc = applyToMaybe (push exp) [exp] doc
+              where new_doc = push (stripExpT exp) doc
           processGate g = let g'  = maybeApply ghook g
-                              g'' = addGateDoc e_doc g'
+                              g'' = {- trace ("Adding doc " << e_doc
+                                       << " to gate " << gateNode g) -}
+                                          (addGateDoc e_doc g')
                           in  g''
 
 -- update the label of a graph Context
-updateCtxLab (ins,node,label,    outs)  new_label = 
-             (ins,node,new_label,outs)
+updateCtxLab new_label = tup4_proj_3 (const new_label)
+
 
 
 -- get the offset of an expression, relative to the simple variable
@@ -286,9 +321,9 @@ genStm circ stm =
              insertVar var nodes
              return c'
 
+      -- get the gates for this 'val', and set the address of 'lval'
+      -- to those gates
       (SAss lval@(EStruct str_e (off,len)) val) ->
-             -- get the gates for this 'val', and mark them as holding
-             -- this lval from now
           do let (rv, off_e) = getRootvarOffset str_e
                  this_off    = off_e + off
              c2 <- checkOutputVars circ rv (Just (this_off,len))
@@ -362,9 +397,8 @@ checkOutputVars c var mb_gate_loc
 updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
 updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
                         in  case mctx of
-                              Nothing                           -> gr
-                              Just (e_in, node', lab  , e_out)  ->
-                                   (e_in, node', f lab, e_out) & gr'
+                              Nothing   -> gr
+                              Just ctx  -> (tup4_proj_3 f ctx) & gr'
 
 
                             
@@ -382,7 +416,8 @@ genCondExit testGate
                   filter nonLocal $
                   map (\(var,gates) -> var) $
                   concatMap Map.toList [ifScope, elseScope]
-        sources = map varSources $ trace ("non-local scope vars: " << vars) vars
+        sources = map varSources $ trace ("non-local scope vars: " << vars)
+                                         vars
     in  foldM addSelect circ $ zip vars sources
           
     where -- a var is non-local if was not declared in this scope,
@@ -428,7 +463,7 @@ genCondExit testGate
 
           mkCtx' i t (true_gate,false_gate) =
               let src_gates = [testGate, true_gate, false_gate]
-              in  mkCtx (Gate i t Select src_gates [] Nothing)
+              in  mkCtx (Gate i t Select src_gates [] [])
 
 
 -- take a list of pairs, and where a pair is equal, pass on that value, but
@@ -463,10 +498,12 @@ getSelType gr (node1, node2)
 genExp :: Circuit -> Exp -> OutMonad (Circuit, [Gr.Node])
 genExp c e = do (c', res) <- genExp' c e
                 case res of
-                  -- extend the graph with the new context, and return it
-                  (Left ctx@(_,node,_,_))       -> return (ctx & c' , [node])
+                  -- extend the graph with the new contexts, and return it
+                  (Left ctxs)       -> return ( foldl (flip (&)) c' ctxs,
+                                                map Gr.node' ctxs )
                   -- just pass on the graph and node
-                  (Right gateNums)              -> return (c'       , gateNums)
+                  (Right gateNums)  -> return (c',
+                                               gateNums)
                   
 
 -- this one is a little nasty - it returns the expanded circuit, and
@@ -476,60 +513,149 @@ genExp c e = do (c', res) <- genExp' c e
 --
 -- Need to be able to return a list of nodes, in the case of a struct
 -- or array
+--
+-- also need to be able to return a list of newly generated Contexts,
+-- for a ReadDynArray gate with all its following Slicer gates
 
-genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either CircuitCtx [Gr.Node]))
+
+genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
+                                                  [CircuitCtx]
+                                                  [Gr.Node]))
 genExp' c exp =
-    case exp of
+    case trace ("genExp' " << stripExpT exp) exp of
       (BinOp op e1 e2)  -> do i <- nextInt
-                              (c1', [gate1]) <- genExp c   e1
-                              (c2', [gate2]) <- genExp c1' e2
-                              let ctx = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] [] Nothing
-                              return (c2', Left ctx)
+                              (c1, [gate1]) <- genExp c   e1
+                              (c2, [gate2]) <- genExp c1  e2
+                              let ctx       = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] [] []
+                              return (c2, Left [ctx])
 
       (UnOp op e1)      -> do i <- nextInt
-                              (c1', [gate1]) <- genExp c   e1
-                              let ctx = mkCtx $ Gate i VoidT (Un op) [gate1] [] Nothing
-                              return (c1', Left ctx)
+                              (c1, [gate1]) <- genExp c   e1
+                              let ctx       = mkCtx $ Gate i VoidT (Un op) [gate1] [] []
+                              return (c1, Left [ctx])
 
       (EVar var)        -> do gates <- getsVars $
-                                       fromJustMsg "CircGen: Lookup EVar" .
+                                       fromJustMsg "CircGen: Lookup Var" .
                                        maybeLookup var
                               return (c, Right gates)
 
-      (ELit l)          -> do i <- nextInt
-                              let ctx = mkCtx (Gate i VoidT (Lit l) [] [] Nothing)
-                              return (c, Left ctx)
+      (ELit l)          -> do i         <- nextInt
+                              let ctx   = mkCtx (Gate i VoidT (Lit l) [] [] [])
+                              return (c, Left [ctx])
 
       -- here we try to update the Typ annotation on the Gate
       -- generated recursively
       (ExpT typ e)      -> do (c', res) <- genExp' c e
                               case res of
-                                (Left          (c1, c2, gate,                 c3)) ->
-                                    let ctx' = (c1, c2, setGateType typ gate, c3)
-                                    in  return (c', Left ctx')
+                                (Left          [(c1, c2, gate,                 c3)]) ->
+                                    let ctx' =  (c1, c2, setGateType typ gate, c3)
+                                    in  return (c', Left [ctx'])
+                                -- FIXME: can't deal with multiple contexts
+                                -- for now
+                                (Left ctxs) ->
+                                    return (c', res)
                                 (Right node)    ->
-                                        return (c', Right node)
+                                    return (c', res)
 
       (EStruct str_e (offset,len)) ->
                            do (c', gates) <- genExp c str_e
                               return (c', Right $ take len $ drop offset gates)
 
+      (EArr arr_e idx_e) ->
+                           do (c1, [arr_n]) <- genExp c arr_e
+                              (c2, [idx_n]) <- genExp c1 idx_e
+                              readarr_n     <- nextInt
+                              type_table    <- getTypeTable
+                                  -- get the array element type from the
+                                  -- gate where the array now is
+                              let (ArrayT elem_t _) = gateType $
+                                                      fromJustMsg
+                                                        "CircGen: get current array node" $
+                                                      Gr.lab c2 arr_n
+                                  ctx               = mkCtx (Gate readarr_n
+                                                                  VoidT
+                                                                  (ReadDynArray)
+                                                                  [arr_n, idx_n]
+                                                                  [] [])
+                                  elem_locs         = getStructFieldLocs type_table
+                                                                         elem_t
+                                  elem_count        = length elem_locs
+                              if (elem_count == 1)
+                                     then -- easy, just need this gate
+                                          return (c2, Left [ctx])
+                                     else -- now we need a bunch of
+                                          -- slicer gates
+                                          do is <- replicateM elem_count nextInt
+                                             let slicers = [Gate
+                                                            i
+                                                            t
+                                                            (Slicer (off,len))
+                                                            [readarr_n]
+                                                            [] [] | (i,
+                                                                     (off,len,t)) <- zip is elem_locs]
+                                                 ctxs2   = map mkCtx slicers
+                                                 ctxs    = ctx:ctxs2
+                                             return (c2, (Left ctxs))
+
       (EStatic e)       -> genExp' c e
 
       e                 -> error $ "CircGen: unknown expression " << e
--- TODO: EArr
-                              
-             
--- make an unlabelled edge
-uAdj n = ((), n)
 
 
--- make a graph Context for this operator, node number and source gates
+
+-- make a graph Context for this operator, node number and source
+-- gates
+mkCtx :: Gate -> CircuitCtx
 mkCtx g@(Gate node _ _ srcs _ _) = let ctx = (map uAdj srcs,
                                               node,
                                               g,
                                               []) -- no outgoing edges
                                     in ctx
+
+
+
+-- make a list of (offset,length,type) for the primitive elements of this
+-- struct
+-- TODO: we take a rather approximate approach, assigning 4 bytes to
+-- any IntT, 1 bytes to BoolT, but at least an accurate amount to
+-- EnumT!
+getStructFieldLocs :: TypeTable -> Typ -> [(Int,Int,Typ)]
+getStructFieldLocs tab t =
+    let t_full = expandType tab t
+    in  f t_full
+    where {- f (StructT fields)    = let subendss  = map (f . snd) fields
+                                      starts    = init $ scanl (+) 0 (map last subendss)
+                                   -- subends incremented so their
+                                   -- start points are in order
+                                   -- eg [[4,8,12] , [1,2,3],    [4,8,12]] ->
+                                   --    [[4,8,12] , [13,14,15], [19,23,27]]
+                                      subendss' = zipWith (\ends start -> map (+start) ends)
+                                                          subendss
+                                                          starts 
+                                  in  concat subendss' -}
+          f (StructT fields)    = let -- recurse on the fields
+                                      fldlocss      = map (f . snd) fields
+                                      -- the total length of each field
+                                      sublens       = map (sum . map snd3) fldlocss
+                                      sublens_accum = init $ scanl (+) 0 sublens
+                                      -- add the corresponding shift
+                                      -- to each offset
+                                      fldlocss_shifted = zipWith (map . projFst3 . (+))
+                                                                 sublens_accum
+                                                                 fldlocss
+                                  in  concat fldlocss_shifted
+                                      
+          f t@(IntT _)           = [(0,4,t)]
+          f t@(BoolT)            = [(0,1,t)]
+          f t@(EnumT _ bits)     = [(0, bits `divUp` 8, t)]
+          -- for now we do not allow something like x.y[i].z[j]
+          -- ie, an array appears max once in any complex type
+          f (ArrayT _ _)        = error "Cannot have an array under another array"
+
+             
+-- make an unlabelled edge
+uAdj n = ((), n)
+
 
 
 -- extract the params of main() from a Prog
@@ -543,20 +669,31 @@ extractInputs (Prog pname (ProgTables {funcs=fs})) =
 
 
 --------------------
--- state access functions
+-- state and state access functions
 --------------------
-getsVars f = St.gets $ f . fst
 
-getInt :: OutMonad Int
-getInt = St.gets snd
+-- the state in these computations:
+type MyState = ([VarTable],     -- stack of table Var -> [Node]
+                Int,            -- a counter to number the gates
+                                -- sequentially
+                TypeTable       -- the type table is read-only, so
+                                -- could be in a Reader, but easier to
+                                -- stick it in here 
+               )
 
---getVars :: OutMonad [VarTable]
-getVars = getsVars id
+
+
+getsVars        f = St.gets $ f . fst3
+getsTypeTable   f = St.gets $ f . thr3
 
 -- modify the various parts of the state with some function
--- modifyInt f = St.modify (projSnd f)
-modifyInt  = St.modify . projSnd
-modifyVars = St.modify . projFst
+modifyVars = St.modify . projFst3
+modifyInt  = St.modify . projSnd3
+
+
+getTypeTable = getsTypeTable id
+getInt = St.gets snd3
+getVars = getsVars id
 
 
 -- update the location of 'var' by some function.
@@ -589,26 +726,42 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 instance Show Gate where
     show (Gate i typ op srcs flags doc) = i << (if not (null flags) then "#" << show flags else "") 
                                             << ": "
-                                            << op << " [" << typ << "] "
+                                            << op << " [:" << typ << ":] "
                                             << srcs
-                                            << (case doc of
-                                                  Just exps  -> " ~" << exps << "~"
-                                                  Nothing    -> "")
+                                            << (if not (null doc) then " ~" << doc << "~"
+                                                                  else "")
+
 
 instance Show GateFlags where
     show Output = "o"
 
+-- this requires -fallow-overlapping-instances to GHC, as we already
+-- have
+-- (Show a) => instance Show [a]
 instance Show [GateFlags] where
     show flags = concatMap show flags
 
 
 instance Show Op where
-    show (Bin op) = show op
-    show (Un  op) = show op
-    show Input = "in"
-    show Select   = "sel"
-    show (Lit l)        = "Lit " << l
-
+    show (Bin op)           = show op
+    show (Un  op)           = show op
+    show Input              = "in"
+    show Select             = "sel"
+    show (Lit l)            = "lit " << l
+    show ReadDynArray       = "readarr"
+    show (Slicer (off,len)) = "slice " << len << "@" << off
 
 showCct c = Graphviz.graphviz' c
- 
+
+
+
+
+-------------------------------------
+-- some tests
+-------------------------------------
+
+testNextInt = let startState    = ([Map.empty], 0, Map.empty)
+                  (out,st)      = St.runState test_f startState
+              in  (out,st)
+    where test_f = do is <- replicateM 5 nextInt
+                      return (is)

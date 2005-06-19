@@ -64,3 +64,8 @@ if () {
    g.center.x = 0;
 }
 
+
+Sun Jun 19 13:26:41 2005
+
+Graph library bug:
+error message in Tree.hs line 72 is really uninformative

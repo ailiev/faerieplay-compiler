@@ -143,6 +143,16 @@ data Exp =
   deriving (Eq,Ord)
 
 
+-- helpers for expressions
+
+-- deep-remove all mentions of ExpT
+stripExpT = mapExp f
+    where f (ExpT t e)  = e
+          f e           = e
+
+
+
+
 -- some expressions have to be static, hence not annotated with EStatic:
 -- arg of IntT
 
@@ -503,7 +513,7 @@ docProg (Prog id (ProgTables {funcs=fs,
                                                             map docFunc funcList)]
     where collect key val accum = ((key,val) : accum)
           docPair sf (n,t)      = sep [text n, equals, sf t]
-          docVar (t,flags)      = sep [docTyp t, parens (text $ show flags)]
+
 
 docFunc (Func name vars t args stms) = vcat [text "function" <+> (text name) <+>
                                              (parens $ cat $
@@ -535,10 +545,10 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
 
 
 docExp e = case e of
-    (EVar v)            -> parens $ docVar v
+    (EVar v)            -> docVar v
     (EStruct str (off,len))
                         -> cat [docExp str, text ".", int off, brackets (int len)]
-    (EArr arr idx)      -> cat [docExp arr, text "[", docExp idx, text "]"]
+    (EArr arr idx)      -> cat [docExp arr, text "[Arr:", docExp idx, text "]"]
     (ELit l)            -> docLit l
     (EFunCall f args)   -> cat [text f, text "(",
                                 sep (punctuate (text ",") (map docExp args)),
