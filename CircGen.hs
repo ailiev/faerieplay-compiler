@@ -161,16 +161,6 @@ genInputs names     = do gatess     <- mapM (createInputGates True) names
                          return     (Gr.mkGraph (map gate2lnode (concat gatess)) [])
 
 
--- fully expand a type, recursing into complex types
-expandType type_table t =
-    case t of
-      (SimpleT name)    -> let t' = fromJust $ Map.lookup name type_table
-                           in  expandType type_table t'
-      (ArrayT elem_t
-              len)      -> ArrayT (expandType type_table elem_t) len
-      (StructT fields)  -> StructT (map (projSnd (expandType type_table)) fields)
-      _                 -> t
-
 
 -- create the input gates for this argument to main(), and add the vars
 -- to the top-level VarTable
@@ -185,7 +175,7 @@ createInputGates addvars (name, typ) =
     do let var         = add_vflags [FormalParam] (VSimple name)
        type_table      <- getTypeTable
        case typ of
-        (StructT fields)
+        (StructT (fields,_,_))
                 -> do gates <- concatMapM (createInputGates False) fields
                       let is = map gateNode gates
                       if addvars then insertVar var is else return ()
@@ -292,10 +282,13 @@ updateCtxLab new_label = tup4_proj_3 (const new_label)
 -- under which this expression is, eg. for a struct expression x.y.z we want the
 -- offset of field 'y.z' under struct 'x'; also return what is the root
 -- variable, 'x' in this example
-getRootvarOffset (EVar v)                  = (v, 0)
-getRootvarOffset (EStruct str_e (off,len)) = let (r_v, off') = getRootvarOffset str_e
-                                             in  (r_v, off' + off)
-getRootvarOffset (ExpT t e)                = getRootvarOffset e
+                                       -- this will not work with
+-- array update in the picture
+                                       --
+
+getRootvarOffset (EVar v)                   = (v, 0)
+getRootvarOffset (EStruct str_e idx)        = error "mess"
+getRootvarOffset (ExpT t e)                 = getRootvarOffset e
 getRootvarOffset (EArr _ _) = error "getRootvarOffset (EArr ) unimplemented"
 
 
@@ -323,6 +316,7 @@ genStm circ stm =
 
       -- get the gates for this 'val', and set the address of 'lval'
       -- to those gates
+      {-
       (SAss lval@(EStruct str_e (off,len)) val) ->
           do let (rv, off_e) = getRootvarOffset str_e
                  this_off    = off_e + off
@@ -333,7 +327,7 @@ genStm circ stm =
                                           lval
              updateVar (listUpdate (this_off,len) gates) rv
              return c'
-
+-}
 
 
       -- TODO: the lval expression could be EArr.
@@ -592,9 +586,12 @@ genExp' c exp =
                                 (Right node)    ->
                                     return (c', res)
 
-      (EStruct str_e (offset,len)) ->
-                           do (c', gates) <- genExp c str_e
-                              return (c', Right $ take len $ drop offset gates)
+      (EStruct str_e@(ExpT (StructT (_,locs,_))
+                           _)
+               idx)      -> 
+                           do let (off,len) = locs !! idx
+                              (c', gates) <- genExp c str_e
+                              return (c', Right $ take len $ drop off gates)
 
       (EArr arr_e idx_e) ->
                            do (c1, [arr_n]) <- genExp c arr_e
@@ -612,9 +609,9 @@ genExp' c exp =
                                                                   (ReadDynArray)
                                                                   [arr_n, idx_n]
                                                                   [] [])
-                                  elem_locs         = getStructFieldByteLocs type_table
-                                                                             elem_t
-                                  elem_count        = length elem_locs
+                                  (e_locs,e_typs)   = getTypByteLocs type_table
+                                                                     elem_t
+                                  elem_count        = length e_locs
                               if (elem_count == 1)
                                      then -- easy, just need this gate
                                           return (c2, Left [ctx])
@@ -626,8 +623,9 @@ genExp' c exp =
                                                             t
                                                             (Slicer (off,len))
                                                             [readarr_n]
-                                                            [] [] | i               <- is
-                                                                  | ((off,len),t)   <- elem_locs]
+                                                            [] [] | i           <- is
+                                                                  | (off,len)   <- e_locs
+                                                                  | t           <- e_typs]
                                                  ctxs2   = map mkCtx slicers
                                                  ctxs    = ctx:ctxs2
                                              return (c2, (Left ctxs))
@@ -649,7 +647,7 @@ mkCtx g@(Gate node _ _ srcs _ _) = let ctx = (map uAdj srcs,
 
 
 
-
+{-
 -- get the ordered list of types in this type (complex or not)
 getStructFieldTypes :: TypeTable -> Typ -> [Typ]
 getStructFieldTypes tab t =
@@ -666,21 +664,19 @@ getStructFieldLocs tab t = [ (off, t)  | t    <- getStructFieldTypes tab t
                                        | off  <- [0..]]
 
 
+
+-}
+
 -- similar to above but the locations (offset-length) are in bytes
-getStructFieldByteLocs :: TypeTable -> Typ -> [(FieldLoc, Typ)]
-getStructFieldByteLocs tab t =
-    let ts          = getStructFieldTypes tab t
-        tlens       = map tblen ts
-        offs        = init $ scanl (+) 0 tlens
-    in  [ ( (off,len), t )  | t <- ts | off <- offs | len <- tlens ]
-
-
--- byte-lengths of primitive types    
-tblen (IntT _)          = 4
-tblen (BoolT)           = 1
-tblen (EnumT _ bits)    = bits `divUp` 8
-
-
+getTypByteLocs :: TypeTable -> Typ -> ([FieldLoc], [Typ])
+getTypByteLocs tab t =
+    let t_full = expandType tab t
+    in case t_full of
+         (StructT (fields,_,bytelocs))  ->
+             let types          = map snd fields
+             in  (bytelocs, types)
+         t                              ->
+             ([(0, tblen t)], [t])
 
 -- make an unlabelled edge
 uAdj n = ((), n)
@@ -712,16 +708,16 @@ type MyState = ([VarTable],     -- stack of table Var -> [Node]
 
 
 
-getsVars        f = St.gets $ f . fst3
-getsTypeTable   f = St.gets $ f . thr3
+getsVars        f = St.gets $ f . tup3_get1
+getsTypeTable   f = St.gets $ f . tup3_get3
 
 -- modify the various parts of the state with some function
-modifyVars = St.modify . projFst3
-modifyInt  = St.modify . projSnd3
+modifyVars = St.modify . tup3_proj1
+modifyInt  = St.modify . tup3_proj2
 
 
 getTypeTable = getsTypeTable id
-getInt = St.gets snd3
+getInt = St.gets tup3_get2
 getVars = getsVars id
 
 

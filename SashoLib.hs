@@ -50,10 +50,8 @@ module SashoLib (
                  sumOp,
                  mapInputs2,
                 
-                fst3, snd3, thr3,
-                projFst3, projSnd3, projThr3,
-
-                tup4_get,
+                tup3_get1, tup3_get2, tup3_get3,
+                tup3_proj1, tup3_proj2, tup3_proj3,
 
                 tup4_proj_1,  tup4_proj_2,  tup4_proj_3,  tup4_proj_4
 		)
@@ -342,15 +340,17 @@ mapInputs2 x y fs = map (\f -> f x y) fs
 apply3 = ((($).).)
 
 
+-- a version of scanl that throws away its last element
+--scanl
 
 -- helpers for 3-tuples!
-fst3 (x,_,_) = x
-snd3 (_,x,_) = x
-thr3 (_,_,x) = x
+tup3_get1 (x,_,_) = x
+tup3_get2 (_,x,_) = x
+tup3_get3 (_,_,x) = x
 
-projFst3 f (x,y,z) = (f x , y   , z  )
-projSnd3 f (x,y,z) = (x   , f y , z  )
-projThr3 f (x,y,z) = (x   , y   , f z)
+tup3_proj1 f (x,y,z) = (f x , y   , z  )
+tup3_proj2 f (x,y,z) = (x   , f y , z  )
+tup3_proj3 f (x,y,z) = (x   , y   , f z)
 
 
 -- and for 4-tuples!

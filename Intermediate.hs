@@ -6,6 +6,7 @@ import Text.PrettyPrint
 -- import Tree
 
 import List (intersperse)
+import Maybe (fromJust)
 
 import Data.Bits ((.&.), (.|.), complement)
 import Control.Monad.Error (Error, throwError)
@@ -90,7 +91,11 @@ data Typ =
  | GenIntT
  | BoolT
  | VoidT
- | StructT [TypedName]          -- field names/types
+ | StructT ([TypedName],        -- field's name and type
+             [FieldLoc],        -- field's location (offset and
+                                --     length) in primitive units
+             [FieldLoc])        -- the location in bytes
+                    
  | EnumT String Int             -- name and bitsize. the identifiers are in the
                                 -- global var table as instances of
                                 -- (Enum name i)
@@ -124,8 +129,8 @@ type FieldLoc = (Int,Int)
 
 data Exp =
    EVar Var
-   -- Structure and field location
- | EStruct Exp FieldLoc
+   -- Structure and field number (look up other infos in the StructT)
+ | EStruct Exp Int
  | EArr Exp Exp                 -- array
  | ELit Lit                     -- literal
  | EFunCall Ident [Exp]
@@ -245,6 +250,48 @@ type Scope = [Int]
 
 
 
+
+
+------------------
+-- helpers for Typ
+------------------
+
+-- fully expand a type, recursing into complex types
+expandType type_table t =
+    let rec = expandType type_table in
+    case t of
+      (SimpleT name)    -> let t' = fromJust $ Map.lookup name type_table
+                           in  rec t'
+      (ArrayT elem_t
+              len)      -> ArrayT (rec elem_t) len
+      -- a bit of a mess to reach the field types, with the large
+      -- fields_info tuple
+      (StructT
+         fields_info)   -> StructT (tup3_proj1 (map (projSnd rec))
+                                               fields_info)
+      _                 -> t
+
+-- return the length of a type,
+-- which has already been expanded (ie. no SimpleT)
+-- use 'f' to get the length of simple types: Int, Bool, EnumT
+typeLength :: (Typ -> Int) -> Typ -> Int
+typeLength f t =
+    let rec = typeLength f in
+    case t of
+      (StructT fields)          -> sum $
+                                   map (rec . snd) $
+                                   tup3_get1 fields
+      (SimpleT name)            -> error $ "Intermediate: typeLength of a SimpleT "
+                                           << name
+      (ArrayT t len)            -> rec t
+      t                         -> f t
+      
+
+
+-- byte-lengths of primitive types    
+tblen (IntT _)          = 4
+tblen (BoolT)           = 1
+tblen (EnumT _ bits)    = bits `divUp` 8
 
 
 
@@ -547,8 +594,8 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
 
 docExp e = case e of
     (EVar v)            -> docVar v
-    (EStruct str (off,len))
-                        -> cat [docExp str, text ".", int off, brackets (int len)]
+    (EStruct str fld_idx)
+                        -> cat [docExp str, text ".", int fld_idx]
     (EArr arr idx)      -> cat [docExp arr, text "[Arr:", docExp idx, text "]"]
     (ELit l)            -> docLit l
     (EFunCall f args)   -> cat [text f, text "(",
@@ -573,7 +620,8 @@ docTyp t =
       (GenIntT)         -> cat [text "Int"]
       (BoolT)           -> text "bool"
       (VoidT)           -> text "void"
-      (StructT fields)  -> sep [text "struct",
+      (StructT (fields,
+                _, _ )) -> sep [text "struct",
                                      braces $ sep $
                                      punctuate (text ",") $
                                      map docTypedName fields]

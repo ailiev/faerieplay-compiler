@@ -237,12 +237,22 @@ checkStm s@(T.SIfElse cond stm1 stm2) =
 -- computes the sizes of Int and Array, which should be statically
 -- computable at this stage
 -- TODO: when we consider .bitSize etc. expressions, will need to
--- delay the computation of type sizes till Unroll
+-- delay the computation of some type sizes till Unroll
 ---------------
 checkTyp :: T.Typ -> StateWithErr Im.Typ
 
-checkTyp (T.StructT fields)     = do im_fields <- mapM checkTypedName fields
-                                     return (Im.StructT im_fields)
+checkTyp (T.StructT fields)     = do type_table     <- getTypeTable
+                                     im_fields      <- mapM checkTypedName fields
+                                     let full_ts    = map ((Im.expandType type_table) . snd)
+                                                          im_fields
+                                         lens       = map (Im.typeLength (const 1)) full_ts
+                                         bytelens   = map (Im.typeLength Im.tblen) full_ts
+                                         offs       = init $ scanl (+) 0 lens
+                                         byteoffs   = init $ scanl (+) 0 bytelens
+                                         fields'    = (im_fields,
+                                                       zip offs lens,
+                                                       zip byteoffs bytelens)
+                                     return $ Im.StructT fields'
                                     
 checkTyp (T.ArrayT t sizeExp)   = do im_t <- checkTyp t
                                      im_size <- checkExp sizeExp
@@ -263,6 +273,8 @@ checkTyp T.VoidT                = return Im.VoidT
 -- do a partial processing of EnumT, without sticking its name in
 -- there, this will be done by the parent checkDec
 checkTyp (T.EnumT ids)          = return (Im.EnumT "" (bitsize $ length ids))
+
+
 
 
 ---------------------
@@ -351,15 +363,14 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
 
          -- ** check: return the expression's type and value
          -- find the field in this struct's definition
-    where check (Im.StructT fields) new_str =
-              do case lookup fieldname fields of
-                          (Just t) -> do size   <- typeLength t
-                                         
-                                         offset <-    liftM sum $
-                                                      mapM (typeLength . snd) $
-                                                      takeWhile ( (/= fieldname) . fst ) $
-                                                      fields
-                                         return (t, Im.EStruct new_str (offset,size))
+    where check (Im.StructT fields_info) new_str =
+              do -- get just the [TypedName]
+                 let (fields,_,_) = fields_info
+                 case lookup fieldname fields of
+                          (Just t) -> do let field_idx = fromJust $
+                                                         findIndex ((== fieldname) . fst) $
+                                                         fields
+                                         return (t, Im.EStruct new_str field_idx)
                           _        -> throwErr 42 $ "in " << e << ", struct has no field "
                                                       << fieldname
 
@@ -412,19 +423,6 @@ checkExp e
 
 
 
--- return the length, in simple types (ie Int and Bool), of a type
-typeLength :: Im.Typ -> StateWithErr Int
-typeLength t =
-    case t of
-      (Im.StructT fields)       -> mapM (typeLength . snd) fields >>=
-                                   return . sum
-      (Im.SimpleT name)         -> lookupType name >>=
-                                   typeLength
-      (Im.RedArrayT typ len)    -> typeLength typ >>=
-                                   return . (* len)
-      _                         -> return 1
---      (ArrayT typ len_e)  = typeLength typ
-      
                                           
                  
 
@@ -473,7 +471,7 @@ checkLoopCounter ctx name =
          
 
 -- create initialization statements for local variables
--- needs to be in StateWithErr because of (typeLength)
+-- needs to be in StateWithErr because of (lookupType)
 mkVarInits :: Im.VarTable -> StateWithErr [Im.Stm]
 mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                             concatMapM mkInit $ map (\(t,v) -> (t,Im.EVar v)) locs
@@ -485,12 +483,12 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
           -- for a struct, we first add an SAss for the whole struct,
           -- using Im.EComplexInit,
           -- and then individual SAss for each member, recursively
-                              (Im.StructT flds)    ->
-                                  do lens <-   mapM (typeLength . snd) flds
-                                     let offsets = init $ scanl (+) 0 lens
+                              (Im.StructT fields_info)    ->
+                                  do let (fields, locs, _)  = fields_info
+                                         (_,lens)           = unzip locs
                                      inits <- zipWithM (mkStruct lval)
-                                                       flds
-                                                       (zip offsets lens)
+                                                       fields
+                                                       [0..]
                                      return $ (ass lval (Im.EComplexInit (sum lens)) t) :
                                               concat inits
 
@@ -505,7 +503,7 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
           ass lval val t = Im.SAss lval (Im.ExpT t val)
           -- create a field-init statement for struct 'str', for the
           -- given field (ie. its type, offset and length)
-          mkStruct str (_, t) (offset,len) = mkInit (t, (Im.EStruct str (offset,len)))
+          mkStruct str (_, t) field_idx = mkInit (t, (Im.EStruct str field_idx))
 
 
 
@@ -702,6 +700,9 @@ lookupType name =
            Just t -> return t
            _      -> throwErr 42 $ "Type " << name << " is not in scope"
 
+
+getTypeTable = do TCS {types=ts} <- St.get
+                  return ts
 
 -- getRvalTyp name     = lookupSym Var name
 
