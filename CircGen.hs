@@ -46,11 +46,14 @@ data Op =
   -- contains the byte-address of the *last* byte of each element
   | ReadDynArray -- [Int]
 
-  -- update array; inputs = [array, index, value] output is the
-  -- updated array. The value will consist of multiple gates in case
-  -- of a complex type, and the runtime can just concat the values to
-  -- get a lump to write to the array location
-  | WriteDynArray
+  -- update array; inputs = [array, index, val1, val2, ...]; output is
+  -- the updated array. The parameter is a slice of where inputs
+  -- (concatenated) should end up in the array element.
+  --
+  -- The input will consist of multiple gates in case of a complex
+  -- type, and the runtime can just concat the values to get a lump to
+  -- write to the (sliced) array location
+  | WriteDynArray (Int,Int)
 
   -- an input gate for a primitive type, IntT or BoolT
   | Input
@@ -282,20 +285,43 @@ updateCtxLab new_label = tup4_proj_3 (const new_label)
 -- under which this expression is, eg. for a struct expression x.y.z we want the
 -- offset of field 'y.z' under struct 'x'; also return what is the root
 -- variable, 'x' in this example
-                                       -- this will not work with
--- array update in the picture
-                                       --
+-- the 'loc_extr' parameter is a function which specifies which struct
+-- locations we use, primitive type (tup3_get2) or byte (tup3_get3)
 
-getRootvarOffset (EVar v)                   = (v, 0)
-getRootvarOffset (EStruct str_e idx)        = error "mess"
-getRootvarOffset (ExpT t e)                 = getRootvarOffset e
-getRootvarOffset (EArr _ _) = error "getRootvarOffset (EArr ) unimplemented"
+getRootvarOffset :: TypeTable ->
+                    (([TypedName], [FieldLoc], [FieldLoc]) -> [FieldLoc]) ->
+                    Exp ->
+                    (Var, Int)
+getRootvarOffset tab loc_extr exp =
+    let rec = getRootvarOffset tab loc_extr in
+    case exp of
+      (EVar v)              -> (v, 0)
+      (EStruct str_e idx)   -> let (v, o)     = rec str_e
+                                   fld_info   = getStrTParams tab str_e
+                                   locs       = loc_extr fld_info
+                                   preceding  = sum $
+                                                map snd $
+                                                take (idx-1) locs
+                               in  (v, o + preceding)
+      (ExpT t e)            -> rec e
+      (EArr arr_e idx_e)    -> rec arr_e
+      e                     -> error $
+                               "CircGen: getRootvarOffset: invalid lval "
+                               << e
+                                                      
 
+-- get the field parameters of a StructT, from the expression carrying the struct
+getStrTParams tab (ExpT t _)   = let (StructT field_params) = expandType tab t
+                                 in  field_params
+getStrTParams _   e             = error $
+                                  "getStrTParams: unexpected expression "
+                                  << e
 
 
 genStm :: Circuit -> Stm -> OutMonad Circuit
 genStm circ stm =
     case stm of
+
       -- do away with lval type annotations for now
       (SAss (ExpT _ lval) val) -> genStm circ (SAss lval val)
              
@@ -316,21 +342,44 @@ genStm circ stm =
 
       -- get the gates for this 'val', and set the address of 'lval'
       -- to those gates
-      {-
-      (SAss lval@(EStruct str_e (off,len)) val) ->
-          do let (rv, off_e) = getRootvarOffset str_e
-                 this_off    = off_e + off
-             c2 <- checkOutputVars circ rv (Just (this_off,len))
-             (c', gates) <- genExpWithDoc c2
-                                          (addOutputFlag rv)
-                                          val
-                                          lval
-             updateVar (listUpdate (this_off,len) gates) rv
-             return c'
--}
+      (SAss lval@(EStruct str_e idx) val) ->
+          do type_table     <- getTypeTable
+             let (_,locs,_) = getStrTParams type_table str_e
+                 (off,len)  = locs !! idx
+                               -- the offset is in primitive types, not bytes
+                 (rv,
+                  lval_off) = getRootvarOffset type_table tup3_get2 lval
+             c2             <- checkOutputVars circ rv (Just (lval_off,len))
+             (c3, gates)    <- genExpWithDoc c2
+                                             (addOutputFlag rv)
+                                             val
+                                             lval
+             case extractEArr type_table lval of
+               Nothing              -> -- just update the lval location(s)
+                                       do updateVar (listUpdate (lval_off,len) gates) rv
+                                          return c3
+               Just ((EArr arr_e idx_e), arr_off, blocs)
+                                    -> -- need to generate a WriteDynArray gate!
+                                       -- eg: for x.y[i].z, we will:
+                                       -- - add a WriteDynArray gate for x.y, limited to .z
+                                       -- - update one of x's gates (the array gate)
+                                       do i             <- nextInt
+                                          (c4, [arr_n]) <- genExp c3 arr_e
+                                          (c5, [idx_n]) <- genExp c4 idx_e
+                                          let (ExpT arr_t _)  = arr_e
+                                              total_blen = sum $ map snd blocs
+                                              ctx        = mkCtx $
+                                                           Gate i
+                                                                arr_t
+                                                                (WriteDynArray (fst $ head blocs,
+                                                                                total_blen))
+                                                                ([arr_n, idx_n] ++ gates)
+                                                                [] []
+                                          updateVar (listUpdate (arr_off,1) [i]) rv
+                                          return $ ctx & c5
 
+      -- TODO: the lval expression could be a straight EArr.
 
-      -- TODO: the lval expression could be EArr.
 
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
       (SIfElse test@(EVar testVar)
@@ -362,39 +411,43 @@ genStm circ stm =
                 _                -> Nothing
 
 
-{-
-
 -- extract an array sub-expression from the given Exp
 -- also return the list of field-locations (in bytes) of the array element type
--- which are affected by the whole expression
+-- which are covered by the whole expression
+-- and also return the offset of the array expression under its root variable.
+-- by example, say we have an expression x.y[i].z
+-- then, the outputs are
+-- ( the array expression x.y[i],
+--   the offset of .y under x,
+--   the (byte offset, byte len)'s of .z under x.y[i]
+-- )
+  
 -- return Nothing if there is no array subexpression
 extractEArr :: TypeTable -> Exp -> Maybe ( Exp,
-                                           [(Int,Int)] )
-extractEArr tab e =
-    do (arr_exp, offs_ts)   <- extractEArr' tab e
-       let (offs, ts)       = unzip offs_ts
+                                           Int,
+                                           [(Int,Int)]
+                                         )
 
--- a helper which returns the primitive unit lens (all 1) and offsets,
--- as well as the types
-extractEArr' :: TypeTable -> Exp -> Maybe ( Exp,
-                                            [(FieldLoc, Typ)] )
-extractEArr' tab (ExpT elem_t exp@(EArr arr_e idx_e)) =
-    Just $ let  t_full      = expandType elem_t
-                offs_ts     = getStructFieldLocs tab t_full
-           in  (exp, offs_ts)
+extractEArr tab (ExpT elem_t exp@(EArr arr_e idx_e)) =
+    Just $ let (blocs,_)    = getTypByteLocs tab elem_t
+                              -- here we need the offset in bytes
+               (rv,off)     = getRootvarOffset tab tup3_get3 arr_e
+           in  (exp, off, blocs)
 
 -- get a recursive answer and return just the slice of this field
-extractEArr' tab (EStruct str_e (off,len)) =
+extractEArr  tab (EStruct str_e idx) =
     -- this is in the Maybe monad
-    do (arr_exp, offs_ts)  <- extractEArr' tab str_e
-       return (arr_exp, take len $ drop off offs_ts)
+    do (arr_exp,arr_off,sublocs)   <- extractEArr tab str_e
+       let (_,_,blocs)              = getStrTParams tab str_e
+           (boff,blen)              = blocs !! idx
+       return (arr_exp, arr_off, take blen $ drop boff sublocs)
 
-extractEArr' tab (ExpT _ e) = extractEArr' tab e
+extractEArr tab (ExpT _ e)  = extractEArr tab e
 
 -- if we hit a primitive expression, there's no array in the exp.
-extractEArr tab e = Nothing
+extractEArr _   _           = Nothing
 
--}
+
 
 
 -- see if this var is an output var, and if so remove the Output flag
@@ -586,11 +639,11 @@ genExp' c exp =
                                 (Right node)    ->
                                     return (c', res)
 
-      (EStruct str_e@(ExpT (StructT (_,locs,_))
-                           _)
-               idx)      -> 
-                           do let (off,len) = locs !! idx
-                              (c', gates) <- genExp c str_e
+      (EStruct str_e idx) -> 
+                           do type_table        <- getTypeTable
+                              (c', gates)       <- genExp c str_e
+                              let (_,locs,_)     = getStrTParams type_table str_e
+                                  (off,len)      = locs !! idx
                               return (c', Right $ take len $ drop off gates)
 
       (EArr arr_e idx_e) ->
@@ -627,8 +680,13 @@ genExp' c exp =
                                                                   | (off,len)   <- e_locs
                                                                   | t           <- e_typs]
                                                  ctxs2   = map mkCtx slicers
-                                                 ctxs    = ctx:ctxs2
-                                             return (c2, (Left ctxs))
+
+                                             -- we'll add the ReadDynArray into the cct
+                                             -- here, and not return it with the slicer
+                                             -- contexts, as others should only look for
+                                             -- vars at the slicers
+                                                 c3 = ctx & c2
+                                             return (c3, (Left ctxs2))
 
       (EStatic e)       -> genExp' c e
 

@@ -57,7 +57,7 @@ program Test4 {
 */
 		k3 = pt.x + 3;
 	
-        main.x = magic.y;
+        main.x = magic.y + magic.x;
 
     }
     

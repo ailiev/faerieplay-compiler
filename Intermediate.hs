@@ -574,10 +574,10 @@ docFunc (Func name vars t args stms) = vcat [text "function" <+> (text name) <+>
                                              empty]
 
 docStm :: Stm -> Doc
-docStm (SBlock vars stms)    = nest 4 (vcat (docVarSet vars :
-                                             text "-----------" :
-                                             (map docStm stms)))
-docStm (SAss lval val)= sep [docExp lval, text "=", docExp val]
+docStm (SBlock vars stms)   = nest 4 (vcat (docVarSet vars :
+                                            text "-----------" :
+                                            (map docStm stms)))
+docStm (SAss lval val)      = sep [docExp lval, text "=", docExp val]
                                
 docStm (SFor counter lo hi stms) = sep [text "for",
                                         parens $ sep [docVar counter, text "=",
