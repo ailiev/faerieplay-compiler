@@ -57,7 +57,13 @@ program Test4 {
 */
 		k3 = pt.x + 3;
 	
+		in.diagonals[2].y = 3;
+
+		main = in.diagonals[2];
+		
         main.x = magic.y + magic.x;
+
+		
 
     }
     

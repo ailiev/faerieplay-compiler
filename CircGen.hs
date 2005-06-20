@@ -301,7 +301,7 @@ getRootvarOffset tab loc_extr exp =
                                    locs       = loc_extr fld_info
                                    preceding  = sum $
                                                 map snd $
-                                                take (idx-1) locs
+                                                take idx locs
                                in  (v, o + preceding)
       (ExpT t e)            -> rec e
       (EArr arr_e idx_e)    -> rec arr_e
@@ -375,7 +375,9 @@ genStm circ stm =
                                                                                 total_blen))
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 [] []
-                                          updateVar (listUpdate (arr_off,1) [i]) rv
+                                          updateVar (trace ("WriteDynArray: rv = " << rv
+                                                            << "; arr_off=" << arr_off)
+                                                           (listUpdate (arr_off,1) [i])) rv
                                           return $ ctx & c5
 
       -- TODO: the lval expression could be a straight EArr.
@@ -421,7 +423,6 @@ genStm circ stm =
 --   the offset of .y under x,
 --   the (byte offset, byte len)'s of .z under x.y[i]
 -- )
-  
 -- return Nothing if there is no array subexpression
 extractEArr :: TypeTable -> Exp -> Maybe ( Exp,
                                            Int,
@@ -430,17 +431,22 @@ extractEArr :: TypeTable -> Exp -> Maybe ( Exp,
 
 extractEArr tab (ExpT elem_t exp@(EArr arr_e idx_e)) =
     Just $ let (blocs,_)    = getTypByteLocs tab elem_t
-                              -- here we need the offset in bytes
-               (rv,off)     = getRootvarOffset tab tup3_get3 arr_e
+                              -- here we need the offset in primitive types
+               (rv,off)     = getRootvarOffset tab getStrTLocs arr_e
            in  (exp, off, blocs)
 
 -- get a recursive answer and return just the slice of this field
-extractEArr  tab (EStruct str_e idx) =
+extractEArr  tab e@(EStruct str_e idx) =
     -- this is in the Maybe monad
     do (arr_exp,arr_off,sublocs)   <- extractEArr tab str_e
-       let (_,_,blocs)              = getStrTParams tab str_e
-           (boff,blen)              = blocs !! idx
-       return (arr_exp, arr_off, take blen $ drop boff sublocs)
+       let (_,locs,_)               = getStrTParams tab str_e
+           (off,len)                = locs !! idx
+       return (arr_exp, arr_off,
+               trace ("extractEArr (" << e << ")" <<
+                      "; sublocs=" << sublocs <<
+                      "; off=" << off <<
+                      "; len=" << len)
+                     (take len $ drop off sublocs))
 
 extractEArr tab (ExpT _ e)  = extractEArr tab e
 
@@ -832,6 +838,8 @@ instance Show Op where
     show Select             = "sel"
     show (Lit l)            = "lit " << l
     show ReadDynArray       = "readarr"
+    show (WriteDynArray
+             (off,len))     = "writearr " << len << "@" << off
     show (Slicer (off,len)) = "slice " << len << "@" << off
 
 showCct c = Graphviz.graphviz' c

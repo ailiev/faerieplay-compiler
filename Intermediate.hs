@@ -287,6 +287,12 @@ typeLength f t =
       t                         -> f t
       
 
+-- extract some of the parameters of a StructT, given the whole parameter tuple
+-- the field locations:
+getStrTLocs     = tup3_get2
+-- the locations in bytes
+getStrTByteLocs = tup3_get3
+
 
 -- byte-lengths of primitive types    
 tblen (IntT _)          = 4
