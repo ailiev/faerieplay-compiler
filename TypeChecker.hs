@@ -441,9 +441,9 @@ checkLVal :: T.LVal -> StateWithErr Im.Exp
 checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
     do ent <- extractEnt lv name
        case ent of
-          (EntVar (_,v))
+          (EntVar (t,v))
               | not $ elem Im.Immutable (Im.vflags v) 
-                  -> return (Im.EVar v)
+                  -> return (Im.ExpT t $ Im.EVar v)
           _       -> throwErr 42 $ "Assigning to immutable value " << name
 
 checkLVal (T.LVal e) =
@@ -486,7 +486,7 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                               (Im.StructT fields_info)    ->
                                   do let (fields, locs, _)  = fields_info
                                          (_,lens)           = unzip locs
-                                     inits <- zipWithM (mkStruct lval)
+                                     inits <- zipWithM (mkStruct lval t)
                                                        fields
                                                        [0..]
                                      return $ (ass lval (Im.EComplexInit (sum lens)) t) :
@@ -500,10 +500,11 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                                      mkInit (typ, lval)
                               _                     -> return []
 
-          ass lval val t = Im.SAss lval (Im.ExpT t val)
+          ass lval val t = Im.SAss (Im.ExpT t lval) (Im.ExpT t val)
           -- create a field-init statement for struct 'str', for the
           -- given field (ie. its type, offset and length)
-          mkStruct str (_, t) field_idx = mkInit (t, (Im.EStruct str field_idx))
+          mkStruct str str_t (_, t) field_idx = mkInit (t, (Im.EStruct (Im.ExpT str_t str)
+                                                                       field_idx))
 
 
 
