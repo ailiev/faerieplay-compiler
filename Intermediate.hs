@@ -8,7 +8,7 @@ import Text.PrettyPrint
 import List (intersperse)
 import Maybe (fromJust)
 
-import Data.Bits ((.&.), (.|.), complement)
+import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
 import Control.Monad.Error (Error, throwError)
 import Control.Monad.Identity (runIdentity)
 
@@ -385,6 +385,8 @@ transIntOp op = case op of
                         Times   -> (*)
                         BAnd    -> (.&.)
                         BOr     -> (.|.)
+                        SL      -> \x s -> shiftL x (fromInteger s)
+                        SR      -> \x s -> shiftR x (fromInteger s)
 {-
                         Eq      -> (==)
                         Gt     -> (>)

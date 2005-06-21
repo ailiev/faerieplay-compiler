@@ -3,6 +3,7 @@
 
 module CircGen (
                 genCircuit,
+                clip_circuit,
                 extractInputs,
                 showCct,
 
@@ -34,10 +35,10 @@ import qualified Container as Cont
 import Intermediate as Im hiding (VarTable)
 
 
--- if we do not want to trace
--- trace _ x = x
 -- reversed order is much better!
-trace = flip Trace.trace
+-- trace = flip Trace.trace
+-- if we do not want to trace
+trace = const
 infix 0 `trace`
 
 
@@ -207,7 +208,7 @@ createInputGates addvars (name, typ) =
         (StructT (fields,_,_))
                 -> do gates <- concatMapM (createInputGates False) fields
                       let is = map gateNode gates
-                      if addvars then insertVar var is else return ()
+                      if addvars then updateVar (const is) var else return ()
                       return gates
 
         (SimpleT tname)
@@ -217,7 +218,7 @@ createInputGates addvars (name, typ) =
         -- IntT, BoolT, ArrayT (for dynamic arrays):
         _         -> do i <- nextInt
                         if addvars
-                          then (insertVar var [i])
+                          then (updateVar (const [i]) var)
                                    `trace`
                                    ("inserting input var " << var << " into VarTable")
                           else return ()
@@ -237,20 +238,21 @@ createInputGates addvars (name, typ) =
 
 
 
--- this just adds a dummy entry of the correct size in the var table for this
--- lval
+-- this just adds a dummy entry (a large negative) of the correct size in the var table
+-- for this lval.
 -- we only need to do it for structs/arrays which are variables, and not
 -- expressions (ie. parts of other complex types)
 genComplexInit lval size =
     case lval of
-      (EVar var)        -> insertVar var (replicate size (minBound))
+      (EVar var)        -> updateVar (const $ replicate size (minBound)) var
       _                 -> return ()
 
 
--- update a range (offset and length) of a list
-listUpdate (offset,len) news l = (take offset l) ++
-                                 news ++
-                                 (drop (offset + len) l)
+-- update a range (offset and length) of a list.
+-- more precisely, replace the range (offset,len) with 'news' (regardless of its length)
+splice (offset,len) news l = (take offset l) ++
+                             news ++
+                             (drop (offset + len) l)
 
 
 -- get the gates corresponding to expression 'e', if necessary adding
@@ -364,7 +366,7 @@ genStm circ stm =
                                           (addOutputFlag var)
                                           exp
                                           lval
-             insertVar var nodes
+             updateVar (const nodes) var
              return c'
 
       -- get the gates for this 'val', and set the address of 'lval'
@@ -383,7 +385,10 @@ genStm circ stm =
                                              lval
              case extractEArr type_table lval of
                Nothing              -> -- just update the lval location(s)
-                                       do updateVar (listUpdate (lval_off,len) gates) rv
+                                       do updateVar
+                                            (applyWithDefault (splice (lval_off,len) gates)
+                                                              gates)
+                                            rv
                                           return c3
                Just ((EArr arr_e idx_e), arr_off, blocs)
                                     -> -- need to generate a WriteDynArray gate!
@@ -402,10 +407,12 @@ genStm circ stm =
                                                                                 total_blen))
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 [] []
-                                          updateVar ((listUpdate (arr_off,1) [i])
+                                          updateVar
+                                            (applyWithDefault (splice (arr_off,1) [i]) [i])
+                                            rv
                                                         `trace`
                                                         ("WriteDynArray: rv = " << rv
-                                                         << "; arr_off=" << arr_off)) rv
+                                                         << "; arr_off=" << arr_off)
                                           return $ ctx & c5
 
       -- TODO: the lval expression could be a straight EArr.
@@ -825,13 +832,16 @@ getInt = St.gets tup3_get2
 getVars = getsVars id
 
 
--- update the location of 'var' by some function.
--- it only touches the first vartable where the var is found, not any of the
--- outer scope tables
-updateVar f var = modifyVars $ mapOne $ maybeAdjust f var
+-- update the location of 'var' by some function of (Maybe [Node])
+-- the new value always goes into the top-most scope
+-- we always use this, even if the var is certain not to be present (eg. during static
+-- initialization), for greater uniformity.
+updateVar :: (Maybe [Gr.Node] -> [Gr.Node]) -> Var -> OutMonad ()
+updateVar f var = modifyVars $ \maps -> let curr    = maybeLookup var maps
+                                            new     = f curr
+                                            maps'   = modtop (Map.insert var new) maps
+                                        in  maps'
 
-
-insertVar var gates = modifyVars $ modtop $ Map.insert var gates
 
 --------------------
 -- state utility functions

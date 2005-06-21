@@ -168,12 +168,15 @@ checkDec (T.TypeDecl n@(T.Ident name) t) = do im_t <- checkTyp t
                                               addToTypes name im_t
 
 
-checkDec (T.ConstDecl (T.Ident name) (T.EInt i)) =
-    do St.modify $ projFromConst $ Map.insert name i
+checkDec (T.ConstDecl (T.Ident name) val) =
+    do im_val   <- checkExp val
+       int_val  <- lift $ Im.evalStatic im_val
+       St.modify $ projFromConst $ Map.insert name int_val
 
+{-
 checkDec (T.ConstDecl (T.Ident name) _)          =
     throwErr 42 $ "Bad value for const " << name
-
+-}
 
 
 

@@ -3,6 +3,9 @@
 program Test4 {
 
 	const DIM = 16;
+
+	const logN = 16;
+	const N    = (1 << logN);
 	
     type Key = Int<16`>;
 	type Short = Int<16`>;
@@ -33,6 +36,8 @@ program Test4 {
 
 		pt = in.center;
 
+		k2 = pt.x;
+
         k3 = 0;
 	
         pt.x = 47;
@@ -40,14 +45,15 @@ program Test4 {
 		magic = in.diagonals[7];
 
         if (pt.x < in.center.x) {
-            for (i = 1 to PI) {
+            for (i = 1 to 16000) {
                 k3 = k3 + k2;
             }
 
             pt.y = k3 * 3;
+			pt.x = k2 - 3;
         }
 
-		magic.y = pt.y;
+		magic = pt;
 
 /*	
 	else {

@@ -3,7 +3,8 @@ module Main where
 import List (unfoldr)
 import Maybe (isJust, fromJust)
 
-import IO ( stdin, hGetContents )
+import IO ( stdin, stderr,
+            hGetContents, hPrint, hFlush  )
 
 import SFDL.Abs                  -- the abstract syntax types from BNFC
 import SFDL.Lex                  -- Alex lexer
@@ -66,18 +67,23 @@ run v p s =
                           print prog
                           let prog_flat = Ho.flattenProg prog
                           putStrLn "Flattened program:"
-                          print prog_flat
+                          hPrint stderr prog_flat
                           case Ur.unrollProg prog_flat of
                             (Left err)       -> print $ "Error! " << err
                             (Right stms)     ->
                                 do putStrLn "Unrolled main:"
-                                   print (PP.vcat (map Im.docStm stms))
+                                   hPrint stderr (PP.vcat (map Im.docStm stms))
                                    let cctFile = "cct.gviz"
-                                   putStrLn $ "And now generating the circuit into " ++ cctFile
-                                   let args = CG.extractInputs prog
-                                       cct  = CG.genCircuit ts stms args
---                                   mapM_ print cct
+                                   let args     = CG.extractInputs prog
+                                       cct      = CG.genCircuit ts stms args
+                                   hPrint stderr cct; hFlush stderr
+                                   putStrLn $ "The raw circuit done"
+                                   let clipped  = CG.clip_circuit cct
+                                   hPrint stderr clipped; hFlush stderr
+                                   putStrLn $ "The clipped circuit done"
+                                   putStrLn $ "Now writing the circuit out to " ++ cctFile
                                    writeFile cctFile(CG.showCct cct)
+--                                   mapM_ print cct
 
 {-
                                                         (stms,errs') ->

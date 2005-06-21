@@ -17,18 +17,16 @@ module SashoLib (
 
          findInStack,
          maybeLookup,
-         maybeAdjust,
+         maybeMapAdjust,
          maybeApply,
                     
         modifyListHead,
-        applyToMaybe,
+        applyWithDefault,
 
         mapOne,
 
 		 pair2,
 		 pair3,
-
-                 map4,
 
                  mapTuple2,
 
@@ -170,14 +168,17 @@ strictList ls@(a : more) = seq a $ seq (strictList more) $ ls
 strictList ls = ls
 
 
--- apply f to (Maybe x), using orig if x is Nothing
-applyToMaybe :: (a -> a) -> a -> Maybe a -> Maybe a
-applyToMaybe f orig x = (x >>= return . f) `mplus` (return orig)
+-- apply f to (Maybe x), using def if x is Nothing
+applyWithDefault :: (a -> a) -> a -> Maybe a -> a
+applyWithDefault f def x = case x of
+                               Just x'  -> f x'
+                               Nothing  -> def
 
 
 maybeApply :: Maybe (a -> a) -> a -> a
 maybeApply (Just f) x = f x
 maybeApply Nothing  x = x
+
 
 
 -- NOTE: needs multi-parameter type classes, which is not Haskell 98, but should
@@ -231,10 +232,10 @@ maybeLookup key maps = findInStack (Map.lookup key) maps
 
 -- a version of Map.adjust which tells if it changed anything or not (ie.
 -- whether the key was found)
-maybeAdjust :: (MonadPlus m, Ord k) => (a -> a) -> k -> Map.Map k a -> m (Map.Map k a)
-maybeAdjust f k m = if Map.member k m
-                    then return $ Map.adjust f k m
-                    else mzero
+maybeMapAdjust :: (MonadPlus m, Ord k) => (a -> a) -> k -> Map.Map k a -> m (Map.Map k a)
+maybeMapAdjust f k m    = if Map.member k m
+                          then return $ Map.adjust f k m
+                          else mzero
 
 -- this version of map is mostly the identity, but the first time that f returns
 -- non-Nothing we'll actually use that result.
@@ -249,13 +250,6 @@ mapOne _ [] = []
 
 modifyListHead _ [] = error "modifyListHead on empty list!"
 modifyListHead f (x:xs) = (f x : xs)
-
-
--- another misguided venture...
-map4 :: (a -> b -> c -> d) -> [a] -> [b] -> [c] -> [d]
--- map4 f [] [] [] = []
--- map4 f (x:xs) (y:ys) (z:zs) = ( f x y z : map4 xs ys zs )
-map4 = zipWith3
 
 
 
