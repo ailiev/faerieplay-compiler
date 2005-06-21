@@ -3,6 +3,7 @@ module Common where
 import Control.Monad.Error (Error, noMsg, strMsg)
 
 
+import qualified Debug.Trace                    as Trace
 
 
 -- This is the type of our type error representation.
@@ -21,3 +22,14 @@ instance Error MyError where
 -- successful result of type a using Right a.
 -- note that we now have a type "ErrMonad a", synonym for "Either TypeError a"
 type ErrMonad = Either MyError
+
+
+
+
+
+-- reversed order is much better!
+trace = flip Trace.trace
+-- if we do not want to trace
+-- trace = const
+infix 0 `trace`
+

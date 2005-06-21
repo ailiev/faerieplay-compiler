@@ -271,6 +271,7 @@ expandType type_table t =
                                                fields_info)
       _                 -> t
 
+
 -- return the length of a type,
 -- which has already been expanded (ie. no SimpleT)
 -- use 'f' to get the length of simple types: Int, Bool, EnumT
@@ -283,7 +284,10 @@ typeLength f t =
                                    tup3_get1 fields
       (SimpleT name)            -> error $ "Intermediate: typeLength of a SimpleT "
                                            << name
-      (ArrayT t len)            -> rec t
+      -- NOTE: dynamic arrays take up just one gate, hence always one
+      -- doesnt make sense to ask for the binary size of a dynamic array, but need to
+      -- rethink this
+      (ArrayT t len)            -> 1
       t                         -> f t
       
 
@@ -319,14 +323,16 @@ addScope sc (VScoped scope_old v)     = (VScoped sc v)
 addScope sc v                         = (VScoped sc v)
 
 add_vflags fl (VScoped sc (VFlagged fl' v)) = (VScoped sc (VFlagged (fl'++fl) v))
-add_vflags fl (VFlagged fl' v) = (VFlagged (fl' ++ fl) v)
-add_vflags fl v = (VFlagged fl v)
+add_vflags fl (VScoped sc v)                = (VScoped sc (VFlagged (fl)      v))
+add_vflags fl (VFlagged fl' v)              = (VFlagged (fl' ++ fl) v)
+add_vflags fl v                             = (VFlagged fl v)
 
                
 
+-- FIXME: strips the scope as well if there is one!
 strip_vflags v = case stripScope v of
                                    (VFlagged _ v)       -> v
-                                   v                    -> v
+                                   _                    -> v
 
 -- complete strip
 strip_var = strip_vflags . stripScope
@@ -482,6 +488,9 @@ mapExp f e = runIdentity (mapExpM (myLiftM f) e)
 -- f_s: function on a statement
 -- f_e: function on an expression (passed on to mapExpM)
 mapStmM :: (Monad m) => (Stm -> m Stm) -> (Exp -> m Exp) -> Stm -> m Stm
+
+-- SIfElse does not fit well into the simple stmChildren scheme, as it has two separate lists
+-- of child statements
 mapStmM f_s f_e (SIfElse test (locs1,stms1)
                               (locs2,stms2)) =
     do new_stms1 <- mapM (mapStmM f_s f_e) stms1
@@ -613,7 +622,8 @@ docExp e = case e of
     (BinOp op e1 e2)    -> cat [docExp e1, docBinOp op, docExp e2]
     (EGetBit x b)       -> docExp (EArr x b)
     (EStatic e)         -> docExp e
-    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
+--    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
+    (ExpT t e)          -> docExp e
     (ESeq stms e)       -> brackets $
                            cat ((punctuate comma (map docStm stms))) <>
                            text ": " <>
@@ -651,8 +661,8 @@ docVar v =
       (VTemp i)         -> text "temp" <> (parens (int i))
       -- the scope list is reversed so we see the outermost scope (which is at
       -- the list end) first
-      (VScoped scopes v)-> cat $ punctuate (text "/") (map int (reverse scopes)) ++ [text "/", docVar v]
-      (VFlagged flags v)-> docVar v <> (text "#") <> cat (map docVarFlag flags)
+      (VScoped scopes v)-> parens $ cat $ punctuate (text "/") (map int (reverse scopes)) ++ [text "/", docVar v]
+      (VFlagged flags v)-> parens $ docVar v <> (text "#") <> cat (map docVarFlag flags)
 
 
 docVarFlag f = char (case f of

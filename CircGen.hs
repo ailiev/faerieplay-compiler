@@ -15,7 +15,6 @@ import Monad (foldM, mplus, liftM)
 import Maybe (fromJust, isJust, fromMaybe)
 import List
 
-import qualified Debug.Trace                    as Trace
 
 import Data.Graph.Inductive.Graph               ((&))
 import qualified Data.Graph.Inductive.Graph     as Gr
@@ -31,15 +30,10 @@ import qualified Control.Monad.State            as St
 import SashoLib
 
 import qualified Container as Cont
+import Common (trace)
 
 import Intermediate as Im hiding (VarTable)
 
-
--- reversed order is much better!
--- trace = flip Trace.trace
--- if we do not want to trace
-trace = const
-infix 0 `trace`
 
 
 -- gate flags
@@ -314,7 +308,7 @@ updateCtxLab new_label = tup4_proj_3 (const new_label)
 -- locations we use, primitive type (tup3_get2) or byte (tup3_get3)
 
 getRootvarOffset :: TypeTable ->
-                    (([TypedName], [FieldLoc], [FieldLoc]) -> [FieldLoc]) ->
+                    ( ([TypedName], [FieldLoc], [FieldLoc]) -> [FieldLoc] ) ->
                     Exp ->
                     (Var, Int)
 getRootvarOffset tab loc_extr exp =
@@ -357,12 +351,12 @@ genStm circ stm =
              return circ
 
       s@(SAss lval@(EVar var) exp) ->
-          do var_table  <- getVars
+          do -- var_table  <- getVars
              circ'      <- checkOutputVars circ var Nothing
-                               `trace` ("genStm " << s <<
+                               {- `trace` ("genStm " << s <<
                                         "; var=" << var <<
-                                        "; vartable=" << var_table)
-             (c', nodes) <- genExpWithDoc circ'
+                                        "; vartable=" << var_table) -}
+             (c',nodes) <- genExpWithDoc circ'
                                           (addOutputFlag var)
                                           exp
                                           lval
@@ -408,14 +402,36 @@ genStm circ stm =
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 [] []
                                           updateVar
-                                            (applyWithDefault (splice (arr_off,1) [i]) [i])
+                                            (applyWithDefault (splice (arr_off,1) [i])
+                                                              [i])
                                             rv
                                                         `trace`
                                                         ("WriteDynArray: rv = " << rv
                                                          << "; arr_off=" << arr_off)
                                           return $ ctx & c5
 
-      -- TODO: the lval expression could be a straight EArr.
+
+      -- quite similar to the above. really need to structure this better
+      s@(SAss lval@(EArr arr_e idx_e) val) ->
+          do i                  <- nextInt
+             type_table         <- getTypeTable
+             let (rv,off)        = getRootvarOffset type_table getStrTLocs arr_e
+             (c3, gates)        <- genExpWithDoc circ
+                                                 (addOutputFlag rv)
+                                                 val
+                                                 lval
+             (c4, [arr_n])      <- genExp c3 arr_e
+             (c5, [idx_n])      <- genExp c4 idx_e
+             let (ExpT arr_t _)  = arr_e
+                 ctx             = mkCtx $ Gate i
+                                                arr_t
+                                                -- NOTE: writing -1 here to mean "the end"
+                                                (WriteDynArray (0,
+                                                                -1))
+                                                ([arr_n, idx_n] ++ gates)
+                                                [] []
+             updateVar (applyWithDefault (splice (off,1) [i]) [i]) rv
+             return $ ctx & c5
 
 
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
@@ -502,23 +518,24 @@ checkOutputVars :: Circuit -> Var -> Maybe FieldLoc -> OutMonad Circuit
 checkOutputVars c var mb_gate_loc
     | strip_var var == VSimple "main" =
         -- remove the output flags there
-        do vgates <- getsVars $
-                     fromJustMsg "CircGen: genStm: lookup main" .
-                     (maybeLookup var)
-           -- take a slice of the gates if mb_gate_loc is not Nothing
-           let vgates' = case mb_gate_loc of
-                           Nothing          -> vgates
-                           (Just (off,len)) -> (take len $ drop off vgates)
-                                                  `trace`
-                                                     ("checkOutputVars (off,len)="
-                                                      << (off,len) <<
-                                                     "; vgates=" << vgates)
+        do mb_vgates    <- getsVars $ maybeLookup var
+           case mb_vgates of
+             Nothing        -> return c
+             Just vgates    ->
+                 -- take a slice of the gates if mb_gate_loc is not Nothing
+                 do let vgates' = case mb_gate_loc of
+                                    Nothing          -> vgates
+                                    (Just (off,len)) -> (take len $ drop off vgates)
+                                                           `trace`
+                                                           ("checkOutputVars (off,len)="
+                                                            << (off,len) <<
+                                                            "; vgates=" << vgates)
 
-               -- and update the Gate flags on those gates
-               c' = foldl (updateLabel (setFlags []))
-                          c
-                          vgates'
-           return c'
+                        -- and update the Gate flags on those gates
+                        c' = foldl (updateLabel (setFlags []))
+                                   c
+                                   vgates'
+                    return c'
     | otherwise =
         return c `trace` ("checkOutputVars non-matching var: " << var)
 
@@ -616,9 +633,13 @@ foo [] _  = []
 -- inputs
 getSelType gr (node1, node2)
     = case map (getType . fromJust . Gr.lab gr) [node1, node2] of
-        [Im.BoolT,   Im.BoolT  ]  -> Im.BoolT
-        [Im.IntT i1, Im.IntT i2]  -> Im.IntT $ Im.BinOp Max i1 i2
-
+        [Im.BoolT          , Im.BoolT          ]    -> Im.BoolT
+        [Im.IntT i1        , Im.IntT i2        ]    -> Im.IntT $ Im.BinOp Max i1 i2
+        [t1@(Im.StructT _) , t2@(Im.StructT _) ]    -> t1 `trace`
+                                                            ("getSelType got types " <<
+                                                             t1 << " and " << t2)
+        [a1@(Im.ArrayT _ _), a2@(Im.ArrayT _ _)]    -> a1 `trace` ("getSelType got types " <<
+                                                                   a1 << " and " << a2)
     where getType (Gate _ t _ _ _ _) = t
 
 
@@ -654,8 +675,18 @@ genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
 genExp' c exp =
     case exp `trace` ("genExp' " << stripExpT exp) of
       (BinOp op e1 e2)  -> do i <- nextInt
-                              (c1, [gate1]) <- genExp c   e1
-                              (c2, [gate2]) <- genExp c1  e2
+                              (c1, gates1) <- genExp c   e1
+                              let gate1 = case gates1 of
+                                            [g1]   -> g1
+                                            _      -> error ("BinOp " << exp <<
+                                                             " arg1 got multiple gates: " <<
+                                                             gates1)
+                              (c2, gates2) <- genExp c1  e2
+                              let gate2 = case gates2 of
+                                            [g]    -> g
+                                            _      -> error ("BinOp " << exp <<
+                                                             " arg2 got multiple gates: " <<
+                                                             gates2)
                               let ctx       = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] [] []
                               return (c2, Left [ctx])
 
@@ -665,7 +696,7 @@ genExp' c exp =
                               return (c1, Left [ctx])
 
       (EVar var)        -> do gates <- getsVars $
-                                       fromJustMsg "CircGen: Lookup Var" .
+                                       fromJustMsg ("CircGen: Lookup Var " << var) .
                                        maybeLookup var
                               return (c, Right gates)
 
@@ -695,7 +726,11 @@ genExp' c exp =
                               return (c', Right $ take len $ drop off gates)
 
       (EArr arr_e idx_e) ->
-                           do (c1, [arr_n]) <- genExp c arr_e
+                           do (c1, arr_ns)  <- genExp c arr_e
+                              let arr_n = case arr_ns of
+                                            [arr_n] -> arr_n
+                                            _       -> error ("Array got too many wires: " <<
+                                                              arr_ns)
                               (c2, [idx_n]) <- genExp c1 idx_e
                               readarr_n     <- nextInt
                               type_table    <- getTypeTable

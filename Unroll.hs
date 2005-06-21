@@ -1,7 +1,7 @@
 module Unroll where
 
 
-import Debug.Trace
+-- import Debug.Trace
 
 import Control.Monad.Error (Error, noMsg, strMsg, throwError)
 import Control.Monad.Identity (Identity, runIdentity)
@@ -86,19 +86,26 @@ unroll :: Stm -> StateWithErr [Stm]
 unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
               do (Func name locals t form_args stms) <- extractFunc nm
-                 -- replace all local variables with Scoped ones, in stms
                  let stms'      = map (scopeVars locals scope) stms
-                     form_vars  = map (\(name,typ) -> addScope scope $ VSimple name)
+                                        `trace`
+                                        ("unroll func: name = " << nm <<
+                                         "; locals = " << locals <<
+                                         "; scope = " << scope)
+                     -- slight HACK: recreating vars from the formal param list like this
+                     -- is not well structured, but for now needed to get the formal arg
+                     -- to look like its usage inside the function.
+                     form_vars  = map (\(name,typ) -> addScope scope $
+                                                      add_vflags [FormalParam] $
+                                                      VSimple name)
                                       form_args
-                 -- substitute actual values for all the formal params, in all
-                 -- stms
-                 -- substs is a list of subst partial applications:
-                 -- substs :: [Stm -> Stm]
-                     substs     = [subst fvar arg | fvar <- form_vars, arg <- args]
-                     stms''     = map (\stm -> foldl (flip ($)) stm substs) stms'
-                     -- append an assignment to the target var
-                     stms3  = stms'' ++ [SAss lv (fcnRetVar nm scope)]
-                 return stms3
+                     -- assignments to the formal params
+                     ass's      = [SAss (EVar formarg)
+                                        actual_arg      | formarg    <- form_vars
+                                                        | actual_arg <- args]
+                     -- assignment to lval from the function return parameter
+                     retass     = [SAss lv (fcnRetVar nm scope)]
+                 return $ ass's ++ stms' ++ retass
+
 
 
 
@@ -119,9 +126,6 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                  let stms' = map (scopeVars (Cont.singleton (stripScope countVar))
                                             scope)
                                  stms
---                 return stms'
-                     -- the actual unrolling!
---                     dummy = trace ("num reps = " << (hi - lo)) 3
                      stmss = replicate (fromInteger (hi-lo)) stms'
                      -- and subst correct counter values into all the statements
                      -- a version of subst for each unrolled block of stm's
@@ -218,8 +222,8 @@ subst var val s = mapStm f_s f_e s
 -- substitue a value for a var into an exp
 --          var      val    exp    result
 substExp :: Var -> Exp -> Exp -> Exp
-substExp var val exp = mapExp f exp
-    where f (EVar var2) | var2 == var   = val
+substExp var val exp = mapExp f exp   -- `trace` ("try substExp " << var << " for " <<  val)
+    where f (EVar var2) | var2 == var   = val    -- `trace` ("substExp " << var2 << " -> " << val)
           f e                           = e
 
 

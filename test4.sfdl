@@ -22,7 +22,7 @@ program Test4 {
 		Point[DIM] diagonals
 	};
 
-    function Int<16`> f (Int<16`> x) {
+    function Key f (Key x) {
         f = x * 2;
     };
 
@@ -45,8 +45,8 @@ program Test4 {
 		magic = in.diagonals[7];
 
         if (pt.x < in.center.x) {
-            for (i = 1 to 16000) {
-                k3 = k3 + k2;
+            for (i = 1 to 3) {
+                k3 = f(k3);
             }
 
             pt.y = k3 * 3;

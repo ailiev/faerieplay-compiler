@@ -281,13 +281,23 @@ checkTyp (T.EnumT ids)          = return (Im.EnumT "" (bitsize $ length ids))
 
 
 ---------------------
--- expandTyp does top-level resolving of type names. No need to fully unroll a
--- complex type
+-- expandTyp fully unrolls a type, resolving all type names
+-- FIXME: this is a duplicate of Im.expandType, modulo Monad differences
 ---------------------
 expandTyp :: Im.Typ -> StateWithErr Im.Typ
-expandTyp (Im.SimpleT name)     = do exp_t <- lookupType name
-                                     expandTyp exp_t
-expandTyp t                     = return t
+expandTyp t = case t of
+                (Im.SimpleT name)       -> do exp_t <- lookupType name
+                                              expandTyp exp_t
+                (Im.ArrayT elem_t
+                           len)         -> do elem_t' <- expandTyp elem_t
+                                              return $ Im.ArrayT elem_t' len
+                (Im.StructT (name_typs,
+                             s2,
+                             s3))       -> do let (names,typs)   = unzip name_typs
+                                              typs'             <- mapM expandTyp typs
+                                              return $ Im.StructT (zip names typs', s2, s3)
+
+                _                       -> return t
 
 
 
@@ -346,20 +356,27 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
                                     (elemT,new_e) <- check new_arr new_idx
                                     return $ annot elemT new_e
     -- returns the type of the array elements
-    where check arr@(Im.ExpT (Im.ArrayT typ _) _) idx = do checkIdx idx
-                                                           return ( typ,        (Im.EArr arr idx) )
-          check arr@(Im.ExpT (Im.IntT   _)     _) idx = do checkIdx idx
-                                                           return ( (Im.IntT 1), (Im.EGetBit arr idx) )
-          check _ _                                   = throwErr 42 $ "Array " << arr << " in " << e
-                                                                     << " is not an array or int!"
+    where check arr@(Im.ExpT arr_t _) idx =
+              do checkIdx idx
+                 arr_t_full <- expandTyp arr_t
+                 case arr_t of
+                   (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx)    )
+                   (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx) )
+                   _                  -> throwErr 42 ( "Array " << arr << " in " << e
+                                                       << " is not an array or int!")
           -- index type has to be int
-          checkIdx idx = case idx of
-                           (Im.ExpT (Im.IntT _) _)  -> return ()
-                           _                        -> throwErr 42 $ "Array index in " << e << " is not an Int"
+          checkIdx idx = let (Im.ExpT idx_t _) = idx
+                         in  do idx_t_full <- expandTyp idx_t
+                                case idx_t_full of
+                                    (Im.IntT _)  -> return ()
+                                    _            -> throwErr 42 ("Array index in " <<
+                                                                 e << " is not an Int")
 
 
 checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
     = do new_str@(Im.ExpT strT _) <- checkExp str
+         -- FIXME: here it is not so good that the type is fully expanded, as then we
+         -- include it into the expression
          typ_full                <- expandTyp strT
          (typ,new_e)             <- check typ_full new_str
          return $ annot typ new_e
@@ -386,7 +403,9 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
           check (Im.GenIntT) new_str = let val = Im.EStatic $ Im.UnOp Im.Bitsize new_str
                                        in  return (Im.IntT (Im.UnOp Im.Bitsize val) , val)
 
-          check typ _              = throwErr 42 $ str << " in " << e << " is not a struct, it is " << typ
+          check typ _              = throwErr 42 (str << " in " << e <<
+                                                  " is not a struct, it is " <<
+                                                  typ)
 
 
 
@@ -627,7 +646,8 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
           (Im.EnumT nm1 _, Im.EnumT nm2 _) | nm1 == nm2 -> return answer
           _                      -> throwErr 42 $ "Args to comparison expression "
                                                   << answer
-                                                  << " are invalid"
+                                                  << " are invalid; the two types are "
+                                                  << full_t1 << " and " << full_t2
 
 
 mkVarSet :: Im.VarTable -> Im.VarSet
