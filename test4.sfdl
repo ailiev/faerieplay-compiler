@@ -39,15 +39,16 @@ program Test4 {
 
 		magic = in.diagonals[7];
 
-        /*
-        if (pt.x < 16) {
+        if (pt.x < in.center.x) {
             for (i = 1 to PI) {
                 k3 = k3 + k2;
             }
 
-            pt.y = pt.x * 3;
+            pt.y = k3 * 3;
         }
-		*/
+
+		magic.y = pt.y;
+
 /*	
 	else {
 	    k3 = k;
@@ -62,6 +63,7 @@ program Test4 {
 		main = in.diagonals[2];
 		
         main.x = magic.y + magic.x;
+		main.y = 2;
 
 		
 

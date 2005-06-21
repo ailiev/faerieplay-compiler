@@ -14,13 +14,16 @@ import Monad (foldM, mplus, liftM)
 import Maybe (fromJust, isJust, fromMaybe)
 import List
 
-import Debug.Trace      (trace)
+import qualified Debug.Trace                    as Trace
 
 import Data.Graph.Inductive.Graph               ((&))
 import qualified Data.Graph.Inductive.Graph     as Gr
+import qualified Data.Graph.Inductive.Basic     as GrBas
 import qualified Data.Graph.Inductive.Graphviz  as Graphviz
 import qualified Data.Graph.Inductive.Tree      as TreeGr
 import qualified Data.Graph.Inductive.Query.DFS as GrDFS
+import qualified Data.Graph.Inductive.Query.BFS as GrBFS
+
 import qualified Data.Map                       as Map
 import qualified Control.Monad.State            as St
 
@@ -31,8 +34,16 @@ import qualified Container as Cont
 import Intermediate as Im hiding (VarTable)
 
 
+-- if we do not want to trace
+-- trace _ x = x
+-- reversed order is much better!
+trace = flip Trace.trace
+infix 0 `trace`
+
+
 -- gate flags
-data GateFlags = Output
+data GateFlags = Output deriving (Eq,Ord)
+
 
 -- the gate operations
 data Op =
@@ -109,10 +120,10 @@ setGateType newt        (Gate g1 typ  g3 g4 g5 g6) =
 gate2lnode :: Gate -> Gr.LNode Gate
 gate2lnode g@(Gate i _ _ _ _ _) = (i,g)
 
--- just the node number of a Gate
+-- accessors for some of the Gate fields
 gateNode = fst . gate2lnode
-
 gateType (Gate _ t _ _ _ _) = t
+gateFlags (Gate _ _ _ _ fl _) = fl
 
 
 
@@ -142,13 +153,28 @@ genCircuit :: TypeTable ->      -- the type table
 -}
 
 genCircuit type_table stms args =
-    let startState = ([Map.empty], 0, type_table)
-        (circ, st) = St.runState (genCircuitM stms args)
-                                 startState
+    let startState      = ([Map.empty], 0, type_table)
+        (circ, st)      = St.runState (genCircuitM stms args)
+                                      startState
+        clipped_circ    = clip_circuit circ
         top_circ   = GrDFS.topsort' circ
-    in circ
+    in clipped_circ
 
 
+-- keep only gates which are reverse-reachable from the output gates
+clip_circuit :: Circuit -> Circuit
+clip_circuit c = let c_rev          = GrBas.grev c
+                     out_nodes      = map Gr.node' $
+                                      GrBas.gsel isOutCtx c_rev
+                     reach_nodes    = GrBFS.bfsn out_nodes c_rev
+                     reach_gr       = keepNodes reach_nodes c
+                 in  reach_gr
+    where isOutCtx = elem Output . gateFlags . Gr.lab'
+
+
+
+keepNodes :: Gr.Graph gr => [Gr.Node] -> gr a b -> gr a b
+keepNodes keeps g = Gr.delNodes (Gr.nodes g \\ keeps) g
 
 
 
@@ -191,8 +217,9 @@ createInputGates addvars (name, typ) =
         -- IntT, BoolT, ArrayT (for dynamic arrays):
         _         -> do i <- nextInt
                         if addvars
-                          then trace ("inserting input var " << var << " into VarTable")
-                                     (insertVar var [i])
+                          then (insertVar var [i])
+                                   `trace`
+                                   ("inserting input var " << var << " into VarTable")
                           else return ()
                         -- FIXME: this adds an incorrect doc
                         -- annotation to the gate - it show struct
@@ -216,7 +243,7 @@ createInputGates addvars (name, typ) =
 -- expressions (ie. parts of other complex types)
 genComplexInit lval size =
     case lval of
-      (EVar var)        -> insertVar var (replicate size (-1))
+      (EVar var)        -> insertVar var (replicate size (minBound))
       _                 -> return ()
 
 
@@ -244,16 +271,12 @@ genExpWithDoc c ghook e e_doc =
                             -- we got Contexts back, so
                             -- add the doc to the gate, and apply the
                             -- hook
-                                let gate    = Gr.lab' ctx
-                                    gate'   = processGate gate
-                                    ctx'    = updateCtxLab gate' ctx
+                                let ctx'    = processCtx ctx
                                 in  (ctx' & c', [Gr.node' ctx'])
 
                             (Left ctxs) ->
-                                -- TODO: cannot for now add a doc to
-                                -- multiple contexts
-                                let ctxs' = trace ("genExpWithDoc on ctxs " << map Gr.lab' ctxs)
-                                                  ctxs
+                                -- FIXME: adding the same doc to all the gates
+                                let ctxs'   = map processCtx ctxs
                                 in ( foldl (flip (&)) c' ctxs',
                                      map Gr.node' ctxs' )
 
@@ -270,11 +293,11 @@ genExpWithDoc c ghook e e_doc =
     where addGateDoc exp (Gate g1 g2 g3 g4 g5 doc) =
                           Gate g1 g2 g3 g4 g5 new_doc
               where new_doc = push (stripExpT exp) doc
-          processGate g = let g'  = maybeApply ghook g
-                              g'' = {- trace ("Adding doc " << e_doc
-                                       << " to gate " << gateNode g) -}
-                                          (addGateDoc e_doc g')
-                          in  g''
+          processGate g     = let g'  = maybeApply ghook g
+                                  g'' = (addGateDoc e_doc g')
+                              in  g''
+          processCtx        = tup4_proj_3 processGate
+
 
 -- update the label of a graph Context
 updateCtxLab new_label = tup4_proj_3 (const new_label)
@@ -331,8 +354,12 @@ genStm circ stm =
           do genComplexInit lval size
              return circ
 
-      (SAss lval@(EVar var) exp) ->
-          do circ' <- checkOutputVars circ var Nothing
+      s@(SAss lval@(EVar var) exp) ->
+          do var_table  <- getVars
+             circ'      <- checkOutputVars circ var Nothing
+                               `trace` ("genStm " << s <<
+                                        "; var=" << var <<
+                                        "; vartable=" << var_table)
              (c', nodes) <- genExpWithDoc circ'
                                           (addOutputFlag var)
                                           exp
@@ -342,11 +369,11 @@ genStm circ stm =
 
       -- get the gates for this 'val', and set the address of 'lval'
       -- to those gates
-      (SAss lval@(EStruct str_e idx) val) ->
-          do type_table     <- getTypeTable
+      s@(SAss lval@(EStruct str_e idx) val) ->
+          do type_table    <- getTypeTable
              let (_,locs,_) = getStrTParams type_table str_e
                  (off,len)  = locs !! idx
-                               -- the offset is in primitive types, not bytes
+                               -- (off,len) are in primitive types, not bytes
                  (rv,
                   lval_off) = getRootvarOffset type_table tup3_get2 lval
              c2             <- checkOutputVars circ rv (Just (lval_off,len))
@@ -375,9 +402,10 @@ genStm circ stm =
                                                                                 total_blen))
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 [] []
-                                          updateVar (trace ("WriteDynArray: rv = " << rv
-                                                            << "; arr_off=" << arr_off)
-                                                           (listUpdate (arr_off,1) [i])) rv
+                                          updateVar ((listUpdate (arr_off,1) [i])
+                                                        `trace`
+                                                        ("WriteDynArray: rv = " << rv
+                                                         << "; arr_off=" << arr_off)) rv
                                           return $ ctx & c5
 
       -- TODO: the lval expression could be a straight EArr.
@@ -442,11 +470,12 @@ extractEArr  tab e@(EStruct str_e idx) =
        let (_,locs,_)               = getStrTParams tab str_e
            (off,len)                = locs !! idx
        return (arr_exp, arr_off,
-               trace ("extractEArr (" << e << ")" <<
-                      "; sublocs=" << sublocs <<
-                      "; off=" << off <<
-                      "; len=" << len)
-                     (take len $ drop off sublocs))
+               (take len $ drop off sublocs)
+                    `trace`
+                    ("extractEArr (" << e << ")" <<
+                     "; sublocs=" << sublocs <<
+                     "; off=" << off <<
+                     "; len=" << len))
 
 extractEArr tab (ExpT _ e)  = extractEArr tab e
 
@@ -468,20 +497,26 @@ checkOutputVars c var mb_gate_loc
         -- remove the output flags there
         do vgates <- getsVars $
                      fromJustMsg "CircGen: genStm: lookup main" .
-                     maybeLookup var
+                     (maybeLookup var)
            -- take a slice of the gates if mb_gate_loc is not Nothing
            let vgates' = case mb_gate_loc of
                            Nothing          -> vgates
-                           (Just (off,len)) -> take len $ drop off vgates
+                           (Just (off,len)) -> (take len $ drop off vgates)
+                                                  `trace`
+                                                     ("checkOutputVars (off,len)="
+                                                      << (off,len) <<
+                                                     "; vgates=" << vgates)
+
+               -- and update the Gate flags on those gates
                c' = foldl (updateLabel (setFlags []))
                           c
                           vgates'
            return c'
     | otherwise =
-        return c
+        return c `trace` ("checkOutputVars non-matching var: " << var)
 
 
--- update the label for a given node in a graph, if this label is present
+-- update the label for a given node in a graph, if this node is present
 updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
 updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
                         in  case mctx of
@@ -504,8 +539,8 @@ genCondExit testGate
                   filter nonLocal $
                   map (\(var,gates) -> var) $
                   concatMap Map.toList [ifScope, elseScope]
-        sources = map varSources $ trace ("non-local scope vars: " << vars)
-                                         vars
+        sources = (map varSources vars) `trace` ("non-local scope vars: " << vars)
+
     in  foldM addSelect circ $ zip vars sources
           
     where -- a var is non-local if was not declared in this scope,
@@ -610,7 +645,7 @@ genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
                                                   [CircuitCtx]
                                                   [Gr.Node]))
 genExp' c exp =
-    case trace ("genExp' " << stripExpT exp) exp of
+    case exp `trace` ("genExp' " << stripExpT exp) of
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1, [gate1]) <- genExp c   e1
                               (c2, [gate2]) <- genExp c1  e2
@@ -769,6 +804,11 @@ type MyState = ([VarTable],     -- stack of table Var -> [Node]
                                 -- could be in a Reader, but easier to
                                 -- stick it in here 
                )
+{-
+instance St.MonadState Int (St.State MyState) where
+    get = getInt
+    put = tup3_get2 >>= St.put
+-}
 
 
 
