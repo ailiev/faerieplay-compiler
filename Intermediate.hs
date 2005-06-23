@@ -58,7 +58,12 @@ data VarFlag =
                                 -- representing its enclosing function
    deriving (Show,Ord,Eq)
 
+
 type TypeTable = Map.Map EntName Typ
+
+class (Monad m) => TypeTableMonad m where
+    getTypeTable :: m TypeTable
+
 
 type FuncTable = Map.Map EntName Func
 
@@ -257,19 +262,40 @@ type Scope = [Int]
 ------------------
 
 -- fully expand a type, recursing into complex types
-expandType type_table t =
-    let rec = expandType type_table in
+expandType :: (TypeTableMonad m) => Typ -> m Typ
+expandType t =
+       case t of
+                (SimpleT name)          -> do type_table <- getTypeTable
+                                              let t' = fromJust $ Map.lookup name type_table
+                                              expandType t'
+                (ArrayT elem_t
+                           len)         -> do elem_t' <- expandType elem_t
+                                              return $ ArrayT elem_t' len
+                (StructT (name_typs,
+                          s2,
+                          s3))          -> do let (names,typs)   = unzip name_typs
+                                              typs'             <- mapM expandType typs
+                                              return $ StructT (zip names typs', s2, s3)
+
+                _                       -> return t
+
+{-
+expandType :: (TypeTableMonad m) => Typ -> m Typ
+expandType t =
+    do type_table <- getTypeTable
     case t of
-      (SimpleT name)    -> let t' = fromJust $ Map.lookup name type_table
-                           in  rec t'
+      (SimpleT name)    -> do 
+                              expandType  t'
       (ArrayT elem_t
-              len)      -> ArrayT (rec elem_t) len
+              len)      -> do elem_t' <- expandType elem_t
+                              return ArrayT elem_t' len
       -- a bit of a mess to reach the field types, with the large
       -- fields_info tuple
       (StructT
          fields_info)   -> StructT (tup3_proj1 (map (projSnd rec))
                                                fields_info)
       _                 -> t
+-}
 
 
 -- return the length of a type,
@@ -651,6 +677,15 @@ docTyp t =
       (FuncT t ts)      -> cat [parens $ cat $ punctuate (text ", ") (map docTyp ts),
                                 text " -> ",
                                 docTyp t]
+
+docTypMachine t = 
+    case t of
+      (ArrayT t size)   -> let size_i   = case evalStatic size of
+                                            (Left e)  -> error ("docTypMachine on " << t <<
+                                                                "failed: " << e)
+                                            (Right i) -> i
+                           in  sep [text "array", integer size_i]
+      _                 -> text "scalar"
 
 
 docTypedName (name,t) = sep [docTyp t, text name]

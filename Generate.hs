@@ -4,7 +4,9 @@ import List (unfoldr)
 import Maybe (isJust, fromJust)
 
 import IO ( stdin, stderr,
-            hGetContents, hPrint, hFlush  )
+            hGetContents, hPrint, hFlush, hPutStrLn,
+            openFile, hClose,
+            IOMode(..))
 
 import SFDL.Abs                  -- the abstract syntax types from BNFC
 import SFDL.Lex                  -- Alex lexer
@@ -61,10 +63,10 @@ run v p s =
                   case typeCheck prog of
                     (Left err)        -> print $ "Error! " << err
                     (Right prog@(Im.Prog pname
-                                         Im.ProgTables {Im.types=ts,
+                                         Im.ProgTables {Im.types=typ_table,
                                                         Im.funcs=fs}))      ->
                        do putStrLn "After typechecking:"
-                          print prog
+                          hPrint stderr prog
                           let prog_flat = Ho.flattenProg prog
                           putStrLn "Flattened program:"
                           hPrint stderr prog_flat
@@ -73,16 +75,15 @@ run v p s =
                             (Right stms)     ->
                                 do putStrLn "Unrolled main:"
                                    hPrint stderr (PP.vcat (map Im.docStm stms))
-                                   let cctFile = "cct.gviz"
-                                   let args     = CG.extractInputs prog
-                                       cct      = CG.genCircuit ts stms args
+                                   let cctFile      = "cct.gviz"
+                                       gatesFile    = "gates.txt"
+                                       args         = CG.extractInputs prog
+                                       (cct,gates)  = CG.genCircuit typ_table stms args
                                    hPrint stderr cct; hFlush stderr
-                                   putStrLn $ "The raw circuit done"
-                                   let clipped  = CG.clip_circuit cct
-                                   hPrint stderr clipped; hFlush stderr
-                                   putStrLn $ "The clipped circuit done"
                                    putStrLn $ "Now writing the circuit out to " ++ cctFile
-                                   writeFile cctFile(CG.showCct cct)
+                                   writeFile cctFile (CG.showCct cct)
+                                   putStrLn $ "Writing the gate list to " ++ gatesFile
+                                   writeGates gatesFile gates
 --                                   mapM_ print cct
 
 {-
@@ -96,6 +97,11 @@ run v p s =
                                                          else return ()
 -}
 -}
+
+writeGates file gates = do h        <- openFile file WriteMode
+                           mapM (hPrint h) gates
+                           hClose h
+
 
 printMap m = mapM_ print $ Map.fold (:) [] m
 

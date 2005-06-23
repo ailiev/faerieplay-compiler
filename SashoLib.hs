@@ -19,6 +19,7 @@ module SashoLib (
          maybeLookup,
          maybeMapAdjust,
          maybeApply,
+         MaybeT, runMaybeT,
                     
         modifyListHead,
         applyWithDefault,
@@ -59,7 +60,9 @@ import List (isPrefixOf, union)
 
 import Monad (MonadPlus, mzero, mplus, msum, liftM)
 
-import Control.Monad.Error (Error, noMsg)
+import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT)
+
+import Control.Monad.Trans (MonadTrans, lift)
 
 import qualified Data.Map as Map
 
@@ -100,7 +103,7 @@ notp f = not . f
 -- operator to build strings
 (<<) :: (Show a, Show b) => (a -> b -> String)
 x << y = cleanup $ (show x) ++ (show y)
-    where cleanup = (filter ((/= '"') .&& (/= '\\')))
+    where cleanup = (filter ((/= '"')))
 
 
 -- compose a function on 2 args with a function on one arg
@@ -251,6 +254,38 @@ mapOne _ [] = []
 modifyListHead _ [] = error "modifyListHead on empty list!"
 modifyListHead f (x:xs) = (f x : xs)
 
+
+{-
+-- shortcut isn't quite working for now...
+
+newtype MaybeT = ErrorT ()
+
+runMaybeT c = do v <- runErrorT c
+                 return (either Just (const Nothing) v)
+
+-}
+
+newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }
+
+instance (Monad m) => Monad (MaybeT m) where
+    return a    = MaybeT $ return (Just a)
+    m >>= k     = MaybeT $ do a <- runMaybeT m
+                              case a of
+                                     Nothing -> return Nothing
+                                     Just x  -> runMaybeT (k x)
+    fail _      = MaybeT $ return Nothing
+
+
+instance (Monad m) => MonadPlus (MaybeT m) where
+    mzero       = MaybeT $ return Nothing
+    m `mplus` n = MaybeT $ do a <- runMaybeT m
+                              case a of
+                                     Nothing    -> runMaybeT n
+                                     Just x     -> return (Just x)
+
+instance MonadTrans MaybeT where
+    lift m      = MaybeT $ do a <- m
+                              return $ Just a
 
 
 

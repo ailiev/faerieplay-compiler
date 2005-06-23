@@ -64,6 +64,8 @@ throwErr :: Int -> String -> StateWithErr a
 throwErr p msg = lift $ Left $ Err p msg
 
 
+instance Im.TypeTableMonad StateWithErr where
+    getTypeTable = St.gets types
 
 
 
@@ -244,11 +246,13 @@ checkStm s@(T.SIfElse cond stm1 stm2) =
 ---------------
 checkTyp :: T.Typ -> StateWithErr Im.Typ
 
-checkTyp (T.StructT fields)     = do type_table     <- getTypeTable
-                                     im_fields      <- mapM checkTypedName fields
-                                     let full_ts    = map ((Im.expandType type_table) . snd)
-                                                          im_fields
-                                         lens       = map (Im.typeLength (const 1)) full_ts
+checkTyp (T.StructT fields)     = do im_fields      <- mapM checkTypedName fields
+                                     -- note that by the time expandType is called here,
+                                     -- checkTypedName has already checked the sub-types
+                                     -- in the struct fields, so we cannot get an error 
+                                     full_ts        <- mapM (Im.expandType . snd)
+                                                            im_fields
+                                     let lens       = map (Im.typeLength (const 1)) full_ts
                                          bytelens   = map (Im.typeLength Im.tblen) full_ts
                                          offs       = init $ scanl (+) 0 lens
                                          byteoffs   = init $ scanl (+) 0 bytelens
@@ -281,24 +285,9 @@ checkTyp (T.EnumT ids)          = return (Im.EnumT "" (bitsize $ length ids))
 
 
 ---------------------
--- expandTyp fully unrolls a type, resolving all type names
--- FIXME: this is a duplicate of Im.expandType, modulo Monad differences
+-- expandType fully unrolls a type, resolving all type names
+-- FIXME: this is a duplicate of Im.expandTypee, modulo Monad differences
 ---------------------
-expandTyp :: Im.Typ -> StateWithErr Im.Typ
-expandTyp t = case t of
-                (Im.SimpleT name)       -> do exp_t <- lookupType name
-                                              expandTyp exp_t
-                (Im.ArrayT elem_t
-                           len)         -> do elem_t' <- expandTyp elem_t
-                                              return $ Im.ArrayT elem_t' len
-                (Im.StructT (name_typs,
-                             s2,
-                             s3))       -> do let (names,typs)   = unzip name_typs
-                                              typs'             <- mapM expandTyp typs
-                                              return $ Im.StructT (zip names typs', s2, s3)
-
-                _                       -> return t
-
 
 
 -- type of a literal int
@@ -358,7 +347,7 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
     -- returns the type of the array elements
     where check arr@(Im.ExpT arr_t _) idx =
               do checkIdx idx
-                 arr_t_full <- expandTyp arr_t
+                 arr_t_full <- Im.expandType arr_t
                  case arr_t of
                    (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx)    )
                    (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx) )
@@ -366,7 +355,7 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
                                                        << " is not an array or int!")
           -- index type has to be int
           checkIdx idx = let (Im.ExpT idx_t _) = idx
-                         in  do idx_t_full <- expandTyp idx_t
+                         in  do idx_t_full <- Im.expandType idx_t
                                 case idx_t_full of
                                     (Im.IntT _)  -> return ()
                                     _            -> throwErr 42 ("Array index in " <<
@@ -377,7 +366,7 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
     = do new_str@(Im.ExpT strT _) <- checkExp str
          -- FIXME: here it is not so good that the type is fully expanded, as then we
          -- include it into the expression
-         typ_full                <- expandTyp strT
+         typ_full                <- Im.expandType strT
          (typ,new_e)             <- check typ_full new_str
          return $ annot typ new_e
 
@@ -590,7 +579,7 @@ extractFunc ctx name = do TCS {funcs=fs} <- St.get
 -- check a unary opeartion, and return its type.
 -- here 'e' is the whole unary expression, not just the parameter
 checkUnary e@(Im.ExpT t inner_e) =
-         do t_full <- expandTyp t
+         do t_full <- Im.expandType t
             case (inner_e, t_full) of
                          ( (Im.UnOp Im.Not _),     (Im.BoolT) )   -> return Im.BoolT
                          ( (Im.UnOp Im.BNot _), it@(Im.IntT _) )  -> return it
@@ -602,8 +591,8 @@ checkUnary e@(Im.ExpT t inner_e) =
 
 -- check a logical expression. quite easy
 checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
-    do t1_full <- expandTyp t1
-       t2_full <- expandTyp t2
+    do t1_full <- Im.expandType t1
+       t2_full <- Im.expandType t2
        case (t1_full, t2_full) of
                 (Im.BoolT, Im.BoolT) -> return (Im.ExpT Im.BoolT (Im.BinOp op e1 e2))
                 _                    -> throwErr 42 $ "Logical expression " << (Im.BinOp op e1 e2)
@@ -612,8 +601,8 @@ checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
 -- check an arithmetic expression whose components e1 and e2 are already checked.
 checkBinary op e1 e2 =
     do let ( (Im.ExpT t1 _), (Im.ExpT t2 _) ) = (e1,e2)
-       t1_full <- expandTyp t1
-       t2_full <- expandTyp t2
+       t1_full <- Im.expandType t1
+       t2_full <- Im.expandType t2
        case (t1_full,t2_full) of
              ((Im.IntT i1),
               (Im.IntT i2) )    -> return $ annot (Im.IntT $ Im.BinOp Im.Max i1 i2) (Im.BinOp op e1 e2)
@@ -637,8 +626,8 @@ checkArith op e1 e2 =
 
 -- the parameters must have the same type, and can be Bool, Int or Enum
 checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
-    do full_t1 <- expandTyp t1
-       full_t2 <- expandTyp t2
+    do full_t1 <- Im.expandType t1
+       full_t2 <- Im.expandType t2
        let answer = (Im.ExpT Im.BoolT (Im.BinOp op e1 e2))
        case (full_t1, full_t2) of
           (Im.BoolT,  Im.BoolT)                         -> return answer
@@ -725,8 +714,10 @@ lookupType name =
            _      -> throwErr 42 $ "Type " << name << " is not in scope"
 
 
+{-
 getTypeTable = do TCS {types=ts} <- St.get
                   return ts
+-}
 
 -- getRvalTyp name     = lookupSym Var name
 

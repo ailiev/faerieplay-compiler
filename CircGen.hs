@@ -1,19 +1,20 @@
 -- code to generate a circuit from an unrolled list of statements,
 -- consisiting only of SAss, and SIfElse.
 
-module CircGen (
+module CircGen {- (
                 genCircuit,
                 clip_circuit,
                 extractInputs,
                 showCct,
 
                 testNextInt
-               ) where
+               ) -} where
 
 
 import Monad (foldM, mplus, liftM)
 import Maybe (fromJust, isJust, fromMaybe)
 import List
+import Control.Monad.Trans (lift)
 
 
 import Data.Graph.Inductive.Graph               ((&))
@@ -23,6 +24,8 @@ import qualified Data.Graph.Inductive.Graphviz  as Graphviz
 import qualified Data.Graph.Inductive.Tree      as TreeGr
 import qualified Data.Graph.Inductive.Query.DFS as GrDFS
 import qualified Data.Graph.Inductive.Query.BFS as GrBFS
+
+import qualified Text.PrettyPrint               as PP
 
 import qualified Data.Map                       as Map
 import qualified Control.Monad.State            as St
@@ -80,6 +83,7 @@ data Op =
   | Slicer (Int,Int)
 
   | Lit Im.Lit                  -- a literal
+ deriving (Eq)
 
 
 --          
@@ -117,8 +121,9 @@ gate2lnode g@(Gate i _ _ _ _ _) = (i,g)
 
 -- accessors for some of the Gate fields
 gateNode = fst . gate2lnode
-gateType (Gate _ t _ _ _ _) = t
-gateFlags (Gate _ _ _ _ fl _) = fl
+gateType    (Gate _  t  _  _  _  _)  = t
+gateFlags   (Gate _  _  _  _  fl _)  = fl
+gateOp      (Gate _  _  op _  _  _)  = op
 
 
 
@@ -152,8 +157,8 @@ genCircuit type_table stms args =
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
         clipped_circ    = clip_circuit circ
-        top_circ   = GrDFS.topsort' circ
-    in clipped_circ
+        flat_circ       = flatten_cicrcuit clipped_circ
+    in (clipped_circ, flat_circ)
 
 
 -- keep only gates which are reverse-reachable from the output gates
@@ -165,6 +170,18 @@ clip_circuit c = let c_rev          = GrBas.grev c
                      reach_gr       = keepNodes reach_nodes c
                  in  reach_gr
     where isOutCtx = elem Output . gateFlags . Gr.lab'
+
+
+flatten_cicrcuit :: Circuit -> [Gate]
+flatten_cicrcuit c = let gates  = GrDFS.topsort' c
+                         gates' = ins_to_front gates
+                     in  gates'
+          -- get the input gates to the front of the list
+    where ins_to_front gates =
+              let (ins, others) = List.partition ((== Input) . gateOp)
+                                                 gates
+              in  ins ++ others
+                         
 
 
 
@@ -219,14 +236,16 @@ createInputGates addvars (name, typ) =
                         -- FIXME: this adds an incorrect doc
                         -- annotation to the gate - it show struct
                         -- field names as variable names 
-                        return [mkGate type_table i typ (EVar var)]
+                        gate <- mkGate i typ (EVar var)
+                        return [gate]
 
-    where mkGate type_table i typ doc_exp = Gate i
-                                                 (expandType type_table typ)
-                                                 Input
-                                                 []
-                                                 []
-                                                 [doc_exp]
+    where mkGate i typ doc_exp = do typ_full <- expandType typ
+                                    return $ Gate i
+                                                  typ_full
+                                                  Input
+                                                  []
+                                                  []
+                                                  [doc_exp]
 
 
 
@@ -307,32 +326,32 @@ updateCtxLab new_label = tup4_proj_3 (const new_label)
 -- the 'loc_extr' parameter is a function which specifies which struct
 -- locations we use, primitive type (tup3_get2) or byte (tup3_get3)
 
-getRootvarOffset :: TypeTable ->
+getRootvarOffset :: (TypeTableMonad m) =>
                     ( ([TypedName], [FieldLoc], [FieldLoc]) -> [FieldLoc] ) ->
                     Exp ->
-                    (Var, Int)
-getRootvarOffset tab loc_extr exp =
-    let rec = getRootvarOffset tab loc_extr in
-    case exp of
-      (EVar v)              -> (v, 0)
-      (EStruct str_e idx)   -> let (v, o)     = rec str_e
-                                   fld_info   = getStrTParams tab str_e
-                                   locs       = loc_extr fld_info
-                                   preceding  = sum $
-                                                map snd $
-                                                take idx locs
-                               in  (v, o + preceding)
-      (ExpT t e)            -> rec e
-      (EArr arr_e idx_e)    -> rec arr_e
-      e                     -> error $
+                    m (Var, Int)
+getRootvarOffset loc_extr exp =
+    do let rec = getRootvarOffset loc_extr
+       case exp of
+        (EVar v)            -> return (v, 0)
+        (EStruct str_e idx) -> do  (v, o)     <- rec str_e
+                                   fld_info   <- getStrTParams str_e
+                                   let locs   = loc_extr fld_info
+                                       preceding  = sum $
+                                                    map snd $
+                                                    take idx locs
+                                   return (v, o + preceding)
+        (ExpT t e)          -> rec e
+        (EArr arr_e idx_e)  -> rec arr_e
+        e                   -> error $
                                "CircGen: getRootvarOffset: invalid lval "
                                << e
                                                       
 
 -- get the field parameters of a StructT, from the expression carrying the struct
-getStrTParams tab (ExpT t _)   = let (StructT field_params) = expandType tab t
-                                 in  field_params
-getStrTParams _   e             = error $
+getStrTParams      (ExpT t _)   = do (StructT field_params)  <- expandType t
+                                     return field_params
+getStrTParams     e             = error $
                                   "getStrTParams: unexpected expression "
                                   << e
 
@@ -367,17 +386,17 @@ genStm circ stm =
       -- to those gates
       s@(SAss lval@(EStruct str_e idx) val) ->
           do type_table    <- getTypeTable
-             let (_,locs,_) = getStrTParams type_table str_e
-                 (off,len)  = locs !! idx
+             (_,locs,_)    <- getStrTParams str_e
+             let (off,len)  = locs !! idx
                                -- (off,len) are in primitive types, not bytes
-                 (rv,
-                  lval_off) = getRootvarOffset type_table tup3_get2 lval
+             (rv,lval_off)  <- getRootvarOffset tup3_get2 lval
              c2             <- checkOutputVars circ rv (Just (lval_off,len))
              (c3, gates)    <- genExpWithDoc c2
                                              (addOutputFlag rv)
                                              val
                                              lval
-             case extractEArr type_table lval of
+             arr_info       <- extractEArr lval
+             case arr_info of
                Nothing              -> -- just update the lval location(s)
                                        do updateVar
                                             (applyWithDefault (splice (lval_off,len) gates)
@@ -414,8 +433,7 @@ genStm circ stm =
       -- quite similar to the above. really need to structure this better
       s@(SAss lval@(EArr arr_e idx_e) val) ->
           do i                  <- nextInt
-             type_table         <- getTypeTable
-             let (rv,off)        = getRootvarOffset type_table getStrTLocs arr_e
+             (rv,off)           <- getRootvarOffset getStrTLocs arr_e
              (c3, gates)        <- genExpWithDoc circ
                                                  (addOutputFlag rv)
                                                  val
@@ -475,35 +493,40 @@ genStm circ stm =
 --   the (byte offset, byte len)'s of .z under x.y[i]
 -- )
 -- return Nothing if there is no array subexpression
-extractEArr :: TypeTable -> Exp -> Maybe ( Exp,
-                                           Int,
-                                           [(Int,Int)]
-                                         )
+extractEArr :: (TypeTableMonad m) => Exp -> m ( Maybe (Exp,
+                                                       Int,
+                                                       [(Int,Int)]) 
+                                              )
+extractEArr = runMaybeT . extractEArr'
 
-extractEArr tab (ExpT elem_t exp@(EArr arr_e idx_e)) =
-    Just $ let (blocs,_)    = getTypByteLocs tab elem_t
+-- the typechecker actually inferred a more general type on its own...
+extractEArr'    :: (TypeTableMonad m) => Exp -> MaybeT m (Exp,
+                                                          Int,
+                                                          [(Int,Int)]) 
+extractEArr' (ExpT elem_t exp@(EArr arr_e idx_e)) =
+    do  (blocs,_)   <- lift $ getTypByteLocs elem_t
                               -- here we need the offset in primitive types
-               (rv,off)     = getRootvarOffset tab getStrTLocs arr_e
-           in  (exp, off, blocs)
+        (rv,off)    <- lift $ getRootvarOffset getStrTLocs arr_e
+        return (exp, off, blocs)
 
 -- get a recursive answer and return just the slice of this field
-extractEArr  tab e@(EStruct str_e idx) =
-    -- this is in the Maybe monad
-    do (arr_exp,arr_off,sublocs)   <- extractEArr tab str_e
-       let (_,locs,_)               = getStrTParams tab str_e
-           (off,len)                = locs !! idx
-       return (arr_exp, arr_off,
-               (take len $ drop off sublocs)
-                    `trace`
-                    ("extractEArr (" << e << ")" <<
-                     "; sublocs=" << sublocs <<
-                     "; off=" << off <<
-                     "; len=" << len))
+extractEArr' e@(EStruct str_e idx) =
+              do (arr_exp,arr_off,sublocs) <- extractEArr' str_e
+                 (_,locs,_)                <- lift $ getStrTParams str_e
+                 let (off,len)              = locs !! idx
+                 return (arr_exp,
+                         arr_off,
+                         (take len $ drop off sublocs))
+                            `trace`
+                                ("extractEArr (" << e << ")" <<
+                                 "; sublocs=" << sublocs <<
+                                 "; off=" << off <<
+                                 "; len=" << len)
 
-extractEArr tab (ExpT _ e)  = extractEArr tab e
+extractEArr' (ExpT _ e) = extractEArr' e
 
 -- if we hit a primitive expression, there's no array in the exp.
-extractEArr _   _           = Nothing
+extractEArr'   e        = fail ""
 
 
 
@@ -632,15 +655,19 @@ foo [] _  = []
 -- figure out the type of a Select gate, based on the type of its two
 -- inputs
 getSelType gr (node1, node2)
-    = case map (getType . fromJust . Gr.lab gr) [node1, node2] of
+    = case map (gateType . fromJust . Gr.lab gr) [node1, node2] of
         [Im.BoolT          , Im.BoolT          ]    -> Im.BoolT
         [Im.IntT i1        , Im.IntT i2        ]    -> Im.IntT $ Im.BinOp Max i1 i2
+        [a1@(Im.ArrayT _ _), a2@(Im.ArrayT _ _)]    -> a1 `trace` ("getSelType got types " <<
+                                                                   a1 << " and " << a2)
+        [t1                , t2                ]    -> error ("getSelType got unexpected inputs of type " <<
+                                                              t1 << " and " << t2)
+        {-
+          -- it should not be a struct
         [t1@(Im.StructT _) , t2@(Im.StructT _) ]    -> t1 `trace`
                                                             ("getSelType got types " <<
                                                              t1 << " and " << t2)
-        [a1@(Im.ArrayT _ _), a2@(Im.ArrayT _ _)]    -> a1 `trace` ("getSelType got types " <<
-                                                                   a1 << " and " << a2)
-    where getType (Gate _ t _ _ _ _) = t
+                                                             -}
 
 
 
@@ -719,10 +746,9 @@ genExp' c exp =
                                     return (c', res)
 
       (EStruct str_e idx) -> 
-                           do type_table        <- getTypeTable
-                              (c', gates)       <- genExp c str_e
-                              let (_,locs,_)     = getStrTParams type_table str_e
-                                  (off,len)      = locs !! idx
+                           do (c', gates)       <- genExp c str_e
+                              (_,locs,_)        <- getStrTParams str_e
+                              let (off,len)      = locs !! idx
                               return (c', Right $ take len $ drop off gates)
 
       (EArr arr_e idx_e) ->
@@ -733,7 +759,6 @@ genExp' c exp =
                                                               arr_ns)
                               (c2, [idx_n]) <- genExp c1 idx_e
                               readarr_n     <- nextInt
-                              type_table    <- getTypeTable
                                   -- get the array element type from the
                                   -- gate where the array now is
                               let (ArrayT elem_t _) = gateType $
@@ -745,9 +770,8 @@ genExp' c exp =
                                                                   (ReadDynArray)
                                                                   [arr_n, idx_n]
                                                                   [] [])
-                                  (e_locs,e_typs)   = getTypByteLocs type_table
-                                                                     elem_t
-                                  elem_count        = length e_locs
+                              (e_locs,e_typs)      <- getTypByteLocs elem_t
+                              let elem_count        = length e_locs
                               if (elem_count == 1)
                                      then -- easy, just need this gate
                                           return (c2, Left [ctx])
@@ -809,15 +833,15 @@ getStructFieldLocs tab t = [ (off, t)  | t    <- getStructFieldTypes tab t
 -}
 
 -- similar to above but the locations (offset-length) are in bytes
-getTypByteLocs :: TypeTable -> Typ -> ([FieldLoc], [Typ])
-getTypByteLocs tab t =
-    let t_full = expandType tab t
-    in case t_full of
-         (StructT (fields,_,bytelocs))  ->
-             let types          = map snd fields
-             in  (bytelocs, types)
-         t                              ->
-             ([(0, tblen t)], [t])
+getTypByteLocs :: (TypeTableMonad m) => Typ -> m ([FieldLoc], [Typ])
+getTypByteLocs t =
+    do t_full <- expandType t
+       return (case t_full of
+                  (StructT (fields,_,bytelocs))  ->
+                      let types          = map snd fields
+                      in  (bytelocs, types)
+                  t                              ->
+                          ([(0, tblen t)], [t]))
 
 -- make an unlabelled edge
 uAdj n = ((), n)
@@ -862,7 +886,10 @@ modifyVars = St.modify . tup3_proj1
 modifyInt  = St.modify . tup3_proj2
 
 
-getTypeTable = getsTypeTable id
+instance TypeTableMonad OutMonad where
+    getTypeTable = getsTypeTable id
+
+--getTypeTable = getsTypeTable id
 getInt = St.gets tup3_get2
 getVars = getsVars id
 
@@ -896,7 +923,57 @@ fromJustMsg msg (Just x) = x
 fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 
+-- need a instance Show Gate friendlier to machine parsing
+-- line-oriented format:
+-- 
+-- gate number
+-- flags, or "noflags"
+-- gate (output) type
+-- gate operation
+-- sources, or "nosrc"
+-- comment (the name of the output wire usually)
+-- <blank line>
 
+instance Show Gate where
+    show (Gate i typ op srcs flags doc) = show i ++ "\n" ++
+                                          show flags ++ "\n" ++
+                                          PP.render (Im.docTypMachine typ) ++ "\n" ++
+                                          show op ++ "\n" ++
+                                          (if null srcs
+                                           then "nosrc"
+                                           else (foldr1 (\s1 s2 -> s1 ++ " " ++  s2)
+                                                        (map show srcs)))              ++ "\n" ++
+                                          (if null doc
+                                           then "nocomm"
+                                           else show (peek doc)) ++
+                                          "\n\n"
+
+
+
+instance Show GateFlags where
+    show Output = "Output"
+
+-- this requires -fallow-overlapping-instances to GHC, as we already
+-- have
+-- (Show a) => instance Show [a]
+instance Show [GateFlags] where
+    show []     = "noflags"
+    show flags  = concatMap show flags
+
+
+instance Show Op where
+    show (Bin op)           = "BinOp " ++ show op
+    show (Un  op)           = "UnOp " ++ show op
+    show Input              = "Input"
+    show Select             = "Select"
+    show (Lit l)            = "Lit " ++ show l
+    show ReadDynArray       = "ReadDynArray"
+    show (WriteDynArray
+             (off,len))     = "WriteDynArray " ++ show off ++ " " ++ show len
+    show (Slicer (off,len)) = "Slicer "    ++ show off ++ " " ++ show len
+
+
+{-
 instance Show Gate where
     show (Gate i typ op srcs flags doc) = i << (if not (null flags) then "#" << show flags else "") 
                                             << ": "
@@ -926,6 +1003,8 @@ instance Show Op where
     show (WriteDynArray
              (off,len))     = "writearr " << len << "@" << off
     show (Slicer (off,len)) = "slice " << len << "@" << off
+-}
+
 
 showCct c = Graphviz.graphviz' c
 
