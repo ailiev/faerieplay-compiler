@@ -1,5 +1,6 @@
 module SashoLib (
 		 (.&&),
+                 (.||),
 		 (.*),
                  (...),
          (<<),
@@ -52,7 +53,9 @@ module SashoLib (
                 tup3_get1, tup3_get2, tup3_get3,
                 tup3_proj1, tup3_proj2, tup3_proj3,
 
+                tup4_get1, tup4_get2, tup4_get3, tup4_get4, 
                 tup4_proj_1,  tup4_proj_2,  tup4_proj_3,  tup4_proj_4
+
 		)
     where
 
@@ -72,6 +75,9 @@ import qualified Data.Map as Map
 infixr 3 .&&
 (.&&) :: (a -> Bool) -> (a -> Bool) -> (a -> Bool)
 f .&& g = \x -> f x && g x
+
+infixr 4 .||
+f .|| g = \x -> f x || g x
 
 
 -- instance (Eq a) => Eq (a -> a) where
@@ -104,6 +110,13 @@ notp f = not . f
 (<<) :: (Show a, Show b) => (a -> b -> String)
 x << y = cleanup $ (show x) ++ (show y)
     where cleanup = (filter ((/= '"')))
+
+{-
+instance Show String where
+    -- try to deal with surrounding quotes
+    show ('"' : chars)  = init chars
+    show x              = ('"':x) ++ ['"']
+-}
 
 
 -- compose a function on 2 args with a function on one arg
@@ -258,12 +271,20 @@ modifyListHead f (x:xs) = (f x : xs)
 {-
 -- shortcut isn't quite working for now...
 
-newtype MaybeT = ErrorT ()
+-- newtype MaybeT m a = ET (ErrorT () m a)
+type MaybeT = ErrorT ()
 
+
+runMaybeT :: (Monad m) => MaybeT m a -> m (Maybe a)
+runMaybeT c = do let (ET c') = c
+                 v <- runErrorT c'
+                 return (either (const Nothing) Just v)
 runMaybeT c = do v <- runErrorT c
-                 return (either Just (const Nothing) v)
-
+                 return (either (const Nothing) Just v)
 -}
+
+
+
 
 newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }
 
@@ -383,13 +404,11 @@ tup3_proj3 f (x,y,z) = (x   , y   , f z)
 
 
 -- and for 4-tuples!
-tup4_get i (x1,x2,x3,x4) = case i of
-                                  1 -> x1
-                                  2 -> x2
-                                  3 -> x3
-                                  4 -> x4
-                                  _ -> error $ "No element " << i
-                                               << "in a 4-tuple"
+tup4_get1 (x1,x2,x3,x4) = x1
+tup4_get2 (x1,x2,x3,x4) = x2
+tup4_get3 (x1,x2,x3,x4) = x3
+tup4_get4 (x1,x2,x3,x4) = x4
+
 
 tup4_proj_1 f (x1,x2,x3,x4) = (f x1, x2  , x3  , x4  )
 tup4_proj_2 f (x1,x2,x3,x4) = (x1  , f x2, x3  , x4  )

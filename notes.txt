@@ -69,3 +69,13 @@ Sun Jun 19 13:26:41 2005
 
 Graph library bug:
 error message in Tree.hs line 72 is really uninformative
+
+
+
+Thu Jun 23 13:34:10 2005
+
+DISCOVERY: array writes have to update the array variable/pointer too. not the
+case with "normal" array reads, but the oblivious read alg. updates the array
+values (in particular the working area in sqrt alg.), so any subsequent reads
+and writes should use the new one.
+

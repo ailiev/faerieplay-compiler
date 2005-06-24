@@ -22,6 +22,7 @@ program Test4 {
 		Point[DIM] diagonals
 	};
 
+    
     function Key f (Key x) {
         f = x * 2;
     };
@@ -30,19 +31,19 @@ program Test4 {
 
     function Point main (Input in) {
         var Key k2, k3, k4;
-		var Point magic;
+	var Point magic;
 		
         var Point pt;
 
-		pt = in.center;
-
-		k2 = pt.x;
-
+	pt = in.center;
+	
+	k2 = pt.x;
+	
         k3 = 0;
 	
         pt.x = 47;
-
-		magic = in.diagonals[7];
+	
+	magic = in.diagonals[7];
 
         if (pt.x < in.center.x) {
             for (i = 1 to 3) {
@@ -50,11 +51,11 @@ program Test4 {
             }
 
             pt.y = k3 * 3;
-			pt.x = k2 - 3;
+	    pt.x = k2 - 3;
         }
 
-		magic = pt;
-
+	magic.x = pt.x;
+		
 /*	
 	else {
 	    k3 = k;
@@ -62,17 +63,14 @@ program Test4 {
 		k3 = f(k3);
 	}
 */
-		k3 = pt.x + 3;
+	k3 = pt.x + 3;
 	
-		in.diagonals[2].y = 3;
-
-		main = in.diagonals[2];
+	in.diagonals[2].y = 3;
+	
+	main = in.diagonals[2];
 		
         main.x = magic.y + magic.x;
-		main.y = 2;
-
-		
-
+//	main.y = 2;
     }
     
 

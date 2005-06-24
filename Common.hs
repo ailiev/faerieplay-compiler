@@ -26,8 +26,8 @@ type ErrMonad = Either MyError
 
 
 -- reversed order is much better!
--- trace = flip Trace.trace
+trace = flip Trace.trace
 -- if we do not want to trace
-trace = const
+--trace = const
 infix 0 `trace`
 

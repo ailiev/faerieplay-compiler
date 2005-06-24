@@ -11,6 +11,7 @@ module CircGen {- (
                ) -} where
 
 
+import Array (array, (!))
 import Monad (foldM, mplus, liftM)
 import Maybe (fromJust, isJust, fromMaybe)
 import List
@@ -48,12 +49,12 @@ data Op =
     Bin Im.BinOp
   | Un  Im.UnOp
 
-  -- read from a dynamic array; inputs: [array, index]; output is of
-  -- the array element type: either a basic type like Int etc, or a
-  -- StructSplit gate to handle a Struct
-  -- The [Int] is used to split a structure into its simple elements: it
-  -- contains the byte-address of the *last* byte of each element
-  | ReadDynArray -- [Int]
+  -- read from a dynamic array; inputs: [array, index]; output is
+  -- 1: the new array value (or rather pointer, as the runtime will manage the actual
+  --    values), and
+  -- 2: of the array element type: either a basic type like Int etc, or a list of Slicer
+  --    gates which extract the basic components of the complex type in this array
+  | ReadDynArray
 
   -- update array; inputs = [array, index, val1, val2, ...]; output is
   -- the updated array. The parameter is a slice of where inputs
@@ -125,6 +126,9 @@ gateType    (Gate _  t  _  _  _  _)  = t
 gateFlags   (Gate _  _  _  _  fl _)  = fl
 gateOp      (Gate _  _  op _  _  _)  = op
 
+gateProjNum  f  (Gate i  g2 g3 g4 g5 g6) = Gate (f i) g2 g3 g4     g5 g6
+gateProjSrcs f  (Gate g1 g2 g3 ss g5 g6) = Gate g1    g2 g3 (f ss) g5 g6
+
 
 
 -- needed to lookup a variable's current gate number
@@ -157,8 +161,9 @@ genCircuit type_table stms args =
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
         clipped_circ    = clip_circuit circ
-        flat_circ       = flatten_cicrcuit clipped_circ
-    in (clipped_circ, flat_circ)
+        out_circ        = renumber clipped_circ
+        flat_circ       = flatten_cicrcuit out_circ
+    in (out_circ, flat_circ)
 
 
 -- keep only gates which are reverse-reachable from the output gates
@@ -170,6 +175,29 @@ clip_circuit c = let c_rev          = GrBas.grev c
                      reach_gr       = keepNodes reach_nodes c
                  in  reach_gr
     where isOutCtx = elem Output . gateFlags . Gr.lab'
+
+
+
+-- renumber the nodes so they are consecutive, in the same order as the original numbering
+renumber :: Circuit -> Circuit
+renumber g   =  Gr.gmap doRenum g
+          -- the returned map will map from current numbering to consecutive numbering
+    where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isInputCtx g
+                                              nodes = sort $ GrBFS.bfsn ins g
+                                          in  array (minimum nodes, maximum nodes) (zip nodes [0..])
+                                                  `trace` ("renumber nodes: " << nodes)
+          doRenum (ins,node,gate,outs)  = ( map (projSnd renum) ins,
+                                            renum node,
+                                            gateProjNum renum $
+                                               gateProjSrcs (map renum) $ gate,
+                                            map (projSnd renum) outs )
+          renum node                    = renumMap ! node
+          isInputCtx                    = isStartOp . gateOp . Gr.lab'
+          isStartOp op                  = case op of
+                                                  Input -> True
+                                                  Lit _ -> True
+                                                  _     -> False
+                                               
 
 
 flatten_cicrcuit :: Circuit -> [Gate]
@@ -219,7 +247,7 @@ createInputGates addvars (name, typ) =
         (StructT (fields,_,_))
                 -> do gates <- concatMapM (createInputGates False) fields
                       let is = map gateNode gates
-                      if addvars then updateVar (const is) var else return ()
+                      if addvars then setVar is var else return ()
                       return gates
 
         (SimpleT tname)
@@ -229,7 +257,7 @@ createInputGates addvars (name, typ) =
         -- IntT, BoolT, ArrayT (for dynamic arrays):
         _         -> do i <- nextInt
                         if addvars
-                          then (updateVar (const [i]) var)
+                          then setVar [i] var
                                    `trace`
                                    ("inserting input var " << var << " into VarTable")
                           else return ()
@@ -257,7 +285,7 @@ createInputGates addvars (name, typ) =
 -- expressions (ie. parts of other complex types)
 genComplexInit lval size =
     case lval of
-      (EVar var)        -> updateVar (const $ replicate size (minBound)) var
+      (EVar var)        -> setVar (replicate size (minBound)) var
       _                 -> return ()
 
 
@@ -324,7 +352,7 @@ updateCtxLab new_label = tup4_proj_3 (const new_label)
 -- offset of field 'y.z' under struct 'x'; also return what is the root
 -- variable, 'x' in this example
 -- the 'loc_extr' parameter is a function which specifies which struct
--- locations we use, primitive type (tup3_get2) or byte (tup3_get3)
+-- locations we use, primitive type (getStrTLocs) or byte (getStrTByteLocs)
 
 getRootvarOffset :: (TypeTableMonad m) =>
                     ( ([TypedName], [FieldLoc], [FieldLoc]) -> [FieldLoc] ) ->
@@ -379,7 +407,7 @@ genStm circ stm =
                                           (addOutputFlag var)
                                           exp
                                           lval
-             updateVar (const nodes) var
+             setVar nodes var
              return c'
 
       -- get the gates for this 'val', and set the address of 'lval'
@@ -398,32 +426,27 @@ genStm circ stm =
              arr_info       <- extractEArr lval
              case arr_info of
                Nothing              -> -- just update the lval location(s)
-                                       do updateVar
-                                            (applyWithDefault (splice (lval_off,len) gates)
-                                                              gates)
-                                            rv
+                                       do spliceVar (lval_off,len) gates rv
                                           return c3
                Just ((EArr arr_e idx_e), arr_off, blocs)
                                     -> -- need to generate a WriteDynArray gate!
                                        -- eg: for x.y[i].z, we will:
                                        -- - add a WriteDynArray gate for x.y, limited to .z
                                        -- - update one of x's gates (the array gate)
-                                       do i             <- nextInt
-                                          (c4, [arr_n]) <- genExp c3 arr_e
+                                       do (c4, [arr_n]) <- genExp c3 arr_e
                                           (c5, [idx_n]) <- genExp c4 idx_e
+                                          i             <- nextInt
                                           let (ExpT arr_t _)  = arr_e
                                               total_blen = sum $ map snd blocs
+                                              boff       = fst $ head blocs
                                               ctx        = mkCtx $
                                                            Gate i
                                                                 arr_t
-                                                                (WriteDynArray (fst $ head blocs,
+                                                                (WriteDynArray (boff,
                                                                                 total_blen))
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 [] []
-                                          updateVar
-                                            (applyWithDefault (splice (arr_off,1) [i])
-                                                              [i])
-                                            rv
+                                          spliceVar (arr_off,1) [i] rv
                                                         `trace`
                                                         ("WriteDynArray: rv = " << rv
                                                          << "; arr_off=" << arr_off)
@@ -448,7 +471,7 @@ genStm circ stm =
                                                                 -1))
                                                 ([arr_n, idx_n] ++ gates)
                                                 [] []
-             updateVar (applyWithDefault (splice (off,1) [i]) [i]) rv
+             spliceVar (off,1) [i] rv
              return $ ctx & c5
 
 
@@ -627,7 +650,7 @@ genCondExit testGate
                    is           <- replicateM (length ts) nextInt
                    let ctxs      = zipWith3 mkCtx' is ts changed_gates
                        new_gates = foo (uncurry zip in_gates) is
-                   updateVar (const new_gates) var
+                   setVar new_gates var
                    -- work all the new Contexts into circuit c
                    return (foldl (flip (&)) c ctxs)
 
@@ -753,47 +776,54 @@ genExp' c exp =
 
       (EArr arr_e idx_e) ->
                            do (c1, arr_ns)  <- genExp c arr_e
-                              let arr_n = case arr_ns of
-                                            [arr_n] -> arr_n
-                                            _       -> error ("Array got too many wires: " <<
-                                                              arr_ns)
-                              (c2, [idx_n]) <- genExp c1 idx_e
-                              readarr_n     <- nextInt
-                                  -- get the array element type from the
-                                  -- gate where the array now is
-                              let (ArrayT elem_t _) = gateType $
-                                                      fromJustMsg
-                                                        "CircGen: get current array node" $
-                                                      Gr.lab c2 arr_n
-                                  ctx               = mkCtx (Gate readarr_n
+                              let arr_n      = case arr_ns of
+                                                 [arr_n] -> arr_n
+                                                 _       -> error ("Array " << arr_e <<
+                                                                   " got too many wires: " <<
+                                                                   arr_ns)
+                              (c2, [idx_n])        <- genExp c1 idx_e
+                              readarr_n            <- nextInt
+                                  -- get the array type and the element type, from the
+                                  -- array expression annotations
+                              let (ExpT arr_t@(ArrayT elem_t _) _)   = arr_e
+                                  readarr_ctx       = mkCtx (Gate readarr_n
                                                                   VoidT
                                                                   (ReadDynArray)
                                                                   [arr_n, idx_n]
                                                                   [] [])
                               (e_locs,e_typs)      <- getTypByteLocs elem_t
-                              let elem_count        = length e_locs
-                              if (elem_count == 1)
-                                     then -- easy, just need this gate
-                                          return (c2, Left [ctx])
-                                     else -- now we need a bunch of
-                                          -- slicer gates
-                                          do is <- replicateM elem_count nextInt
-                                             let slicers = [Gate
-                                                            i
-                                                            t
-                                                            (Slicer (off,len))
-                                                            [readarr_n]
-                                                            [] [] | i           <- is
-                                                                  | (off,len)   <- e_locs
-                                                                  | t           <- e_typs]
-                                                 ctxs2   = map mkCtx slicers
+                              -- build the array pointer slicer gate. it will get the new
+                              -- array pointer value in the first array_blen bytes of the
+                              -- ReadDynArray output.
+                              arrptr_n            <- nextInt
+                              let arr_ptr_ctx      = mkCtx $ Gate arrptr_n
+                                                                  arr_t
+                                                                  (Slicer (0, array_blen))
+                                                                  [readarr_n] 
+                                                                  [] []
+                              -- add array_blen to all the offsets, as the array pointer
+                              -- will be output first by the ReadDynArray gate
+                              let e_locs'           = map (projFst (+ array_blen)) e_locs
+                              -- slicer gates
+                              is <- replicateM (length e_locs') nextInt
+                              let slicer_ctxs = map mkCtx [Gate i
+                                                                t
+                                                                (Slicer (off,len))
+                                                                [readarr_n]
+                                                                [] [] | i           <- is
+                                                                      | (off,len)   <- e_locs'
+                                                                      | t           <- e_typs]
 
-                                             -- we'll add the ReadDynArray into the cct
-                                             -- here, and not return it with the slicer
-                                             -- contexts, as others should only look for
-                                             -- vars at the slicers
-                                                 c3 = ctx & c2
-                                             return (c3, (Left ctxs2))
+                              -- update the gate location of the array pointer
+                              (rv,off)  <- getRootvarOffset getStrTLocs arr_e
+                              spliceVar (off,1) [arrptr_n] rv
+
+                                  -- we'll add the ReadDynArray and the slicer for the
+                                  -- array pointer into the cct here, and not return it
+                                  -- with the other slicer contexts, as others should only
+                                  -- look for the return vars at the slicers
+                              let c_out  = foldl (flip (&)) c2 [readarr_ctx, arr_ptr_ctx]
+                              return (c_out, Left slicer_ctxs)
 
       (EStatic e)       -> genExp' c e
 
@@ -885,9 +915,10 @@ getsTypeTable   f = St.gets $ f . tup3_get3
 modifyVars = St.modify . tup3_proj1
 modifyInt  = St.modify . tup3_proj2
 
-
+-- OutMonad does carry a TypeTable around
 instance TypeTableMonad OutMonad where
     getTypeTable = getsTypeTable id
+
 
 --getTypeTable = getsTypeTable id
 getInt = St.gets tup3_get2
@@ -898,11 +929,23 @@ getVars = getsVars id
 -- the new value always goes into the top-most scope
 -- we always use this, even if the var is certain not to be present (eg. during static
 -- initialization), for greater uniformity.
+-- an update function which just sets all the gates, already present or not, is
+-- (const new_gates)
 updateVar :: (Maybe [Gr.Node] -> [Gr.Node]) -> Var -> OutMonad ()
 updateVar f var = modifyVars $ \maps -> let curr    = maybeLookup var maps
                                             new     = f curr
                                             maps'   = modtop (Map.insert var new) maps
                                         in  maps'
+
+-- two common usages:
+-- just set the var gates completely, regardless if the var is already present or not
+setVar new_gates = updateVar (const new_gates)
+-- splice in new gates into a part of the current list. error if the var not already
+-- present
+spliceVar loc@(off,len) new_gates var = updateVar (splice loc new_gates .
+                                                   fromJustMsg ("spliceVar " << var))
+                                                  var
+
 
 
 --------------------
@@ -923,7 +966,9 @@ fromJustMsg msg (Just x) = x
 fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 
--- need a instance Show Gate friendlier to machine parsing
+
+
+-- need a instance Show Gate easier for machine parsing in a weak language (C++)
 -- line-oriented format:
 -- 
 -- gate number
@@ -948,8 +993,6 @@ instance Show Gate where
                                            else show (peek doc)) ++
                                           "\n\n"
 
-
-
 instance Show GateFlags where
     show Output = "Output"
 
@@ -971,6 +1014,7 @@ instance Show Op where
     show (WriteDynArray
              (off,len))     = "WriteDynArray " ++ show off ++ " " ++ show len
     show (Slicer (off,len)) = "Slicer "    ++ show off ++ " " ++ show len
+
 
 
 {-
@@ -1003,7 +1047,10 @@ instance Show Op where
     show (WriteDynArray
              (off,len))     = "writearr " << len << "@" << off
     show (Slicer (off,len)) = "slice " << len << "@" << off
+
+
 -}
+
 
 
 showCct c = Graphviz.graphviz' c

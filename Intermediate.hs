@@ -329,6 +329,7 @@ tblen (IntT _)          = 4
 tblen (BoolT)           = 1
 tblen (EnumT _ bits)    = bits `divUp` 8
 
+array_blen = 4::Int
 
 
 ------------------------

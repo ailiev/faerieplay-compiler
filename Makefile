@@ -1,11 +1,12 @@
-GHCFLAGS = -v0
+GHCFLAGS = -v0 -fglasgow-exts
+GHCFLAGS += -fallow-overlapping-instances
 
 all:
 	bnfc -haskell -d SFDL.cf
 	$(MAKE) -C SFDL
 
 ghc:
-	ghc $(GHCFLAGS) -fglasgow-exts -fallow-overlapping-instances \
+	ghc $(GHCFLAGS) \
 	-i$(HOME)/code/haskell \
 	--make -o gen Generate.hs
 
