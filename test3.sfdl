@@ -2,16 +2,28 @@
 
 program Test2 {
 
-    type Key = Int<16`>;
-    
-    function Key f (Key x) {
-        f = x * 2;
+    const WordSize = 32;
+    type Word = Int<WordSize`>;
+
+    function Word gcd (Word a, Word b) {
+	var Word temp;
+		
+	for (i = 1 to WordSize*2) {
+	    // (b != 0) is the real loop condition
+	    if (b != 0) {
+		temp	= b;
+		b	= a % b;
+		a	= temp;
+	    }
+	}
+
+	gcd = a;
     };
 
 
-    function Key main (Key arg) {
-		main = f (arg);
-	}
+    function Word main (Word a, Word b) {
+	main = gcd (a, b);
+    }
 		
 
 }

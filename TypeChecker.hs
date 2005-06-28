@@ -734,9 +734,11 @@ analyzeSomeBinExps pred e = if pred e then analyzeBinExp e else Nothing
 
 analyzeBinExp e = case e of
                      (T.EPlus e1 e2)      -> Just (Arith,Im.Plus,e1,e2)
-                     (T.ETimes e1 e2)     -> Just (Arith,Im.Times,e1,e2)
                      (T.EMinus e1 e2)     -> Just (Arith,Im.Minus,e1,e2)
+
+                     (T.ETimes e1 e2)     -> Just (Arith,Im.Times,e1,e2)
                      (T.EDiv e1 e2)       -> Just (Arith,Im.Div,e1,e2)
+                     (T.EMod e1 e2)       -> Just (Arith,Im.Mod,e1,e2)
 
                      (T.EEq e1 e2)      -> Just (Comparison,Im.Eq,e1,e2)
                      (T.ENeq e1 e2)     -> Just (Comparison,Im.Neq,e1,e2)

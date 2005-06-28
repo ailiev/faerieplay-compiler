@@ -54,11 +54,14 @@ data Op =
   --    values), and
   -- 2: of the array element type: either a basic type like Int etc, or a list of Slicer
   --    gates which extract the basic components of the complex type in this array
+  --
+  -- the paramater is the current scope depth
   | ReadDynArray
 
   -- update array; inputs = [array, index, val1, val2, ...]; output is
-  -- the updated array. The parameter is a slice of where inputs
-  -- (concatenated) should end up in the array element.
+  -- the updated array. The parameters are:
+  -- - the current scope depth (ie. how far inside nested conditionals), starting at 0
+  -- - a slice of where inputs (concatenated) should end up in the array element.
   --
   -- The input will consist of multiple gates in case of a complex
   -- type, and the runtime can just concat the values to get a lump to
@@ -72,10 +75,6 @@ data Op =
   -- be: [test, src_true, src_false]
   | Select
 
-  -- split a structure into its elements. The [Int] is the
-  -- byte-address of each element
-  -- NOTE: has been subsumed into ReadDynArray for now
-  --  | StructSplit [Int]
 
   -- a gate which takes only a part of its input, specified by a
   -- zero-based offset and a length, in bytes;
@@ -94,41 +93,35 @@ data Op =
 -- the order of in-edges is important for non-commutative operators,
 -- whereas in standard graphs the order of edges is immaterial. For
 -- now I do include the input gate numbers
-data Gate = Gate Int            -- the gate number
-                 Typ            -- the output type of the gate
-                 Op             -- gate operation (+,*, & etc)
-                 [Int]          -- numbers of the input gates, in the
+data Gate = Gate {gate_num   :: Int,            -- the gate number
+                  gate_typ   :: Typ, -- the output type of the gate
+                  gate_op    :: Op,  -- gate operation (+,*, & etc)
+                  gate_inputs :: [Int], -- numbers of the input gates, in the
                                 -- right order. may do away with this
                                 -- if the graph can mainatain
                                 -- edge-order
-                 [GateFlags]
-                 GateDoc        -- some documentation, eg. a var name
+                  gate_depth :: Int, -- depth in nested conditionals
+                  gate_flags :: [GateFlags],
+                  gate_doc :: GateDoc } -- some documentation, eg. a var name
 
 type GateDoc = [Exp]
 
 
-setFlags newfl (Gate g1 g2 g3 g4 fl    g6) =
-               (Gate g1 g2 g3 g4 newfl g6)
-
-setGateType newt        (Gate g1 typ  g3 g4 g5 g6) =
-                        (Gate g1 newt g3 g4 g5 g6)
+--setFlags    newfl g = g {flags=newfl}
+--setGateType newt  g = g {typ = newt}
 
 
 -- NOTE: the gate number is the same as the Node value in the Graph
 -- (which is also an Int)
 -- helper to make a labelled Node from a Gate
 gate2lnode :: Gate -> Gr.LNode Gate
-gate2lnode g@(Gate i _ _ _ _ _) = (i,g)
+gate2lnode g@(Gate {gate_num=i}) = (i,g)
 
--- accessors for some of the Gate fields
-gateNode = fst . gate2lnode
-gateType    (Gate _  t  _  _  _  _)  = t
-gateFlags   (Gate _  _  _  _  fl _)  = fl
-gateOp      (Gate _  _  op _  _  _)  = op
 
-gateProjNum  f  (Gate i  g2 g3 g4 g5 g6) = Gate (f i) g2 g3 g4     g5 g6
-gateProjSrcs f  (Gate g1 g2 g3 ss g5 g6) = Gate g1    g2 g3 (f ss) g5 g6
 
+gateProjNum  f  g@(Gate {gate_num=i})        = g { gate_num    = f i }
+gateProjSrcs f  g@(Gate {gate_inputs=is})    = g { gate_inputs = f is }
+gateProjDoc  f  g@(Gate {gate_doc=ds})    = g { gate_doc = f ds }
 
 
 -- needed to lookup a variable's current gate number
@@ -174,7 +167,7 @@ clip_circuit c = let c_rev          = GrBas.grev c
                      reach_nodes    = GrBFS.bfsn out_nodes c_rev
                      reach_gr       = keepNodes reach_nodes c
                  in  reach_gr
-    where isOutCtx = elem Output . gateFlags . Gr.lab'
+    where isOutCtx = elem Output . gate_flags . Gr.lab'
 
 
 
@@ -182,7 +175,7 @@ clip_circuit c = let c_rev          = GrBas.grev c
 renumber :: Circuit -> Circuit
 renumber g   =  Gr.gmap doRenum g
           -- the returned map will map from current numbering to consecutive numbering
-    where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isInputCtx g
+    where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isRootCtx g
                                               nodes = sort $ GrBFS.bfsn ins g
                                           in  array (minimum nodes, maximum nodes) (zip nodes [0..])
                                                   `trace` ("renumber nodes: " << nodes)
@@ -192,12 +185,8 @@ renumber g   =  Gr.gmap doRenum g
                                                gateProjSrcs (map renum) $ gate,
                                             map (projSnd renum) outs )
           renum node                    = renumMap ! node
-          isInputCtx                    = isStartOp . gateOp . Gr.lab'
-          isStartOp op                  = case op of
-                                                  Input -> True
-                                                  Lit _ -> True
-                                                  _     -> False
-                                               
+          isRootCtx (ins,_,_,_)         = null ins
+
 
 
 flatten_cicrcuit :: Circuit -> [Gate]
@@ -206,7 +195,7 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
                      in  gates'
           -- get the input gates to the front of the list
     where ins_to_front gates =
-              let (ins, others) = List.partition ((== Input) . gateOp)
+              let (ins, others) = List.partition ((== Input) . gate_op)
                                                  gates
               in  ins ++ others
                          
@@ -246,7 +235,7 @@ createInputGates addvars (name, typ) =
        case typ of
         (StructT (fields,_,_))
                 -> do gates <- concatMapM (createInputGates False) fields
-                      let is = map gateNode gates
+                      let is = map gate_num gates
                       if addvars then setVar is var else return ()
                       return gates
 
@@ -272,6 +261,7 @@ createInputGates addvars (name, typ) =
                                                   typ_full
                                                   Input
                                                   []
+                                                  0
                                                   []
                                                   [doc_exp]
 
@@ -333,9 +323,7 @@ genExpWithDoc c ghook e e_doc =
                                 in  (c'', nodes)
        return (c'', nodes)
 
-    where addGateDoc exp (Gate g1 g2 g3 g4 g5 doc) =
-                          Gate g1 g2 g3 g4 g5 new_doc
-              where new_doc = push (stripExpT exp) doc
+    where addGateDoc exp = gateProjDoc (push (stripExpT exp))
           processGate g     = let g'  = maybeApply ghook g
                                   g'' = (addGateDoc e_doc g')
                               in  g''
@@ -435,6 +423,7 @@ genStm circ stm =
                                        -- - update one of x's gates (the array gate)
                                        do (c4, [arr_n]) <- genExp c3 arr_e
                                           (c5, [idx_n]) <- genExp c4 idx_e
+                                          depth         <- getDepth
                                           i             <- nextInt
                                           let (ExpT arr_t _)  = arr_e
                                               total_blen = sum $ map snd blocs
@@ -445,6 +434,7 @@ genStm circ stm =
                                                                 (WriteDynArray (boff,
                                                                                 total_blen))
                                                                 ([arr_n, idx_n] ++ gates)
+                                                                depth
                                                                 [] []
                                           spliceVar (arr_off,1) [i] rv
                                                         `trace`
@@ -463,13 +453,14 @@ genStm circ stm =
                                                  lval
              (c4, [arr_n])      <- genExp c3 arr_e
              (c5, [idx_n])      <- genExp c4 idx_e
+             depth              <- getDepth
              let (ExpT arr_t _)  = arr_e
                  ctx             = mkCtx $ Gate i
                                                 arr_t
                                                 -- NOTE: writing -1 here to mean "the end"
-                                                (WriteDynArray (0,
-                                                                -1))
+                                                (WriteDynArray (0, -1))
                                                 ([arr_n, idx_n] ++ gates)
+                                                depth
                                                 [] []
              spliceVar (off,1) [i] rv
              return $ ctx & c5
@@ -501,7 +492,7 @@ genStm circ stm =
       s -> error $ "Unknow genStm on " << s
     where addOutputFlag var =
               case strip_var var of
-                (VSimple "main") -> Just (\gate -> setFlags [Output] gate)
+                (VSimple "main") -> Just (\gate -> gate {gate_flags = [Output]})
                 _                -> Nothing
 
 
@@ -578,7 +569,7 @@ checkOutputVars c var mb_gate_loc
                                                             "; vgates=" << vgates)
 
                         -- and update the Gate flags on those gates
-                        c' = foldl (updateLabel (setFlags []))
+                        c' = foldl (updateLabel (\g -> g{gate_flags = []}))
                                    c
                                    vgates'
                     return c'
@@ -656,7 +647,8 @@ genCondExit testGate
 
           mkCtx' i t (true_gate,false_gate) =
               let src_gates = [testGate, true_gate, false_gate]
-              in  mkCtx (Gate i t Select src_gates [] [])
+                  depth     = (length parentScope) - 1
+              in  mkCtx (Gate i t Select src_gates depth [] [])
 
 
 -- take a list of pairs, and where a pair is equal, pass on that value, but
@@ -678,7 +670,7 @@ foo [] _  = []
 -- figure out the type of a Select gate, based on the type of its two
 -- inputs
 getSelType gr (node1, node2)
-    = case map (gateType . fromJust . Gr.lab gr) [node1, node2] of
+    = case map (gate_typ . fromJust . Gr.lab gr) [node1, node2] of
         [Im.BoolT          , Im.BoolT          ]    -> Im.BoolT
         [Im.IntT i1        , Im.IntT i2        ]    -> Im.IntT $ Im.BinOp Max i1 i2
         [a1@(Im.ArrayT _ _), a2@(Im.ArrayT _ _)]    -> a1 `trace` ("getSelType got types " <<
@@ -723,6 +715,7 @@ genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
                                                   [CircuitCtx]
                                                   [Gr.Node]))
 genExp' c exp =
+ do depth <- getDepth
     case exp `trace` ("genExp' " << stripExpT exp) of
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1, gates1) <- genExp c   e1
@@ -737,12 +730,12 @@ genExp' c exp =
                                             _      -> error ("BinOp " << exp <<
                                                              " arg2 got multiple gates: " <<
                                                              gates2)
-                              let ctx       = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] [] []
+                              let ctx       = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] depth [] []
                               return (c2, Left [ctx])
 
       (UnOp op e1)      -> do i <- nextInt
                               (c1, [gate1]) <- genExp c   e1
-                              let ctx       = mkCtx $ Gate i VoidT (Un op) [gate1] [] []
+                              let ctx       = mkCtx $ Gate i VoidT (Un op) [gate1] depth [] []
                               return (c1, Left [ctx])
 
       (EVar var)        -> do gates <- getsVars $
@@ -751,7 +744,7 @@ genExp' c exp =
                               return (c, Right gates)
 
       (ELit l)          -> do i         <- nextInt
-                              let ctx   = mkCtx (Gate i VoidT (Lit l) [] [] [])
+                              let ctx   = mkCtx (Gate i VoidT (Lit l) [] depth [] [])
                               return (c, Left [ctx])
 
       -- here we try to update the Typ annotation on the Gate
@@ -759,7 +752,7 @@ genExp' c exp =
       (ExpT typ e)      -> do (c', res) <- genExp' c e
                               case res of
                                 (Left          [(c1, c2, gate,                 c3)]) ->
-                                    let ctx' =  (c1, c2, setGateType typ gate, c3)
+                                    let ctx' =  (c1, c2, gate { gate_typ = typ }, c3)
                                     in  return (c', Left [ctx'])
                                 -- FIXME: can't deal with multiple contexts
                                 -- for now
@@ -783,13 +776,15 @@ genExp' c exp =
                                                                    arr_ns)
                               (c2, [idx_n])        <- genExp c1 idx_e
                               readarr_n            <- nextInt
+                              depth                <- getDepth
                                   -- get the array type and the element type, from the
                                   -- array expression annotations
                               let (ExpT arr_t@(ArrayT elem_t _) _)   = arr_e
                                   readarr_ctx       = mkCtx (Gate readarr_n
                                                                   VoidT
-                                                                  (ReadDynArray)
+                                                                  ReadDynArray
                                                                   [arr_n, idx_n]
+                                                                  depth
                                                                   [] [])
                               (e_locs,e_typs)      <- getTypByteLocs elem_t
                               -- build the array pointer slicer gate. it will get the new
@@ -800,6 +795,7 @@ genExp' c exp =
                                                                   arr_t
                                                                   (Slicer (0, array_blen))
                                                                   [readarr_n] 
+                                                                  depth
                                                                   [] []
                               -- add array_blen to all the offsets, as the array pointer
                               -- will be output first by the ReadDynArray gate
@@ -810,6 +806,7 @@ genExp' c exp =
                                                                 t
                                                                 (Slicer (off,len))
                                                                 [readarr_n]
+                                                                depth
                                                                 [] [] | i           <- is
                                                                       | (off,len)   <- e_locs'
                                                                       | t           <- e_typs]
@@ -834,10 +831,10 @@ genExp' c exp =
 -- make a graph Context for this operator, node number and source
 -- gates
 mkCtx :: Gate -> CircuitCtx
-mkCtx g@(Gate node _ _ srcs _ _) = let ctx = (map uAdj srcs,
-                                              node,
-                                              g,
-                                              []) -- no outgoing edges
+mkCtx g@(Gate node _ _ srcs _ _ _) = let ctx = (map uAdj srcs,
+                                                node,
+                                                g,
+                                                []) -- no outgoing edges
                                     in ctx
 
 
@@ -879,9 +876,6 @@ uAdj n = ((), n)
 
 
 -- extract the params of main() from a Prog
--- FIXME: Func does not now hang on to the types of the function
--- parameters, which we do need here.
--- for now invent a type :)
 extractInputs (Prog pname (ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
     in  form_args
@@ -946,7 +940,8 @@ spliceVar loc@(off,len) new_gates var = updateVar (splice loc new_gates .
                                                    fromJustMsg ("spliceVar " << var))
                                                   var
 
-
+-- the current depth inside nested conditionals, 0-based
+getDepth = getsVars length >>== subtr 1
 
 --------------------
 -- state utility functions
@@ -980,7 +975,8 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 -- <blank line>
 
 instance Show Gate where
-    show (Gate i typ op srcs flags doc) = show i ++ "\n" ++
+    show (Gate i typ op srcs depth flags doc)
+                                        = show i ++ "\n" ++
                                           show flags ++ "\n" ++
                                           PP.render (Im.docTypMachine typ) ++ "\n" ++
                                           show op ++ "\n" ++
@@ -988,10 +984,14 @@ instance Show Gate where
                                            then "nosrc"
                                            else (foldr1 (\s1 s2 -> s1 ++ " " ++  s2)
                                                         (map show srcs)))              ++ "\n" ++
+                                          show depth ++ "\n" ++
                                           (if null doc
                                            then "nocomm"
-                                           else show (peek doc)) ++
+                                           else show (strip $ peek doc)) ++
                                           "\n\n"
+        where strip = mapExp f
+              f (EVar v)    = (EVar (strip_var v))
+              f e           = e
 
 instance Show GateFlags where
     show Output = "Output"

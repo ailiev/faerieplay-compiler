@@ -3,7 +3,10 @@ module SashoLib (
                  (.||),
 		 (.*),
                  (...),
-         (<<),
+
+                 (<<),
+
+                 (>>==),
 
         Stack (..),
 
@@ -15,6 +18,7 @@ module SashoLib (
 		 ilog2,
          isqrt,
          divUp,
+         subtr,
 
          findInStack,
          maybeLookup,
@@ -100,7 +104,6 @@ infixl 7 .*
 f .* g = \x -> f x * g x
 
 
-
 -- return a predicate which is the 'not' of another predicate
 notp :: (a -> Bool) -> (a -> Bool)
 notp f = not . f
@@ -110,6 +113,22 @@ notp f = not . f
 (<<) :: (Show a, Show b) => (a -> b -> String)
 x << y = cleanup $ (show x) ++ (show y)
     where cleanup = (filter ((/= '"')))
+
+
+-- like >>= except the function is outside the monad, so this puts in a "return" for us
+infixl 1  >>==
+(>>==) :: (Monad m) => m a -> (a -> b) -> m b
+k >>== f    = k >>= return . f
+
+
+-- using the subtraction operator applied to one arg is tricky (needs a flip, and
+-- something like (- x) is taken as (negate x)), hence:
+subtr x = \y -> y - x
+-- flip (-)  -- for some unknown reason, this definition fixes the type of subtr to only
+-- Integer
+
+
+
 
 {-
 instance Show String where
@@ -372,6 +391,7 @@ factorial n = product [1..n]
 -- should always be the case anyhow)
 choose n k = factorial n `quot` (factorial k * factorial (n-k))
 
+fib             = 1 : 1 : [ a+b | (a,b) <- zip fib (tail fib) ]
 
 -- simple encapsulation for a summation with limit 'a' to 'b' and
 -- summed function 'f'

@@ -137,6 +137,7 @@ EBNot.          Exp11   ::= "~" Exp12 ;
 
 ETimes.         Exp10   ::= Exp10 "*" Exp11 ;
 EDiv.           Exp10   ::= Exp10 "/" Exp11 ;
+EMod.           Exp10   ::= Exp10 "%" Exp11 ;
 
 EPlus.          Exp9    ::= Exp9 "+" Exp10 ;
 EMinus.         Exp9    ::= Exp9 "-" Exp10 ;

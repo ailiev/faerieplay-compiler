@@ -200,6 +200,7 @@ lbool = ELit . LBool
 data BinOp =
     Times 
   | Div 
+  | Mod
   | Plus 
   | Minus 
   | SL 
@@ -681,11 +682,16 @@ docTyp t =
 
 docTypMachine t = 
     case t of
-      (ArrayT t size)   -> let size_i   = case evalStatic size of
-                                            (Left e)  -> error ("docTypMachine on " << t <<
-                                                                "failed: " << e)
-                                            (Right i) -> i
-                           in  sep [text "array", integer size_i]
+    -- an array is here specified by its length, and the number of primitive types
+    -- (int,bool) in its element type
+      (ArrayT t size)   -> let size_i   = either (\e -> error ("docTypMachine on " << t <<
+                                                               "failed: " << e))
+                                                 (id)
+                                                 (evalStatic size)
+                               size_elt = case t of
+                                            (StructT (_,locs,_))    -> length locs
+                                            _                       -> 1
+                           in  sep [text "array", integer size_i, int size_elt]
       _                 -> text "scalar"
 
 
@@ -728,6 +734,7 @@ docUnOp o = text (case o of
 docBinOp o = text (case o of
                     Times -> "*" 
                     Div -> "/" 
+                    Mod     -> "%"
                     Plus -> "+" 
                     Minus -> "-" 
                     SL -> "<<" 
