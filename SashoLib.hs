@@ -29,6 +29,8 @@ module SashoLib (
         modifyListHead,
         applyWithDefault,
 
+        interleave,
+
         mapOne,
 
 		 pair2,
@@ -397,6 +399,8 @@ fib             = 1 : 1 : [ a+b | (a,b) <- zip fib (tail fib) ]
 -- summed function 'f'
 sumOp f a b = sum . map f $ [a..b]
 
+
+interleave = foldr (\(a,b) xs -> (a:b:xs)) [] ... zip
 
 
 -- have a list of functions on 2 params, run them over a fixed pair of
