@@ -1,12 +1,19 @@
 module Main where
 
-import List (unfoldr)
-import Maybe (isJust, fromJust)
+import List     (unfoldr, find)
+import Maybe    (isJust, fromJust, fromMaybe)
+import System   (getArgs, exitWith, ExitCode(ExitSuccess,ExitFailure))
 
 import IO ( stdin, stderr,
             hGetContents, hPrint, hFlush, hPutStrLn,
             openFile, hClose,
-            IOMode(..))
+            IOMode(..),
+            ioeGetErrorString)
+
+import qualified Distribution.GetOpt    as Opt
+import Data.IORef                       (IORef,newIORef,readIORef,writeIORef)
+import System.IO.Unsafe                 (unsafePerformIO)
+
 
 import SFDL.Abs                  -- the abstract syntax types from BNFC
 import SFDL.Lex                  -- Alex lexer
@@ -22,6 +29,7 @@ import qualified HoistStms      as Ho
 import qualified Unroll         as Ur
 import qualified CircGen        as CG
 
+
 import TypeChecker
 
 import SashoLib
@@ -29,61 +37,106 @@ import SashoLib
 import qualified Text.PrettyPrint.HughesPJ as PP
 
 
+main = do argv          <- getArgs
+          let o@(opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
+--          hPrint stderr o
+          if (not $ null errs) then do hPutStrLn stderr "Command line errors:"
+                                       mapM_ (hPutStrLn stderr) errs
+                                       hPutStrLn stderr $ Opt.usageInfo "Usage:\n" optionControl
+                                       exitWith ExitSuccess
+                               else return ()
+
+          writeIORef g_Flags opts
+
+          hInfile       <- if null args
+                           then return stdin
+                           else let infile = head args in
+                                (openFile infile ReadMode)
+                                    `catch`
+                                (\e -> do putStrLn $ "failed to open " ++
+                                                       infile ++
+                                                       ": " ++
+                                                       ioeGetErrorString e
+                                          exitWith $ ExitFailure 2)
+          (hGetContents hInfile >>= run 1 pProg)
 
 
-main = hGetContents stdin >>= run 2 pProg
+
+------------
+-- command line argument processing stuff
+------------
+g_Flags :: IORef [Flag]
+g_Flags = unsafePerformIO $ newIORef []
+
+data Flag 
+    = Verbose  | Version 
+    | Input String | Output String | LibDir String
+      deriving Show
+    
+optionControl :: [Opt.OptDescr Flag]
+optionControl =
+    [ Opt.Option ['v']     ["verbose"] (Opt.NoArg Verbose)       "chatty output on stderr"
+    , Opt.Option ['V','?'] ["version"] (Opt.NoArg Version)       "show version number"
+    , Opt.Option ['o']     ["output"]  (Opt.ReqArg Output "FILE")  "output FILE"
+--    , Opt.Option ['c']     []          (Opt.OptArg inp  "FILE")  "input FILE"
+     ]
+
+-- extract the output file from the global flags
+getOutFile = do flags   <- readIORef g_Flags
+                let (Output outName) = fromJust $ find isOut flags
+                return outName
+    where isOut (Output _)  = True
+          isOut _           = False
 
 
-type ParseFun a = [Token] -> Err a
 type Verbosity = Int
 
 putStrV :: Verbosity -> String -> IO ()
 putStrV v s = if v > 1 then putStrLn s else return ()
 
+{-
 showTree :: (Show a, Print a) => Int -> a -> IO ()
 showTree v tree
  = do
       putStrV v $ "\n[Abstract Syntax]\n\n" ++ show tree
       putStrV v $ "\n[Linearized tree]\n\n" ++ printTree tree
+-}
 
-
--- run :: (Print a, Show a) => Verbosity -> ParseFun a -> String -> IO ()
-run v p s =
-    let ts =  myLexer s
-        ast = p ts
+--run :: (Print a, Show a) => Verbosity -> ParseFun a -> String -> IO ()
+run v parser input =
+    let tokens  = myLexer input
+        ast     = parser tokens
     in case ast of
-         Bad s    -> do putStrLn "\nParse              Failed...\n"
+         Bad s    -> do putStrLn "\nParse Failed...\n"
                         putStrV v "Tokens:"
-                        putStrV v $ show ts
+                        putStrV v $ show tokens
                         putStrLn s
-         Ok  tree ->
+         Ok  prog@(Prog _ _) ->
            do putStrLn "\nParse Successful!"
-              case tree of
-                prog@(Prog _ _) ->
-                  case typeCheck prog of
-                    (Left err)        -> print $ "Error! " << err
-                    (Right prog@(Im.Prog pname
-                                         Im.ProgTables {Im.types=typ_table,
-                                                        Im.funcs=fs}))      ->
-                       do putStrLn "After typechecking:"
-                          hPrint stderr prog
-                          let prog_flat = Ho.flattenProg prog
-                          putStrLn "Flattened program:"
-                          hPrint stderr prog_flat
-                          case Ur.unrollProg prog_flat of
-                            (Left err)       -> print $ "Error! " << err
-                            (Right stms)     ->
-                                do putStrLn "Unrolled main:"
-                                   hPrint stderr (PP.vcat (map Im.docStm stms))
-                                   let cctFile      = "cct.gviz"
-                                       gatesFile    = "gates.txt"
-                                       args         = CG.extractInputs prog
-                                       (cct,gates)  = CG.genCircuit typ_table stms args
-                                   hPrint stderr cct; hFlush stderr
-                                   putStrLn $ "Now writing the circuit out to " ++ cctFile
-                                   writeFile cctFile (CG.showCct cct)
-                                   putStrLn $ "Writing the gate list to " ++ gatesFile
-                                   writeGates gatesFile gates
+              case typeCheck prog of
+                (Left err)        -> print $ "Type Error! " << err
+                (Right prog@(Im.Prog pname
+                             Im.ProgTables {Im.types=typ_table,
+                                            Im.funcs=fs}))      ->
+                   do putStrLn "After typechecking:"
+                      hPrint stderr prog
+                      let prog_flat = Ho.flattenProg prog
+                      putStrLn "Flattened program:"
+                      hPrint stderr prog_flat
+                      case Ur.unrollProg prog_flat of
+                        (Left err)       -> print $ "Unrolling Error! " << err
+                        (Right stms)     ->
+                           do putStrLn "Unrolled main:"
+                              hPrint stderr (PP.vcat (map Im.docStm stms))
+                              gatesFile       <- getOutFile
+                              let cctFile      = "cct.gviz"
+                                  args         = CG.extractInputs prog
+                                  (cct,gates)  = CG.genCircuit typ_table stms args
+                              hPrint stderr cct; hFlush stderr
+                              putStrLn $ "Now writing the circuit out to " ++ cctFile
+                              writeFile cctFile (CG.showCct cct)
+                              putStrLn $ "Writing the gate list to " ++ gatesFile
+                              writeGates gatesFile gates
 --                                   mapM_ print cct
 
 {-
