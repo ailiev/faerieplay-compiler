@@ -16,6 +16,9 @@
 ---------------
 
 
+-- tokens with position information
+-- position token PIdent (letter (letter|digit|'_'|'\'')*) ;
+
 -----------
 -- ordinary rules
 -----------
@@ -65,8 +68,10 @@ IntT.          Typ      ::= "Int" "<" Exp "`>" ;
 -- generic int, without a specified size. can only be used in a
 -- function signature I believe
 GenIntT.        Typ     ::= "Int" "<`>" ;
+-- other possible solutions to the IntT definition problem:
 --IntT.          Typ         ::= "Int" "<" Exp ">" ;
 --IntT.          Typ         ::= "Int" "<" Integer ">" ;
+
 BoolT.          Typ     ::= "Boolean" ;
 VoidT.          Typ     ::= "void" ;
 
@@ -128,8 +133,7 @@ EStruct.        Exp12   ::= Exp12 "." Exp13 ;
 EFunCall.       Exp12   ::= Ident "(" [FunArg] ")" ;
 
 -- binary operators, grouped by precedence, numbered as in the C
--- operator precedence man page (some are missing here, hence the gap
--- 4-6)
+-- operator precedence man page
 ENot.           Exp11   ::= "!" Exp12 ;
 -- this appears to cause a bunch of shift-reduce conflicts
 ENeg.           Exp11   ::= "-" Exp12 ;

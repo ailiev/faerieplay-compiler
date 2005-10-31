@@ -79,3 +79,9 @@ case with "normal" array reads, but the oblivious read alg. updates the array
 values (in particular the working area in sqrt alg.), so any subsequent reads
 and writes should use the new one.
 
+
+Thu Oct 20 15:27:29 2005
+
+Where/how do we carry the line numbers??
+- all tokens
+- keywords?
