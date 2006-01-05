@@ -9,7 +9,7 @@ import List (intersperse)
 import Maybe (fromJust)
 
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
-import Control.Monad.Error (Error, throwError)
+import Control.Monad.Error (Error, throwError, MonadError)
 import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
@@ -148,9 +148,11 @@ data Exp =
  | ExpT Typ Exp                 -- a type annotation
  | ESeq [Stm] Exp               -- several assignment statements,
                                 -- followed by an expression.
- | EComplexInit Int             -- this is just to communicate to the circuit
-                                -- generator that a struct or array of this size
-                                --is to be prepared-for
+ | EArrayInit Int Int           -- Indicate to the circuit generator (and runtime) that an
+                                -- array of the given elemnt size, and length should be
+                                -- prepared.
+ | EStructInit Int              -- prepare a struct with that many primitive (Int) fields
+                                -- and subfields
   deriving (Eq,Ord)
 
 
@@ -301,7 +303,7 @@ expandType t =
 
 -- return the length of a type,
 -- which has already been expanded (ie. no SimpleT)
--- use 'f' to get the length of simple types: Int, Bool, EnumT
+-- use 'tblen' for f to get the length of simple types: Int, Bool, EnumT
 typeLength :: (Typ -> Int) -> Typ -> Int
 typeLength f t =
     let rec = typeLength f in
@@ -373,7 +375,9 @@ strip_var = strip_vflags . stripScope
 -- evaluation of static expressions
 -----------------------------------
 
-evalStatic :: Exp -> ErrMonad Integer
+-- here, the error class is fixed, but the associated monad is generic, so could be a
+-- State monad, or nothing
+evalStatic :: (MonadError MyError m) => Exp -> m Integer
 evalStatic e = case e of
                       (BinOp op e1 e2)  -> do [i1,i2] <- mapM evalStatic [e1,e2]
                                               let realop = transIntOp op
@@ -656,8 +660,9 @@ docExp e = case e of
                            cat ((punctuate comma (map docStm stms))) <>
                            text ": " <>
                            docExp e
-    (EComplexInit size) -> text "ComplexInit" <> parens (int size)
-
+    (EStructInit size) -> text "StructInit" <> parens (int size)
+    (EArrayInit elem_size len)  -> text "StructInit" <>
+                                   parens (int elem_size <> comma <> int len)
 
 docTyp :: Typ -> Doc
 docTyp t =
