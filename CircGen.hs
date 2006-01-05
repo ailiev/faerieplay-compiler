@@ -1,5 +1,23 @@
 -- code to generate a circuit from an unrolled list of statements,
 -- consisiting only of SAss, and SIfElse.
+
+{-
+How should non-input arrays be dealt with?
+- need to establish a gate for the array
+- add a series of initializations to zero the gates? not too
+  sensible, best to have that as part of the runtime. but, do add a
+  gate to initialize (to zero) the whole array
+
+How is struct initialization dealt with?
+- just have runtime rules about default values for uninitialized
+  gates?
+  - but, each gate needs an input, so will need to connect to the zero
+    literal (or whatever) anyway.
+  - so, it's actually the compiler which does the rules for this: when
+    a value is needed and it's unitialized, pull in from a zero
+    literal.
+-}
+
 module CircGen (
                 genCircuit,
                 clip_circuit,
@@ -30,7 +48,7 @@ import qualified Data.Map                       as Map
 import qualified Control.Monad.State            as St
 
 import SashoLib
-import Sasho.XDR
+-- import Sasho.XDR
 
 import qualified Container as Cont
 import Common (trace)
@@ -56,6 +74,12 @@ data Op =
   --
   -- the paramater is the current scope depth
   | ReadDynArray
+
+  -- initialize an array
+  -- parameters:
+  -- 1) element size
+  -- 2) number of elems
+  | InitDynArray Int Integer
 
   -- update array; inputs = [array, index, val1, val2, ...]; output is
   -- the updated array. The parameters are:
@@ -235,7 +259,7 @@ createInputGates addvars (name, typ) =
         (StructT (fields,_,_))
                 -> do gates <- concatMapM (createInputGates False) fields
                       let is = map gate_num gates
-                      if addvars then setVar is var else return ()
+                      if addvars then setVarAddrs is var else return ()
                       return gates
 
         (SimpleT tname)
@@ -245,7 +269,7 @@ createInputGates addvars (name, typ) =
         -- IntT, BoolT, ArrayT (for dynamic arrays):
         _         -> do i <- nextInt
                         if addvars
-                          then setVar [i] var
+                          then setVarAddrs [i] var
                                    `trace`
                                    ("inserting input var " << var << " into VarTable")
                           else return ()
@@ -268,13 +292,13 @@ createInputGates addvars (name, typ) =
 
 
 
--- this just adds a dummy entry (a large negative) of the correct size in the var table
+-- this just adds an obvious dummy entry of the correct size in the var table
 -- for this lval.
--- we only need to do it for structs/arrays which are variables, and not
+-- we only need to do it for structs which are variables, and not
 -- expressions (ie. parts of other complex types)
 genComplexInit lval size =
     case lval of
-      (EVar var)        -> setVar (replicate size (minBound)) var
+      (EVar var)        -> setVarAddrs (replicate size (-12345678)) var
       _                 -> return ()
 
 
@@ -380,7 +404,7 @@ genStm circ stm =
              
       -- this is a message from the typechecker that a Struct or such
       -- will be coming along just now.
-      (SAss lval (ExpT _ (EComplexInit size))) ->
+      (SAss lval (ExpT _ (EStructInit size))) ->
           do genComplexInit lval size
              return circ
 
@@ -394,12 +418,14 @@ genStm circ stm =
                                           (addOutputFlag var)
                                           exp
                                           lval
-             setVar nodes var
+             setVarAddrs nodes var
              return c'
 
       -- get the gates for this 'val', and set the address of 'lval'
       -- to those gates
+      
       s@(SAss lval@(EStruct str_e idx) val) ->
+         {-# SCC "stm-ass-estruct" #-}
           do type_table    <- getTypeTable
              (_,locs,_)    <- getStrTParams str_e
              let (off,len)  = locs !! idx
@@ -444,31 +470,39 @@ genStm circ stm =
 
       -- quite similar to the above. really need to structure this better
       s@(SAss lval@(EArr arr_e idx_e) val) ->
-          do i                  <- nextInt
-             (rv,off)           <- getRootvarOffset getStrTLocs arr_e
+          {-# SCC "stm-ass-earr" #-} 
+          do (rv,off)           <- getRootvarOffset getStrTLocs arr_e
+             -- generate gates for the rval
              (c3, gates)        <- genExpWithDoc circ
                                                  (addOutputFlag rv)
                                                  val
                                                  lval
+             -- gate for the array lval
              (c4, [arr_n])      <- genExp c3 arr_e
+             -- gate for the index
              (c5, [idx_n])      <- genExp c4 idx_e
              depth              <- getDepth
+             i                  <- nextInt
              let (ExpT arr_t _)  = arr_e
-                 ctx             = mkCtx $ Gate i
-                                                arr_t
-                                                -- NOTE: writing -1 here to mean "the end"
-                                                (WriteDynArray (0, -1))
-                                                ([arr_n, idx_n] ++ gates)
-                                                depth
-                                                [] []
+                 ctx             = {-# SCC "mkCtx" #-}
+                                   (mkCtx $ Gate i
+                                                 arr_t
+                                                 -- NOTE: writing -1 here to mean "the end"
+                                                 (WriteDynArray (0, -1))
+                                                 ([arr_n, idx_n] ++ gates)
+                                                 depth
+                                                 [] [])
              spliceVar (off,1) [i] rv
-             return $ ctx & c5
+             return $ {-# SCC "ctx & c5" #-} (ctx & c5) `trace`
+                        ("SAss to EArr: circuit now = " ++ show c5 ++
+                         "; inserting " ++  show ctx)
 
 
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
       (SIfElse test@(EVar testVar)
                (locs1, stms1)
                (locs2, stms2))  ->
+          {-# SCC "stm-ass-ifelse" #-}
           do [testGate]         <- getsVars $ fromJustMsg "finding conditional test gate" .
                                               maybeLookup testVar
              -- do the recursive generation for both branches, and
@@ -489,6 +523,7 @@ genStm circ stm =
              return circ''
 
       s -> error $ "Unknow genStm on " << s
+
     where addOutputFlag var =
               case strip_var var of
                 (VSimple "main") -> Just (\gate -> gate {gate_flags = [Output]})
@@ -640,7 +675,7 @@ genCondExit testGate
                    is           <- replicateM (length ts) nextInt
                    let ctxs      = zipWith3 mkCtx' is ts changed_gates
                        new_gates = foo (uncurry zip in_gates) is
-                   setVar new_gates var
+                   setVarAddrs new_gates var
                    -- work all the new Contexts into circuit c
                    return (foldl (flip (&)) c ctxs)
 
@@ -696,6 +731,8 @@ genExp c e = do (c', res) <- genExp' c e
                   -- just pass on the graph and node
                   (Right gateNums)  -> return (c',
                                                gateNums)
+                                          `trace`
+                                       ("genExp returning nodes " << gateNums)
                   
 
 -- this one is a little nasty - it returns the expanded circuit, and
@@ -737,10 +774,15 @@ genExp' c exp =
                               let ctx       = mkCtx $ Gate i VoidT (Un op) [gate1] depth [] []
                               return (c1, Left [ctx])
 
-      (EVar var)        -> do gates <- getsVars $
-                                       fromJustMsg ("CircGen: Lookup Var " << var) .
-                                       maybeLookup var
+      (EVar var)        -> do var_table  <- getVars
+                              gates <- (getsVars $
+                                        fromJustMsg ("CircGen: Lookup Var " << var) .
+                                        maybeLookup var)
+                                            
                               return (c, Right gates)
+                                         `trace`
+                                     ("genExp' EVar " << var << ", vartable=" << var_table <<
+                                      " -> " << gates)
 
       (ELit l)          -> do i         <- nextInt
                               let ctx   = mkCtx (Gate i VoidT (Lit l) [] depth [] [])
@@ -822,6 +864,17 @@ genExp' c exp =
                               return (c_out, Left slicer_ctxs)
 
       (EStatic e)       -> genExp' c e
+
+      (EArrayInit elem_size len) ->
+                           do i         <- nextInt
+                              let ctx = mkCtx $ Gate i
+                                                     -- the type field here is a dummy
+                                                     (Im.IntT $ Im.lint 12345678)
+                                                     (InitDynArray (fromIntegral elem_size) len)
+                                                     []
+                                                     depth
+                                                     [] []
+                              return (c, Left [ctx])
 
       e                 -> error $ "CircGen: unknown expression " << e
 
@@ -932,7 +985,7 @@ updateVar f var = modifyVars $ \maps -> let curr    = maybeLookup var maps
 
 -- two common usages:
 -- just set the var gates completely, regardless if the var is already present or not
-setVar new_gates = updateVar (const new_gates)
+setVarAddrs new_gates = updateVar (const new_gates)
 -- splice in new gates into a part of the current list. error if the var not already
 -- present
 spliceVar loc@(off,len) new_gates var = updateVar (splice loc new_gates .
@@ -940,7 +993,10 @@ spliceVar loc@(off,len) new_gates var = updateVar (splice loc new_gates .
                                                   var
 
 -- the current depth inside nested conditionals, 0-based
-getDepth = getsVars length >>== subtr 1
+getDepth = do len <- getsVars length -- the number of var tables (one per scope)
+              return (if len > 0
+                      then len - 1
+                      else 0)
 
 --------------------
 -- state utility functions
@@ -962,7 +1018,7 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 
 
--- need a instance Show Gate easier for machine parsing in a weak language (C++)
+-- need a "instance Show Gate" easier for machine parsing in a weak language (C++)
 -- line-oriented format:
 -- 
 -- gate number
@@ -975,24 +1031,55 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 
 instance Show Gate where
-    show (Gate i typ op srcs depth flags doc)
-                                        = show i ++ sep ++
-                                          show flags ++ sep ++
-                                          PP.render (Im.docTypMachine typ) ++ sep ++
-                                          show op ++ sep ++
-                                          (if null srcs
-                                           then "nosrc"
-                                           else (foldr1 (\s1 s2 -> s1 ++ " " ++  s2)
-                                                        (map show srcs)))              ++ sep ++
-                                          show depth ++ sep ++
-                                          (if null doc
-                                           then "nocomm"
-                                           else show (strip $ peek doc)) ++
-                                          sep ++ sep
-        where strip = mapExp f
+    showsPrec x g@(Gate i typ op srcs depth flags doc)
+                   = ("[[" ++)                                           .
+                     -- 1: gate number
+                     rec i                                  .   (sep ++) .
+                     -- 2: gate flags
+                     showList flags                         .   (sep ++) .
+                     -- 3: gate result type
+                     (PP.render (Im.docTypMachine typ) ++) .
+                                                                (sep ++) .
+                     -- 4: gate operation
+                     rec op .                                   (sep ++) .
+                     -- 5: source gates
+                     (if null srcs
+                      then ("nosrc" ++)
+                      else (foldr1 (\f1 f2 -> f1 . (", " ++) . f2)
+                                   (map rec srcs))) .
+                                                                (sep ++) .
+                     -- 6: gate depth
+                     rec depth .                                (sep ++) .
+                     -- 7: comment
+                     (if null doc
+                      then ("nocomm" ++)
+                      else ((show $ strip $ peek doc) ++))               .
+                     ("]]" ++)
+
+        where rec          :: (Show a) => a -> ShowS
+              rec           = showsPrec x -- recurse
+
+              sep           = " :: "
+
+              strip         = mapExp f
               f (EVar v)    = (EVar (strip_var v))
               f e           = e
-              sep           = "\n"
+
+
+--     show (Gate i typ op srcs depth flags doc)
+--                                         = show i ++ sep ++
+--                                           show flags ++ sep ++
+--                                           PP.render (Im.docTypMachine typ) ++ sep ++
+--                                           show op ++ sep ++
+--                                           (if null srcs
+--                                            then "nosrc"
+--                                            else (foldr1 (\s1 s2 -> s1 ++ " " ++  s2)
+--                                                         (map show srcs)))              ++ sep ++
+--                                           show depth ++ sep ++
+--                                           (if null doc
+--                                            then "nocomm"
+--                                            else show (strip $ peek doc)) ++
+--                                           sep ++ sep
 
 instance Show GateFlags where
     show Output = "Output"
@@ -1011,6 +1098,7 @@ instance Show Op where
     show Input              = "Input"
     show Select             = "Select"
     show (Lit l)            = "Lit " ++ show l
+    show (InitDynArray elemsize len)    = "InitDynArray " << elemsize << " " << len
     show ReadDynArray       = "ReadDynArray"
     show (WriteDynArray
              (off,len))     = "WriteDynArray " ++ show off ++ " " ++ show len
