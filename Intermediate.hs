@@ -148,7 +148,8 @@ data Exp =
  | ExpT Typ Exp                 -- a type annotation
  | ESeq [Stm] Exp               -- several assignment statements,
                                 -- followed by an expression.
- | EArrayInit Int Int           -- Indicate to the circuit generator (and runtime) that an
+ | EArrayInit Int
+              Integer           -- Indicate to the circuit generator (and runtime) that an
                                 -- array of the given elemnt size, and length should be
                                 -- prepared.
  | EStructInit Int              -- prepare a struct with that many primitive (Int) fields
@@ -661,8 +662,8 @@ docExp e = case e of
                            text ": " <>
                            docExp e
     (EStructInit size) -> text "StructInit" <> parens (int size)
-    (EArrayInit elem_size len)  -> text "StructInit" <>
-                                   parens (int elem_size <> comma <> int len)
+    (EArrayInit elem_size len)  -> text "ArrayInit" <>
+                                   parens (int elem_size <> comma <> integer len)
 
 docTyp :: Typ -> Doc
 docTyp t =

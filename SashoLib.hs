@@ -278,10 +278,9 @@ maybeMapAdjust f k m    = if Map.member k m
 -- non-Nothing we'll actually use that result.
 -- TODO: there must be a better way to do this with the Maybe monad
 mapOne :: (a -> Maybe a) -> [a] -> [a]
-mapOne f (x:xs)
-    | Nothing <- f_x    = x : mapOne f xs
-    | Just x' <- f_x    = x' : xs
-    where f_x = f x
+mapOne f (x:xs) = case f x of
+                           Nothing  -> x : mapOne f xs
+                           Just x'  -> x': xs
 mapOne _ [] = []
 
 

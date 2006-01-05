@@ -18,7 +18,7 @@ import Control.Monad.Trans (lift)
 import Common (MyError(..), ErrMonad)
 
 import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
-                 myLiftM, concatMapM)
+                 myLiftM, concatMapM, (>>==))
 import qualified Container as Cont
 
 
@@ -487,12 +487,13 @@ mkVarInits :: Im.VarTable -> StateWithErr [Im.Stm]
 mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                             concatMapM mkInit $ map (\(t,v) -> (t,Im.EVar v)) locs
           -- create Init statements for an lval of the given type
-    where mkInit (t,lval) = trace ("mkInit " << lval << "::" << t) $
+    where mkInit :: (Im.Typ, Im.Exp) -> StateWithErr [Im.Stm]
+          mkInit (t,lval) = trace ("mkInit " << lval << "::" << t) $
                             case t of
                               (Im.IntT i)          -> return [ass lval 0 t]
                               (Im.BoolT)           -> return [ass lval (Im.lbool False) t]
           -- for a struct, we first add an SAss for the whole struct,
-          -- using Im.EComplexInit,
+          -- using Im.EStructInit,
           -- and then individual SAss for each member, recursively
                               (Im.StructT fields_info)    ->
                                   do let (fields, locs, _)  = fields_info
@@ -500,18 +501,21 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                                      inits <- zipWithM (mkStruct lval t)
                                                        fields
                                                        [0..]
-                                     return $ (ass lval (Im.EComplexInit (sum lens)) t) :
+                                     return $ (ass lval (Im.EStructInit (sum lens)) t) :
                                               concat inits
-
-                              (Im.ArrayT elem_t len)    ->
-                                  do return [ass lval (Im.EComplexInit 1) t]
-
+                              (Im.ArrayT elem_t len_e)    ->
+                                   do elem_len   <- Im.expandType elem_t >>== 
+                                                    Im.typeLength Im.tblen
+                                      len        <- Im.evalStatic len_e >>== fromInteger
+                                      return [ass lval (Im.EArrayInit elem_len len) t]
                               (Im.SimpleT tname)    ->
-                                  do typ <- lookupType tname
-                                     mkInit (typ, lval)
+                                   do typ <- lookupType tname
+                                      mkInit (typ, lval)
+
                               _                     -> return []
 
           ass lval val t = Im.SAss (Im.ExpT t lval) (Im.ExpT t val)
+
           -- create a field-init statement for struct 'str', for the
           -- given field (ie. its type, offset and length)
           mkStruct str str_t (_, t) field_idx = mkInit (t, (Im.EStruct (Im.ExpT str_t str)
@@ -669,7 +673,7 @@ computeStaticExp e
     | Just (_, op, e1, e2) <- analyzeBinExp e = do i1 <- computeStaticExp e1
                                                    i2 <- computeStaticExp e2
                                                    return $ doOp e i1 i2
-    | otherwise                              = 
+    | otherwise                               = 
         case e of
                (T.EInt i)       -> return i
                (T.EIdent (T.Ident nm)) ->

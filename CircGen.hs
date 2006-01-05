@@ -177,9 +177,12 @@ genCircuit type_table stms args =
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
         clipped_circ    = clip_circuit circ
-        out_circ        = renumber clipped_circ
-        flat_circ       = flatten_cicrcuit out_circ
-    in (out_circ, flat_circ)
+                                `trace` ("The full circuit: " << circ)
+        renum_circ      = renumber clipped_circ
+                                `trace` ("The clipped circuit " << clipped_circ)
+        flat_circ       = flatten_cicrcuit renum_circ
+                                `trace` ("The renumbered circuit " << renum_circ)
+    in (renum_circ, flat_circ)
 
 
 -- keep only gates which are reverse-reachable from the output gates
@@ -493,9 +496,9 @@ genStm circ stm =
                                                  depth
                                                  [] [])
              spliceVar (off,1) [i] rv
-             return $ {-# SCC "ctx & c5" #-} (ctx & c5) `trace`
+             return $ {-# SCC "ctx & c5" #-} (ctx & c5) {- `trace`
                         ("SAss to EArr: circuit now = " ++ show c5 ++
-                         "; inserting " ++  show ctx)
+                         "; inserting " ++  show ctx) -}
 
 
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
