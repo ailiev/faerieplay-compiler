@@ -1035,38 +1035,43 @@ fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 instance Show Gate where
     showsPrec x g@(Gate i typ op srcs depth flags doc)
-                   = ("[[" ++)                                           .
+                   = (delim ++)                                          .
                      -- 1: gate number
                      rec i                                  .   (sep ++) .
                      -- 2: gate flags
-                     showList flags                         .   (sep ++) .
+                     rec flags                              .   (sep ++) .
                      -- 3: gate result type
-                     (PP.render (Im.docTypMachine typ) ++) .
-                                                                (sep ++) .
+                     (PP.render (Im.docTypMachine typ) ++)  .   (sep ++) .
                      -- 4: gate operation
-                     rec op .                                   (sep ++) .
+                     rec op                                 .   (sep ++) .
                      -- 5: source gates
                      (if null srcs
                       then ("nosrc" ++)
-                      else (foldr1 (\f1 f2 -> f1 . (", " ++) . f2)
-                                   (map rec srcs))) .
-                                                                (sep ++) .
+                      else (foldr1 (\f1 f2 -> f1 . (" " ++) . f2)
+                                   (map rec srcs)))         .   (sep ++) .
                      -- 6: gate depth
-                     rec depth .                                (sep ++) .
+                     rec depth                              .   (sep ++) .
                      -- 7: comment
                      (if null doc
                       then ("nocomm" ++)
+                      -- FIXME: may not be correct to use the latest (top of stack)
+                      -- annotation here
                       else ((show $ strip $ peek doc) ++))               .
-                     ("]]" ++)
+                     (delim ++)
 
         where rec          :: (Show a) => a -> ShowS
               rec           = showsPrec x -- recurse
 
-              sep           = " :: "
+              sep           = "\n"
+              delim         = "\n"
+--              sep           = " :: "
+--              delim         = " ** "
 
+              -- get rid of variable annotations in an expression
               strip         = mapExp f
               f (EVar v)    = (EVar (strip_var v))
               f e           = e
+
 
 
 --     show (Gate i typ op srcs depth flags doc)
