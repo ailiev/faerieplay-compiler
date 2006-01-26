@@ -1,8 +1,8 @@
 module Main where
 
-import List     (unfoldr, find)
+import List     (unfoldr, find, elemIndex)
 import Maybe    (isJust, fromJust, fromMaybe)
-import System   (getArgs, exitWith, ExitCode(ExitSuccess,ExitFailure))
+import System   (getArgs, exitWith, ExitCode(..), getProgName)
 
 import IO ( stdin, stderr,
             hGetContents, hPrint, hFlush, hPutStrLn,
@@ -40,11 +40,16 @@ import qualified Text.PrettyPrint.HughesPJ as PP
 main = do argv          <- getArgs
           let o@(opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
 --          hPrint stderr o
-          if (not $ null errs) then do hPutStrLn stderr "Command line errors:"
+          if (not $ null errs) then do name     <- getProgName
+                                       hPutStrLn stderr "Command line errors:"
                                        mapM_ (hPutStrLn stderr) errs
-                                       hPutStrLn stderr $ Opt.usageInfo "Usage:\n" optionControl
+                                       hPutStrLn stderr $ usage name
                                        exitWith ExitSuccess
                                else return ()
+          if elemIndex Help opts /= Nothing then do name     <- getProgName
+                                                    hPutStrLn stderr $ usage name
+                                                    exitWith ExitSuccess
+                                            else return ()
 
           writeIORef g_Flags opts
 
@@ -69,17 +74,22 @@ g_Flags :: IORef [Flag]
 g_Flags = unsafePerformIO $ newIORef []
 
 data Flag 
-    = Verbose  | Version 
+    = Verbose  | Version | Help
     | Input String | Output String | LibDir String
-      deriving Show
+      deriving (Eq,Show)
     
 optionControl :: [Opt.OptDescr Flag]
 optionControl =
     [ Opt.Option ['v']     ["verbose"] (Opt.NoArg Verbose)       "chatty output on stderr"
     , Opt.Option ['V','?'] ["version"] (Opt.NoArg Version)       "show version number"
-    , Opt.Option ['o']     ["output"]  (Opt.ReqArg Output "FILE")  "output FILE"
---    , Opt.Option ['c']     []          (Opt.OptArg inp  "FILE")  "input FILE"
+    , Opt.Option ['o']     ["output"]  (Opt.ReqArg Output "<file>")  "output circuit to <file>"
+    , Opt.Option ['h']      ["help"]    (Opt.NoArg Help)            "Print help (this text)"
      ]
+usage name = Opt.usageInfo ("Usage: " ++ name ++ " <options> [input file]\n\
+                                                 \Produces <output> and cct.gviz\n\
+                                                 \Options:")
+                           optionControl
+
 
 -- extract the output file from the global flags
 getOutFile = do flags   <- readIORef g_Flags
