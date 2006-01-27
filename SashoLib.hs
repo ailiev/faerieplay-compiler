@@ -20,6 +20,10 @@ module SashoLib (
          divUp,
          subtr,
 
+         tr,
+
+--         mkList,
+
          findInStack,
          maybeLookup,
          maybeMapAdjust,
@@ -27,9 +31,15 @@ module SashoLib (
          MaybeT, runMaybeT,
                     
         modifyListHead,
+        mapOnTail,
+
         applyWithDefault,
 
         interleave,
+
+        filterList,
+        breakList,
+        spanList,
 
         mapOne,
 
@@ -84,6 +94,10 @@ f .&& g = \x -> f x && g x
 
 infixr 4 .||
 f .|| g = \x -> f x || g x
+
+enumAll :: (Enum a) => [a]
+enumAll = undefined
+
 
 
 -- instance (Eq a) => Eq (a -> a) where
@@ -169,6 +183,7 @@ spanList p xs@(x:xs')
 breakList p = spanList (not . p)
 
 
+-- filter some sublist out of a list
 filterList :: (Eq a) => [a] -> [a] -> [a]
 filterList _   [] = []
 filterList bad xs = let (pre,badL) = breakList (bad `isPrefixOf`) xs
@@ -194,6 +209,15 @@ sumM = myLiftM sum
 
 concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
 concatMapM f = (liftM concat) . mapM f
+
+-- substitute a sublist for another list
+tr :: (Eq a) => ([a],[a]) -> [a] -> [a]
+tr _         [] = []
+tr (from,to) xs = let (pre,badL)        = breakList (from `isPrefixOf`) xs
+                      postBad           = drop (length from) badL
+                  in  if ((length pre) == (length xs)) -- 'from' was not found
+                      then xs
+                      else pre ++ to ++ (tr (from,to) postBad)
 
 
 
@@ -286,6 +310,9 @@ mapOne _ [] = []
 
 modifyListHead _ [] = error "modifyListHead on empty list!"
 modifyListHead f (x:xs) = (f x : xs)
+
+mapOnTail f []          = error "mapOnTail on empty list!"
+mapOnTail f (x:xs)      = x : (map f xs)
 
 
 {-

@@ -11,24 +11,27 @@ GHCFLAGS += -debug
 
 PACKS = -package fgl -package Cabal
 
-all: ghc
+all: sfdlc
 
 bnfc:
 	bnfc -haskell -d SFDL.cf
 	$(MAKE) -C SFDL
 
-ghc:
-	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) Generate
-#	ghc --make $(GHCFLAGS) Generate
+sfdlc:
+	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
+#	ghc --make $(GHCFLAGS) sfdlc
+
+# this make shouldnt look at the sfdlc file
+.PHONY: sfdlc
 
 hat:
 	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
 
 clean:
-	HFLAGS="$(GHCFLAGS)" hmake -clean Generate
+	HFLAGS="$(GHCFLAGS)" hmake -clean sfdlc
 
-# hmake:
-# hmake -package fgl -package Cabal -fglasgow-exts -fallow-overlapping-instances -I$HOME/work/code/lib/haskell -I$HOME/code/haskell Generate
+install: sfdlc
+	install sfdlc ~/leeds_root/bin/
 
-# to make postscript of a circuit:
+# to make postscript of a circuit (or any) gviz file:
 #  dot -Tps cct.gviz -o cct.ps

@@ -484,11 +484,12 @@ checkLoopCounter ctx name =
 -- create initialization statements for local variables
 -- needs to be in StateWithErr because of (lookupType)
 mkVarInits :: Im.VarTable -> StateWithErr [Im.Stm]
-mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
-                            concatMapM mkInit $ map (\(t,v) -> (t,Im.EVar v)) locs
+mkVarInits local_table = do let varlist  = Map.toList local_table
+                            concatMapM mkInit $ map (\(n, (t,v)) -> (n,t,Im.EVar v)) varlist
           -- create Init statements for an lval of the given type
-    where mkInit :: (Im.Typ, Im.Exp) -> StateWithErr [Im.Stm]
-          mkInit (t,lval) = trace ("mkInit " << lval << "::" << t) $
+    where mkInit :: (String, Im.Typ, Im.Exp) -> StateWithErr [Im.Stm]
+          mkInit (name,t,lval)
+              = trace ("mkInit " << lval << "::" << t) $
                             case t of
                               (Im.IntT i)          -> return [ass lval 0 t]
                               (Im.BoolT)           -> return [ass lval (Im.lbool False) t]
@@ -507,10 +508,10 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
                                    do elem_len   <- Im.expandType elem_t >>== 
                                                     Im.typeLength Im.tblen
                                       len        <- Im.evalStatic len_e >>== fromInteger
-                                      return [ass lval (Im.EArrayInit elem_len len) t]
+                                      return [ass lval (Im.EArrayInit name elem_len len) t]
                               (Im.SimpleT tname)    ->
                                    do typ <- lookupType tname
-                                      mkInit (typ, lval)
+                                      mkInit (name, typ, lval)
 
                               _                     -> return []
 
@@ -518,8 +519,8 @@ mkVarInits local_table = do let locs  = map snd $ Map.toList local_table
 
           -- create a field-init statement for struct 'str', for the
           -- given field (ie. its type, offset and length)
-          mkStruct str str_t (_, t) field_idx = mkInit (t, (Im.EStruct (Im.ExpT str_t str)
-                                                                       field_idx))
+          mkStruct str str_t (_, t) field_idx = mkInit ("", t, (Im.EStruct (Im.ExpT str_t str)
+                                                                            field_idx))
 
 
 

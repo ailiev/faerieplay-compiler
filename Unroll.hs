@@ -126,11 +126,15 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                  let stms' = map (scopeVars (Cont.singleton (stripScope countVar))
                                             scope)
                                  stms
-                     stmss = replicate (fromInteger (hi-lo)) stms'
+                     -- have +1 here as the loop includes both end values
+                     stmss = replicate (fromInteger (hi-lo+1)) stms'
+                     --
                      -- and subst correct counter values into all the statements
-                     -- a version of subst for each unrolled block of stm's
+                     --
                      countVar' = addScope scope countVar
-                     substs = [subst countVar' (ELit (LInt val)) | val <- [lo..hi]]
+                     -- a version of subst for each unrolled block of stm's
+                     substs = [subst countVar' (lint val) | val <- [lo..hi]]
+                     -- each 'stms' list is mapped a subst with the correct counter value
                      stmss' = zipWith map substs stmss
                  return $ concat stmss'
 

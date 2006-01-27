@@ -738,12 +738,13 @@ genExp c e = do (c', res) <- genExp' c e
                                        ("genExp returning nodes " << gateNums)
                   
 
--- this one is a little nasty - it returns the expanded circuit, and
--- either the context for this expression, which can be processed and
--- added to the circuit by the caller, or the gate number where this
--- expression can be found (in case it was already in the circuit)
+-- this one is a little nasty - it returns the expanded circuit, and:
+-- Left:    the context for this expression, which can be processed and
+--          added to the circuit by the caller, or
+-- Right:   the gate number where this
+--          expression can be found (in case it was already in the circuit)
 --
--- Need to be able to return a list of nodes, in the case of a struct
+-- In both cases, need to be able to return a list of nodes, in the case of a struct
 -- or array
 --
 -- also need to be able to return a list of newly generated Contexts,
@@ -868,15 +869,18 @@ genExp' c exp =
 
       (EStatic e)       -> genExp' c e
 
-      (EArrayInit elem_size len) ->
+      (EArrayInit name elem_size len) ->
                            do i         <- nextInt
-                              let ctx = mkCtx $ Gate i
-                                                     -- the type field here is a dummy
-                                                     (Im.IntT $ Im.lint 12345678)
-                                                     (InitDynArray (fromIntegral elem_size) len)
-                                                     []
-                                                     depth
-                                                     [] []
+                              let ctx = (mkCtx $ Gate   i
+                                                        -- the type field here is a dummy
+                                                        (Im.IntT $ Im.lint 12345678)
+                                                        (InitDynArray (fromIntegral elem_size)
+                                                                      len)
+                                                        []
+                                                        depth
+                                                        [] [])
+                                        `trace`
+                                        ("Adding InitDynArray of len " << len)
                               return (c, Left [ctx])
 
       e                 -> error $ "CircGen: unknown expression " << e
@@ -1101,16 +1105,24 @@ instance Show [GateFlags] where
 
 
 instance Show Op where
-    show (Bin op)           = "BinOp " ++ show op
-    show (Un  op)           = "UnOp " ++ show op
-    show Input              = "Input"
-    show Select             = "Select"
-    show (Lit l)            = "Lit " ++ show l
-    show (InitDynArray elemsize len)    = "InitDynArray " << elemsize << " " << len
-    show ReadDynArray       = "ReadDynArray"
-    show (WriteDynArray
-             (off,len))     = "WriteDynArray " ++ show off ++ " " ++ show len
-    show (Slicer (off,len)) = "Slicer "    ++ show off ++ " " ++ show len
+    showsPrec x o
+        = case o of
+            (Bin op)        -> str "BinOp "    . rec op
+            (Un  op)        -> str "UnOp "     . rec op
+            Input           -> str "Input"
+            Select          -> str "Select"
+            (Lit l)         -> str "Lit "      . rec l
+            (InitDynArray elemsize
+                          len)  -> str "InitDynArray " . rec elemsize . sp .
+                                                          rec len
+            ReadDynArray    -> str "ReadDynArray"
+            (WriteDynArray
+             (off,len))     -> str "WriteDynArray " . rec off . sp . rec len
+            (Slicer
+             (off,len))     -> str "Slicer " . rec off . sp . rec len
+          where rec y   = showsPrec x y
+                str     = (++)
+                sp      = (" " ++)
 
 
 
@@ -1149,7 +1161,9 @@ instance Show Op where
 -}
 
 
-showCct c = Graphviz.graphviz' c
+-- need to get rid of newlines in the nodes
+showCct :: (Gr.DynGraph g, Show b) => g Gate b -> String
+showCct = Graphviz.graphviz' . Gr.nmap (tr ("\n", " # ") . show)
 
 
 {-
