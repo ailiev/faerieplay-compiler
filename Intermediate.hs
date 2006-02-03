@@ -96,10 +96,10 @@ data Typ =
  | GenIntT
  | BoolT
  | VoidT
- | StructT ([TypedName],        -- field's name and type
-             [FieldLoc],        -- field's location (offset and
+ | StructT ([TypedName],        -- fields' name and type
+             [FieldLoc],        -- fields' location (offset and
                                 --     length) in primitive units
-             [FieldLoc])        -- the location in bytes
+             [FieldLoc])        -- fields' location in bytes
                     
  | EnumT String Int             -- name and bitsize. the identifiers are in the
                                 -- global var table as instances of

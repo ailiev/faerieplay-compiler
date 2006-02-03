@@ -10,12 +10,16 @@ module SashoLib (
 
         Stack (..),
 
+        comp2_1,
+
         notp,
 	takeMiddle,
 	log2,
 
          integerize,
-		 ilog2,
+         integerize2,
+
+	 ilog2,
          isqrt,
          divUp,
          subtr,
@@ -27,6 +31,7 @@ module SashoLib (
          findInStack,
          maybeLookup,
          maybeMapAdjust,
+         fromJustMsg,
          maybeApply,
          MaybeT, runMaybeT,
                     
@@ -159,6 +164,8 @@ instance Show String where
 infixr 9 ...
 (...) :: (c -> d) -> (a -> b -> c) -> a -> b -> d
 f ... g = \x y -> f (g x y)
+
+f `comp2_1` g = \x y -> f (g x) (g y)
 
 
 {-
@@ -298,6 +305,12 @@ maybeMapAdjust f k m    = if Map.member k m
                           then return $ Map.adjust f k m
                           else mzero
 
+-- fromJust, with an error message in case of Nothing
+fromJustMsg msg (Just x) = x
+fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
+
+
+
 -- this version of map is mostly the identity, but the first time that f returns
 -- non-Nothing we'll actually use that result.
 -- TODO: there must be a better way to do this with the Maybe monad
@@ -381,6 +394,9 @@ log2 = logBase 2
 -- wrap a numeric function so it takes and returns an Integral type (with rounding)
 -- integerize :: (Num a, Num b, Integral c, Integral d) => (a -> b) -> (c -> d)
 integerize f = ceiling . f . fromIntegral
+
+-- same for function on 2 params
+integerize2 f x y = ceiling $ f (fromIntegral x) (fromIntegral y) 
 
 
 ilog2 x 

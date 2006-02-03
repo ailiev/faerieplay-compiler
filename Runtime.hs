@@ -3,8 +3,11 @@ module Runtime where
 import Maybe
 import Monad
 import Ix
+import List
 
-import qualified Array
+import Common (trace)
+
+import Array
 
 {-
 import qualified Data.Graph.Inductive.Graph     as Gr
@@ -18,6 +21,7 @@ import qualified Data.Array.IO                  as IOArr
 
 import qualified Debug.Trace                    as Trace
 
+import Text.Printf      (printf)
 
 import SashoLib
 
@@ -29,10 +33,18 @@ import Intermediate
 -- produce NodeFunc's for each gate, which is a simple map.
 -- go through graph with BFS and do the funcs
 
+formatRun gates ins = do out <- run gates ins
+                         return $ map printOuts out
+    where printOuts (num, (op,flags), val) = printf "%-6d%-20s%-10s%s"
+                                                    num
+                                                    (show op)
+                                                    (if null flags then "" else show flags)
+                                                    (show val)
+
 
 run :: [Gate]       -- ^ The circuit
     -> [Integer]    -- ^ input values
-    -> IO [(Int,GateVal)]    -- ^ values and numbers for all the gates
+    -> IO [(Int, (Op,[GateFlags]), GateVal)]    -- ^ values and numbers for all the gates
 run gates ins   = do let range = (0, length gates - 1)
                      vals      <- (MArr.newArray range Blank)
                                :: IO (IOArr.IOArray Int GateVal)
@@ -40,7 +52,12 @@ run gates ins   = do let range = (0, length gates - 1)
                                :: IO (IOArr.IOArray Int (Gate, NodeFunc))
                      setRoots gateArr vals (map (VScalar . ScInt) ins)
                      evalGates gateArr vals
-                     MArr.getAssocs vals
+                     vallist <- MArr.getElems vals
+                     return $ zip3 (MArr.indices vals)
+                                   (map (pair2 gate_op gate_flags)
+                                        (sortBy (comp2_1 compare gate_num)
+                                                gates))
+                                   vallist
 
 
 
@@ -82,20 +99,26 @@ evalGate :: (MArr.MArray a (Gate, NodeFunc) m,
                  -> m()
 evalGate gates vals i =
     do (gate, gate_f)   <- MArr.readArray gates i
-       ins              <- Trace.trace ("reading inputs for gate " << gate) $ mapM (MArr.readArray vals) (gate_inputs gate)
-       MArr.writeArray vals i (gate_f ins)
+       ins              <-  mapM (MArr.readArray vals) (gate_inputs gate)
+                              `trace` ("reading inputs for gate " << gate)
+       MArr.writeArray vals (gate_num gate) (gate_f ins)
 
 
 
 
 data GateVal = Blank |
                VScalar   Scalar |
-               Arr      (Array.Array Int Integer)
-    deriving (Show)
+               VArr      (Array.Array Integer GateVal) |
+               VList [GateVal]  -- for output of a ReadDynArray
+
+
 
 data Scalar = ScInt Integer |
               ScBool Bool
-    deriving (Show)
+
+
+
+
 
 type NodeFunc = ([GateVal] -> GateVal)
 
@@ -103,10 +126,31 @@ gate2func :: Gate -> NodeFunc
 gate2func Gate { gate_op = op,
                  gate_flags = flags }
     = case op of
-        Bin op -> \[VScalar s1, VScalar s2] -> VScalar $ binOpFunc op s1 s2
-        Un  op -> \[VScalar s]  -> VScalar $ opUnOp op s
-        Lit l  -> \[] -> case l of (LInt i) -> VScalar $ ScInt i
-                                   (LBool b) -> VScalar $ ScBool b
+        Bin op              -> \[VScalar s1, VScalar s2]    -> VScalar $ binOpFunc op s1 s2
+        Un  op              -> \[VScalar s]                 -> VScalar $ opUnOp op s
+        Lit l               -> \[]                          -> case l of
+                                                                 (LInt i) -> VScalar $ ScInt i
+                                                                 (LBool b) -> VScalar $ ScBool b
+        Select              -> \[ VScalar (ScBool b),
+                                  v_true,
+                                  v_false ]                 -> if b
+                                                               then v_true
+                                                               else v_false
+        Slicer _ (off,len)  -> \[VList vs]                  -> head . take len . drop off $ vs
+        WriteDynArray _     -> \( VArr arr:
+                                  VScalar (ScInt idx):
+                                  vals )                    -> VArr $ arr // [(idx, head vals)]
+        InitDynArray _ len  -> \[]                          -> VArr $ listArray (0,len-1)
+                                                                                (repeat $ VScalar $
+                                                                                          ScInt 0)
+        ReadDynArray        -> \[VArr arr,
+                                 VScalar (ScInt idx)]       -> let val = arr ! idx in
+                                                               VList [VArr arr,
+                                                                      val]
+        Input               -> \[]                          -> Blank
+                                                                            
+                                                                                   
+                                  
 
 binOpFunc o x y = let opClass                       = classifyBinOp o
                   in  case (opClass, x, y) of
@@ -118,7 +162,7 @@ binOpFunc o x y = let opClass                       = classifyBinOp o
 
 arithBinOp o = case o of
                  Times -> (*) 
-                 Plus  -> (+)
+                 Plus  -> \x y -> Trace.trace ("Adding " << x << " + " << y) (x + y)
                  Div   -> div
                  Mod   -> mod
                  Minus -> (-) 
@@ -173,3 +217,18 @@ classifyBinOp o = case o of
                     And   ->  Boolean
                     Or    -> Boolean
                     Max   -> Arith
+
+
+instance (Show GateVal) where
+    showsPrec p g = case g of
+                      Blank     -> str "Blank"
+                      VScalar s -> rec s
+                      VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
+                      VList l   -> showList l
+        where rec x = showsPrec p x
+              str = (++)
+
+instance (Show Scalar) where
+    showsPrec p s = case s of (ScInt i)  -> showsPrec p i
+                              (ScBool b) -> showsPrec p b
+

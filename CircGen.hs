@@ -22,6 +22,7 @@ module CircGen (
                 Circuit,
                 Gate (..),
                 Op (..),
+                GateFlags,
                 genCircuit,
                 clip_circuit,
                 extractInputs,
@@ -103,9 +104,10 @@ data Op =
   -- zero-based offset and a length, in bytes;
   -- used after a ReadDynArray, to collect the output of ReadDynArray
   -- into separate gates
-  -- for internal use, want to also keep a more high-level interpretation, eg. offset and
-  -- number of items from an input list
-  | Slicer (Int,Int) -- (Int,Int)
+  -- for internal use, want to also keep a more high-level interpretation: offset and
+  -- length in GateVal's
+  | Slicer (Int,Int)            -- ^ The byte locations
+           (Int,Int)            -- ^ GateVal locations
 
   | Lit Im.Lit                  -- a literal
  deriving (Eq)
@@ -841,7 +843,8 @@ genExp' c exp =
                               arrptr_n            <- nextInt
                               let arr_ptr_ctx      = mkCtx $ Gate arrptr_n
                                                                   arr_t
-                                                                  (Slicer (0, array_blen))
+                                                                  (Slicer (0, array_blen)
+                                                                          (0, 1))
                                                                   [readarr_n] 
                                                                   depth
                                                                   [] []
@@ -852,11 +855,13 @@ genExp' c exp =
                               is <- replicateM (length e_locs') nextInt
                               let slicer_ctxs = map mkCtx [Gate i
                                                                 t
-                                                                (Slicer (off,len))
+                                                                (Slicer (boff,blen)
+                                                                        (off,1))
                                                                 [readarr_n]
                                                                 depth
                                                                 [] [] | i           <- is
-                                                                      | (off,len)   <- e_locs'
+                                                                      | (boff,blen) <- e_locs'
+                                                                      | off         <- [1..]
                                                                       | t           <- e_typs]
 
                               -- update the gate location of the array pointer
@@ -901,25 +906,27 @@ mkCtx g@(Gate node _ _ srcs _ _ _) = let ctx = (map uAdj srcs,
 
 
 
-{-
+
 -- get the ordered list of types in this type (complex or not)
-getStructFieldTypes :: TypeTable -> Typ -> [Typ]
-getStructFieldTypes tab t =
-    let t_full = expandType tab t
-    in  f t_full
-    where f (StructT fields)    = concatMap (f . snd) fields
-          f t                   = [t]
+getStructFieldTypes :: (TypeTableMonad m) => Typ -> m [Typ]
+getStructFieldTypes t =
+    do t_full <- expandType t
+       return $ case t_full of
+                  (StructT (fields,_,_))    -> map snd fields
+                  t                         -> [t]
 
 
 -- return the Struct type's list of types and offsets.
+-- For a scalar type t return [(0,t)]
 -- WARN: uses GHC extension "parallel list comprehension"
-getStructFieldLocs :: TypeTable -> Typ -> [(Int, Typ)]
-getStructFieldLocs tab t = [ (off, t)  | t    <- getStructFieldTypes tab t
-                                       | off  <- [0..]]
+getStructFieldLocs :: (TypeTableMonad m) => Typ -> m [(Int, Typ)]
+getStructFieldLocs t = 
+    do t_full <- expandType t
+       return $ case t_full of
+                  (StructT (namedtypes,_,fieldlocs))    -> zip (map fst fieldlocs) (map snd namedtypes)
+                  t                                     -> [(0,t)]
 
 
-
--}
 
 -- similar to above but the locations (offset-length) are in bytes
 getTypByteLocs :: (TypeTableMonad m) => Typ -> m ([FieldLoc], [Typ])
@@ -1119,7 +1126,8 @@ instance Show Op where
             (WriteDynArray
              (off,len))     -> str "WriteDynArray " . rec off . sp . rec len
             (Slicer
-             (off,len))     -> str "Slicer " . rec off . sp . rec len
+             (boff,blen)
+             _)             -> str "Slicer " . rec boff . sp . rec blen
           where rec y   = showsPrec x y
                 str     = (++)
                 sp      = (" " ++)

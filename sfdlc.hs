@@ -149,8 +149,8 @@ run v parser input =
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
                               putStrLn "Now running the circuit"
-                              vals <- Run.run gates []
-                              mapM_ print vals
+                              vals <- Run.formatRun gates []
+                              mapM_ putStrLn vals
 
 --                                   mapM_ print cct
 
