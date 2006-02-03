@@ -33,5 +33,8 @@ clean:
 install: sfdlc
 	install sfdlc ~/leeds_root/bin/
 
+%.cct: %.sfdl
+	sfdlc $< -o $@
+
 # to make postscript of a circuit (or any) gviz file:
 #  dot -Tps cct.gviz -o cct.ps

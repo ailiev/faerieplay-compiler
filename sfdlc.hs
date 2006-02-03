@@ -28,6 +28,7 @@ import qualified Intermediate   as Im
 import qualified HoistStms      as Ho
 import qualified Unroll         as Ur
 import qualified CircGen        as CG
+import qualified Runtime        as Run
 
 
 import TypeChecker
@@ -93,7 +94,7 @@ usage name = Opt.usageInfo ("Usage: " ++ name ++ " <options> [input file]\n\
 
 -- extract the output file from the global flags
 getOutFile = do flags   <- readIORef g_Flags
-                let (Output outName) = fromJust $ find isOut flags
+                let (Output outName) = fromJustMsg "Getting output file name" $ find isOut flags
                 return outName
     where isOut (Output _)  = True
           isOut _           = False
@@ -147,6 +148,10 @@ run v parser input =
                               writeFile cctFile (CG.showCct cct)
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
+                              putStrLn "Now running the circuit"
+                              vals <- Run.run gates []
+                              mapM_ print vals
+
 --                                   mapM_ print cct
 
 {-

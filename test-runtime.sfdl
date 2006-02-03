@@ -1,0 +1,11 @@
+// -*- c -*-
+
+program Simple {
+
+    const WordSize = 32;
+    type Word = Int<WordSize`>;
+
+    function Word main () {
+	main = 1 + 3;
+    }
+}

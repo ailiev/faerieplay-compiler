@@ -19,6 +19,9 @@ How is struct initialization dealt with?
 -}
 
 module CircGen (
+                Circuit,
+                Gate (..),
+                Op (..),
                 genCircuit,
                 clip_circuit,
                 extractInputs,
@@ -71,8 +74,6 @@ data Op =
   --    values), and
   -- 2: of the array element type: either a basic type like Int etc, or a list of Slicer
   --    gates which extract the basic components of the complex type in this array
-  --
-  -- the paramater is the current scope depth
   | ReadDynArray
 
   -- initialize an array
@@ -83,7 +84,6 @@ data Op =
 
   -- update array; inputs = [array, index, val1, val2, ...]; output is
   -- the updated array. The parameters are:
-  -- - the current scope depth (ie. how far inside nested conditionals), starting at 0
   -- - a slice of where inputs (concatenated) should end up in the array element.
   --
   -- The input will consist of multiple gates in case of a complex
@@ -103,7 +103,9 @@ data Op =
   -- zero-based offset and a length, in bytes;
   -- used after a ReadDynArray, to collect the output of ReadDynArray
   -- into separate gates
-  | Slicer (Int,Int)
+  -- for internal use, want to also keep a more high-level interpretation, eg. offset and
+  -- number of items from an input list
+  | Slicer (Int,Int) -- (Int,Int)
 
   | Lit Im.Lit                  -- a literal
  deriving (Eq)
@@ -219,7 +221,8 @@ flatten_cicrcuit :: Circuit -> [Gate]
 flatten_cicrcuit c = let gates  = GrDFS.topsort' c
                          gates' = ins_to_front gates
                      in  gates'
-          -- get the input gates to the front of the list
+          -- get the input gates to the front of the list. this partition should not
+          -- disturb the topological sort
     where ins_to_front gates =
               let (ins, others) = List.partition ((== Input) . gate_op)
                                                  gates
@@ -227,7 +230,7 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
                          
 
 
-
+-- | remove the nodes (and associate edges) not in 'keeps' from 'g'. 
 keepNodes :: Gr.Graph gr => [Gr.Node] -> gr a b -> gr a b
 keepNodes keeps g = Gr.delNodes (Gr.nodes g \\ keeps) g
 
@@ -1018,9 +1021,6 @@ popScope  = do scope <- getsVars peek
                modifyVars pop
                return scope
 
-
-fromJustMsg msg (Just x) = x
-fromJustMsg msg Nothing  = error $ "fromJust Nothing: " << msg
 
 
 
