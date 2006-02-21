@@ -35,16 +35,17 @@ import Intermediate
 
 formatRun gates ins = do out <- run gates ins
                          return $ map printOuts out
-    where printOuts (num, (op,flags), val) = printf "%-6d%-20s%-10s%s"
+    where printOuts (num, (op,flags), ins, val) = printf "%-6d%-16s%-8s%-30s%s"
                                                     num
                                                     (show op)
                                                     (if null flags then "" else show flags)
+                                                    (concatMap ((++ ", ") . show) ins)
                                                     (show val)
 
 
-run :: [Gate]       -- ^ The circuit
-    -> [Integer]    -- ^ input values
-    -> IO [(Int, (Op,[GateFlags]), GateVal)]    -- ^ values and numbers for all the gates
+-- run :: [Gate]       -- ^ The circuit
+--     -> [Integer]    -- ^ input values
+--     -> IO [(Int, (Op,[GateFlags]), GateVal)]    -- ^ values and numbers for all the gates
 run gates ins   = do let range = (0, length gates - 1)
                      vals      <- (MArr.newArray range Blank)
                                :: IO (IOArr.IOArray Int GateVal)
@@ -52,13 +53,19 @@ run gates ins   = do let range = (0, length gates - 1)
                                :: IO (IOArr.IOArray Int (Gate, NodeFunc))
                      setRoots gateArr vals (map (VScalar . ScInt) ins)
                      evalGates gateArr vals
-                     vallist <- MArr.getElems vals
-                     return $ zip3 (MArr.indices vals)
+                     -- need the values sorted in gate order.
+                     let gate_idxs = map gate_num gates
+                     vals_sorted <- mapM (MArr.readArray vals) gate_idxs
+                     -- the inputs to each gate
+                     inputs      <- mapM (mapM (MArr.readArray vals)) (map gate_inputs gates)
+                     return $ zip4 gate_idxs
                                    (map (pair2 gate_op gate_flags)
-                                        (sortBy (comp2_1 compare gate_num)
-                                                gates))
-                                   vallist
+                                        (gates))
+                                   inputs
+                                   vals_sorted
 
+-- get the input values 
+getInputs vals in_idxs = mapM (MArr.readArray vals) in_idxs
 
 
 -- set the values of root gates, ie. those without input gates.
@@ -67,7 +74,7 @@ setRoots gates vals ins = do assocs <- MArr.getAssocs gates
                              []     <- foldM (addRoot vals) ins assocs
                              return ()
 
--- set the value of one root gate (if it is)
+-- set the value of one root gate (if it is a root gate)
 addRoot :: (MArr.MArray a GateVal m)
            => a Int GateVal
                -> [GateVal]
@@ -78,7 +85,8 @@ addRoot vals ins (i, (gate,_)) =
     do case gate_op gate of
          Lit l -> do MArr.writeArray vals g_i (VScalar $ case l of LInt i     -> ScInt i
                                                                    LBool b    -> ScBool b)
-                     Trace.trace ("Wrote lit to gate " << g_i) $ return ins
+                     return ins
+                         `trace` ("Wrote lit to gate " << g_i)
          Input -> let (v:vs) = ins in
                   do MArr.writeArray vals g_i v
                      return vs
@@ -162,7 +170,9 @@ binOpFunc o x y = let opClass                       = classifyBinOp o
 
 arithBinOp o = case o of
                  Times -> (*) 
-                 Plus  -> \x y -> Trace.trace ("Adding " << x << " + " << y) (x + y)
+                 Plus  -> \x y -> x + y
+                                    `trace`
+                                     ("Adding " << x << " + " << y)
                  Div   -> div
                  Mod   -> mod
                  Minus -> (-) 

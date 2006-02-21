@@ -34,6 +34,7 @@ module SashoLib (
          fromJustMsg,
          maybeApply,
          MaybeT, runMaybeT,
+         maybeM,
                     
         modifyListHead,
         mapOnTail,
@@ -89,6 +90,7 @@ import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT)
 import Control.Monad.Trans (MonadTrans, lift)
 
 import qualified Data.Map as Map
+
 
 
 
@@ -382,6 +384,8 @@ instance (Show a) => Appendable a where
     s << x = s ++ (show x)
 -}
 
+
+
 -- if a list has predicate results: [F, F, F, T, T, ..., T, F, F,...],
 -- return the middle part that is True
 takeMiddle :: (a -> Bool) -> [a] -> [a]
@@ -449,6 +453,20 @@ interleave = foldr (\(a,b) xs -> (a:b:xs)) [] ... zip
 -- parameters
 mapInputs2 :: a -> b -> [a -> b -> c] -> [c]
 mapInputs2 x y fs = map (\f -> f x y) fs
+
+
+-- ! Monad version of Prelude.maybe
+maybeM :: (Monad m) => m b -> (a -> m b) -> Maybe a -> m b
+maybeM def f x = case x of Just x' -> f x'
+                           Nothing -> def
+
+
+data OneOf3 a b c = Num1 a | Num2 b | Num3 c
+
+oneof3 f1 f2 f3 x = case x of Num1 x -> f1 x
+                              Num2 x -> f2 x
+                              Num3 x -> f3 x
+
 
 
 -- just a reminder, apply3 takes a function f and 3 params, and
