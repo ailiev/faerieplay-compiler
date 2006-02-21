@@ -1,0 +1,7 @@
+2006-02-21  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* sfdlc.hs: expanding the command line options to control the run
+	file and output file better.
+
+	* Runtime.hs: added printing of the input values of every gate.
+
