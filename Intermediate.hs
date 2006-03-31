@@ -9,7 +9,7 @@ import List (intersperse)
 import Maybe (fromJust)
 
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
-import Control.Monad.Error (Error, throwError, MonadError)
+import Control.Monad.Error (Error, throwError, catchError, MonadError)
 import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
@@ -217,8 +217,8 @@ data BinOp =
   | Neq 
   | BAnd 
   | BXor 
-  | BOr 
-  | And 
+  | BOr
+  | And
   | Or
 --  and internal ones
   | Max
@@ -284,23 +284,13 @@ expandType t =
 
                 _                       -> return t
 
-{-
-expandType :: (TypeTableMonad m) => Typ -> m Typ
-expandType t =
-    do type_table <- getTypeTable
-    case t of
-      (SimpleT name)    -> do 
-                              expandType  t'
-      (ArrayT elem_t
-              len)      -> do elem_t' <- expandType elem_t
-                              return ArrayT elem_t' len
-      -- a bit of a mess to reach the field types, with the large
-      -- fields_info tuple
-      (StructT
-         fields_info)   -> StructT (tup3_proj1 (map (projSnd rec))
-                                               fields_info)
-      _                 -> t
--}
+
+-- for a structure, get a field name given the number
+-- TODO: may need to expand the type in case of a type alias which points to a struct
+-- type.
+getFieldName (StructT (names,_,_))  fld_idx = fst $ names !! fld_idx
+getFieldName t                      _       = "getFieldName called on non-struct type "
+                                              ++ show t
 
 
 -- return the length of a type,
@@ -395,6 +385,22 @@ evalStatic e = case e of
                       _                 -> throwError $ Err 42 $ e << " is not static!"
 
 
+-- try to evaluate an operation statically, fall back to an op on Exp if static fails
+-- tryEvalStaticBin :: (MonadError MyError m) => (Integer -> Integer -> Integer) -> (Exp -> Exp -> Exp) ->
+--                  Exp -> Exp -> Exp
+tryEvalStaticBin staticOp expOp x_e y_e = do [x, y] <- mapM evalStatic [x_e, y_e]
+                                                          `catchError` const (return [-1, -1])
+                                             return $ if x >= 0
+                                                      then lint  $ staticOp x y
+                                                      else BinOp expOp x_e y_e
+
+-- a helper which just dies in case of error
+evalStaticOrDie e = either (\e -> error ("evalStaticOrDie on " << e <<
+                                         "failed: " << e))
+                           (id)
+                           (evalStatic e)
+
+
 evalLit (LInt i)  = return i
 evalLit (LBool b) = return $ toInteger $ fromEnum b
 
@@ -423,16 +429,11 @@ transIntOp op = case op of
                         Plus    -> (+)
                         Minus   -> (-)
                         Times   -> (*)
+                        Div     -> div
                         BAnd    -> (.&.)
                         BOr     -> (.|.)
                         SL      -> \x s -> shiftL x (fromInteger s)
                         SR      -> \x s -> shiftR x (fromInteger s)
-{-
-                        Eq      -> (==)
-                        Gt     -> (>)
-                        Lt     -> (<)
-                        GtEq   -> (>=)
--}
                         Max     -> max
 
 -- FIXME: this is confused - these operators do return Bool, but not
@@ -580,6 +581,15 @@ instance Num Exp where
     signum   = id
     fromInteger i = ELit $ LInt $ fromInteger i
 
+{-
+  -- doesnt work, as <= has to return Bool and nothing else (like an expression which will
+  -- evaluate to some bool later
+instance Ord Exp where
+    (ELit (LInt i1))    <=  (ELit (LInt i2))    = i1 <= i2
+    e1                  <=  e2                  = BinOp $ LtEq e1 e2
+-}
+
+
 
 
 ---------------------------
@@ -645,8 +655,16 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
 
 docExp e = case e of
     (EVar v)            -> docVar v
+
+{-
+    -- if we have a type annotation with a struct expression, use it to get the field name
+    (ExpT t (EStruct str fld_idx))
+                        -> let field_name = getFieldName t fld_idx
+                           in  cat [docExp str, text ".", text field_name]
+-}
     (EStruct str fld_idx)
                         -> cat [docExp str, text ".", int fld_idx]
+
     (EArr arr idx)      -> cat [docExp arr, text "[Arr:", docExp idx, text "]"]
     (ELit l)            -> docLit l
     (EFunCall f args)   -> cat [text f, text "(",
@@ -656,8 +674,6 @@ docExp e = case e of
     (BinOp op e1 e2)    -> cat [docExp e1, docBinOp op, docExp e2]
     (EGetBit x b)       -> docExp (EArr x b)
     (EStatic e)         -> docExp e
---    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
-    (ExpT t e)          -> docExp e
     (ESeq stms e)       -> brackets $
                            cat ((punctuate comma (map docStm stms))) <>
                            text ": " <>
@@ -665,11 +681,16 @@ docExp e = case e of
     (EStructInit size) -> text "StructInit" <> parens (int size)
     (EArrayInit name elem_size len)  -> text "ArrayInit" <> text name <>
                                         parens (int elem_size <> comma <> integer len)
+    -- throw away the expression type if not needed (ie. used above)
+--    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
+    (ExpT t e)          -> docExp e
+
 
 docTyp :: Typ -> Doc
 docTyp t =
     case t of
-      (IntT i)          -> cat [text "Int", braces (docExp i)]
+      (IntT size_e)     -> --let size = evalStaticOrDie size_e in
+                           cat [text "Int", braces (docExp size_e)]
       (GenIntT)         -> cat [text "Int"]
       (BoolT)           -> text "bool"
       (VoidT)           -> text "void"
@@ -681,7 +702,8 @@ docTyp t =
       (EnumT nm size)   -> cat [text "enum",
                                 braces (int size),
                                 space, text nm]
-      (ArrayT t size)   -> cat [docTyp t, brackets (docExp size)]
+      (ArrayT t size_e) -> -- let size = evalStaticOrDie size_e in
+                           cat [docTyp t, brackets (docExp size_e)]
       (SimpleT name)    -> text name
       (FuncT t ts)      -> cat [parens $ cat $ punctuate (text ", ") (map docTyp ts),
                                 text " -> ",
@@ -691,10 +713,7 @@ docTypMachine t =
     case t of
     -- an array is here specified by its length, and the number of primitive types
     -- (int,bool) in its element type
-      (ArrayT t size)   -> let size_i   = either (\e -> error ("docTypMachine on " << t <<
-                                                               "failed: " << e))
-                                                 (id)
-                                                 (evalStatic size)
+      (ArrayT t size)   -> let size_i   = evalStaticOrDie size
                                size_elt = case t of
                                             (StructT (_,locs,_))    -> length locs
                                             _                       -> 1

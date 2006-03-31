@@ -22,7 +22,7 @@ module CircGen (
                 Circuit,
                 Gate (..),
                 Op (..),
-                GateFlags,
+                GateFlags (..),
                 genCircuit,
                 clip_circuit,
                 extractInputs,
@@ -207,8 +207,9 @@ renumber g   =  Gr.gmap doRenum g
           -- the returned map will map from current numbering to consecutive numbering
     where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isRootCtx g
                                               nodes = sort $ GrBFS.bfsn ins g
-                                          in  array (minimum nodes, maximum nodes) (zip nodes [0..])
-                                                  `trace` ("renumber nodes: " << nodes)
+                                          in  array (minimum nodes, maximum nodes)
+                                                    (zip nodes [0..])
+                                                    `trace` ("renumber nodes: " << nodes)
           doRenum (ins,node,gate,outs)  = ( map (projSnd renum) ins,
                                             renum node,
                                             gateProjNum renum $
@@ -270,9 +271,11 @@ createInputGates addvars (name, typ) =
                       if addvars then setVarAddrs is var else return ()
                       return gates
 
+
         (SimpleT tname)
                 -> let typ' = fromJust $ Map.lookup tname type_table
                    in  createInputGates True (name, typ')
+
 
         -- IntT, BoolT, ArrayT (for dynamic arrays):
         _         -> do i <- nextInt
@@ -454,6 +457,7 @@ genStm circ stm =
                                        -- eg: for x.y[i].z, we will:
                                        -- - add a WriteDynArray gate for x.y, limited to .z
                                        -- - update one of x's gates (the array gate)
+                                       {-# SCC "have array in expression" #-}
                                        do (c4, [arr_n]) <- genExp c3 arr_e
                                           (c5, [idx_n]) <- genExp c4 idx_e
                                           depth         <- getDepth
@@ -649,9 +653,16 @@ genCondExit testGate
     where -- a var is non-local if was not declared in this scope,
           -- *and* it appears in the parent scope (needed in the case of
           -- generated vars)
+          -- FIXME: do generated vars ever have to be selected? seems not! they are
+          -- intrinsically very local in their usage, and so do not need to persist across
+          -- scopes
           nonLocal var = (not $ any (Cont.member (stripScope var))
-                                    [ifLocs, elseLocs])            &&
-                         (isJust $ maybeLookup var parentScope)
+                                    [ifLocs, elseLocs])
+                         && (isJust $ maybeLookup var parentScope)
+                         && (notTemp var)
+
+          notTemp (VTemp _) = False
+          notTemp _         = True
                           
           -- return a pair with the the gate numbers where this var
           -- can be found, if the cond
@@ -665,7 +676,8 @@ genCondExit testGate
                                out   @(gates_true, gates_false) = mapTuple2 (gates var)
                                                                             scopes
                                     
-                           in  out
+                           in  out `trace` ("varSources for " << var << ": "
+                                            << out)
 
           -- find the gates for a var, looking in the given scope stack
           gates var scopes = fromJust $ maybeLookup var scopes
@@ -677,9 +689,9 @@ genCondExit testGate
           -- updated in this scope
           -- this function is quite nasty!
           addSelect c (var, in_gates@(gates_true', gates_false'))
-              = do let changed_gates = filter (\(x,y) -> x /= y) $ uncurry zip in_gates
-                       ts        = map (getSelType c) changed_gates
-          -- get the right number of new int's
+              = do let changed_gates    = filter (\(x,y) -> x /= y) $ uncurry zip in_gates
+                   ts           <- mapM (getSelType c) changed_gates
+                   -- get the right number of new int's
                    is           <- replicateM (length ts) nextInt
                    let ctxs      = zipWith3 mkCtx' is ts changed_gates
                        new_gates = foo (uncurry zip in_gates) is
@@ -712,19 +724,21 @@ foo [] _  = []
 -- figure out the type of a Select gate, based on the type of its two
 -- inputs
 getSelType gr (node1, node2)
-    = case map (gate_typ . fromJust . Gr.lab gr) [node1, node2] of
-        [Im.BoolT          , Im.BoolT          ]    -> Im.BoolT
-        [Im.IntT i1        , Im.IntT i2        ]    -> Im.IntT $ Im.BinOp Max i1 i2
-        [a1@(Im.ArrayT _ _), a2@(Im.ArrayT _ _)]    -> a1 `trace` ("getSelType got types " <<
-                                                                   a1 << " and " << a2)
-        [t1                , t2                ]    -> error ("getSelType got unexpected inputs of type " <<
-                                                              t1 << " and " << t2)
-        {-
-          -- it should not be a struct
-        [t1@(Im.StructT _) , t2@(Im.StructT _) ]    -> t1 `trace`
-                                                            ("getSelType got types " <<
-                                                             t1 << " and " << t2)
-                                                             -}
+    = do let gates = map (fromJust . Gr.lab gr) [node1, node2]
+         -- expanding types into a canonical form
+         types <- mapM expandType $ map gate_typ gates
+         case types `trace` ("getSelType of gates " << gates) of
+                    [Im.BoolT          , Im.BoolT          ]    -> return Im.BoolT
+                    [Im.IntT i1_e      , Im.IntT i2_e      ]    ->
+                        do let [i1, i2] = map Im.evalStaticOrDie [i1_e, i2_e]
+                           return $ Im.IntT $ Im.lint (max i1 i2)
+
+                    [a1@(Im.ArrayT _ _), a2@(Im.ArrayT _ _)]    -> return a1
+                                                                     `trace` ("getSelType got array types "
+                                                                              << a1 << " and " << a2)
+                    [t1                , t2                ]    ->
+                        error ("getSelType got unexpected inputs of type "
+                               << t1 << " and " << t2)
 
 
 
@@ -789,9 +803,9 @@ genExp' c exp =
                                         maybeLookup var)
                                             
                               return (c, Right gates)
-                                         `trace`
+{-                                         `trace`
                                      ("genExp' EVar " << var << ", vartable=" << var_table <<
-                                      " -> " << gates)
+                                      " -> " << gates) -}
 
       (ELit l)          -> do i         <- nextInt
                               let ctx   = mkCtx (Gate i VoidT (Lit l) [] depth [] [])
@@ -819,11 +833,15 @@ genExp' c exp =
 
       (EArr arr_e idx_e) ->
                            do (c1, arr_ns)  <- genExp c arr_e
+                                               `trace` ("Circuit before array gate generated:"
+                                                        << c)
                               let arr_n      = case arr_ns of
                                                  [arr_n] -> arr_n
                                                  _       -> error ("Array " << arr_e <<
                                                                    " got too many wires: " <<
                                                                    arr_ns)
+                                                           `trace` ("circuit at error: "
+                                                                    ++ showCct c1)
                               (c2, [idx_n])        <- genExp c1 idx_e
                               readarr_n            <- nextInt
                               depth                <- getDepth
@@ -1052,7 +1070,7 @@ instance Show Gate where
                      -- 2: gate flags
                      rec flags                              .   (sep ++) .
                      -- 3: gate result type
-                     (PP.render (Im.docTypMachine typ) ++)  .   (sep ++) .
+                     (PP.render (Im.docTyp typ) ++)  .   (sep ++) .
                      -- 4: gate operation
                      rec op                                 .   (sep ++) .
                      -- 5: source gates
@@ -1067,16 +1085,20 @@ instance Show Gate where
                       then ("nocomm" ++)
                       -- FIXME: may not be correct to use the latest (top of stack)
                       -- annotation here
-                      else ((show $ strip $ peek doc) ++))               .
+--                      else ((show $ strip $ peek doc) ++))               .
+                      else ((show $ map strip doc) ++))               .
                      (delim ++)
 
         where rec          :: (Show a) => a -> ShowS
               rec           = showsPrec x -- recurse
 
+
+{-
               sep           = "\n"
               delim         = "\n"
---              sep           = " :: "
---              delim         = " ** "
+-}
+              sep           = " :: "
+              delim         = " ** "
 
               -- get rid of variable annotations in an expression
               strip         = mapExp f
@@ -1127,7 +1149,7 @@ instance Show Op where
              (off,len))     -> str "WriteDynArray " . rec off . sp . rec len
             (Slicer
              (boff,blen)
-             _)             -> str "Slicer " . rec boff . sp . rec blen
+             (off, len) )   -> str "Slicer " . rec off . sp . rec len
           where rec y   = showsPrec x y
                 str     = (++)
                 sp      = (" " ++)
@@ -1171,7 +1193,10 @@ instance Show Op where
 
 -- need to get rid of newlines in the nodes
 showCct :: (Gr.DynGraph g, Show b) => g Gate b -> String
-showCct = Graphviz.graphviz' . Gr.nmap (tr ("\n", " # ") . show)
+showCct = Graphviz.graphviz'
+          . Gr.nmap (
+                     -- tr ("\n", " # ") .
+                     show)
 
 
 {-

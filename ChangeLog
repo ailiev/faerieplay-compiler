@@ -1,3 +1,8 @@
+2006-03-23  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* Unroll.hs: enable the for-loop to count forwards and backwards
+	by 1, depending on the relation of the endpoints.
+
 2006-02-21  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* sfdlc.hs: expanding the command line options to control the run

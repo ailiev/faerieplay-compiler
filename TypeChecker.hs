@@ -118,9 +118,9 @@ checkDec :: T.Dec -> StateWithErr ()
 
 
 -- addendum - we want to flag global variables
-checkDec dec@(T.VarDecl t ids) = do im_t <- checkTyp t
-                                    isGlobal <- atGlobalScope
-                                    let flags = if isGlobal then [Im.Global] else []
+checkDec dec@(T.VarDecl t ids) = do im_t        <- checkTyp t
+                                    isGlobal    <- atGlobalScope
+                                    let flags   = if isGlobal then [Im.Global] else []
                                     mapM_ (\(T.Ident id) -> addToVars im_t flags id) ids
 
 checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
@@ -135,6 +135,9 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        -- grab the table with just args
        arg_tab <- peekScope
        -- add the function name as a variable
+       -- FIXME: this may not be good, as it will generate a (probably unwanted) array
+       -- init statement. more generally, may have large runtime overhead which is not
+       -- needed.
        addToVars im_t [Im.RetVar] name
        mapM checkDec decs
        im_stms <- mapM checkStm stms
@@ -261,9 +264,9 @@ checkTyp (T.StructT fields)     = do im_fields      <- mapM checkTypedName field
                                                        zip byteoffs bytelens)
                                      return $ Im.StructT fields'
                                     
-checkTyp (T.ArrayT t sizeExp)   = do im_t <- checkTyp t
-                                     im_size <- checkExp sizeExp
-                                     int_size <- lift $ Im.evalStatic im_size
+checkTyp (T.ArrayT t sizeExp)   = do im_t       <- checkTyp t
+                                     im_size    <- checkExp sizeExp
+                                     int_size   <- lift $ Im.evalStatic im_size
                                      return (Im.ArrayT im_t (Im.lint int_size))
 
 checkTyp (T.SimpleT (T.Ident name)) = do lookupType name
@@ -482,7 +485,7 @@ checkLoopCounter ctx name =
          
 
 -- create initialization statements for local variables
--- needs to be in StateWithErr because of (lookupType)
+-- needs to be in StateWithErr because it calls (lookupType)
 mkVarInits :: Im.VarTable -> StateWithErr [Im.Stm]
 mkVarInits local_table = do let varlist  = Map.toList local_table
                             concatMapM mkInit $ map (\(n, (t,v)) -> (n,t,Im.EVar v)) varlist
@@ -608,15 +611,19 @@ checkBinary op e1 e2 =
     do let ( (Im.ExpT t1 _), (Im.ExpT t2 _) ) = (e1,e2)
        t1_full <- Im.expandType t1
        t2_full <- Im.expandType t2
+       -- set the type of the result expression - try to 
        case (t1_full,t2_full) of
-             ((Im.IntT i1),
-              (Im.IntT i2) )    -> return $ annot (Im.IntT $ Im.BinOp Im.Max i1 i2) (Im.BinOp op e1 e2)
+             ((Im.IntT i1_e),
+              (Im.IntT i2_e) )  -> do i_out <- Im.tryEvalStaticBin max Im.Max i1_e i2_e
+                                      return $ annot (Im.IntT i_out) (Im.BinOp op e1 e2)
              _                  -> throwErr 42 $ "Arithmetic expression "
                                             << (Im.BinOp op e1 e2)
                                             << " has non-integer params"
 
 -- same as checkBinary except we have to increment the bitsize of the
 -- output by 1
+-- FIXME: how about with multiplication?? this seems like a dirty area, the bit size *may*
+-- expand a lot, but probably wont, but how do we know?
 checkArith op e1 e2 = do (Im.ExpT (Im.IntT i) e) <- checkBinary op e1 e2
                          return $ Im.ExpT (Im.IntT (i+1)) e
 {-

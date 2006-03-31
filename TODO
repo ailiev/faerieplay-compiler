@@ -1,6 +1,14 @@
-Tue May 24 01:50:56 2005
+<date>Wed Mar 22 16:46:29 2006</date>
 
-- figure out conversion into a circuit, see perhaps single assignment details if
-  deemed necessary.
-- complete the parser to correct SFDL syntax, run the example programs through.
+enable for-loops to count up as well as down, depending on the relative values
+of the endpoints.
+DONE
 
+<date>Mon Mar 27 21:36:34 2006</date>
+
+do not treat the function name as an implicit local variable, but just treat an
+assignment like
+f = val;
+as if it were
+return val;
+in more normal languages (see how Pascal semantics are perhaps)

@@ -85,7 +85,7 @@ import List (isPrefixOf, union)
 
 import Monad (MonadPlus, mzero, mplus, msum, liftM)
 
-import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT)
+import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT, MonadError(..))
 
 import Control.Monad.Trans (MonadTrans, lift)
 
@@ -211,6 +211,10 @@ unfoldrM f x  = do maybe_res <- f x
 replicateM :: (Monad m) => Int -> m a -> m [a]
 replicateM = sequence ... replicate
 
+{-
+fooM :: (Monad m) => (a -> m b) -> [m a] -> m [b]
+fooM f xs = 
+-}
 
 sumM ::  (Num a, Monad m) => [a] -> m a
 sumM = myLiftM sum
@@ -288,9 +292,9 @@ findInStack f stack = msum (map f stack)
 
 
 
--- lift a function into a monad. havent quite nailed why this cannot
--- be done my liftM, but they are clearly different
-myLiftM :: (Monad m) => (a -> b) -> a -> m b
+-- lift a function into a monad. The difference from liftM is that the result of myLiftM
+-- takes a value not in the monad, so it's useful on the RHS of >>= (among others)
+myLiftM :: (Monad m) => (a -> b) -> (a -> m b)
 myLiftM f = \x -> return (f x)
 
 
@@ -345,7 +349,11 @@ runMaybeT c = do v <- runErrorT c
                  return (either (const Nothing) Just v)
 -}
 
-
+-- not quite sure about this, but can be useful
+instance MonadError () (Maybe) where
+    throwError _            = Nothing
+    Nothing `catchError` h  = h ()
+    Just x  `catchError` _  = Just x
 
 
 newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }

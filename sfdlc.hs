@@ -98,7 +98,7 @@ usage name = Opt.usageInfo ("Usage: " ++ name ++ " <options> <input file>\n\
                            optionControl
 
 
--- extract the output file from the global flags
+-- extract various options from the global options list
 getOutFile = do (flags,_)   <- readIORef g_Flags
                 return ( do (Output f) <- find isOut flags -- Maybe monad
                             return f )
@@ -155,31 +155,42 @@ run v parser input =
                         (Right stms)     ->
                            do putStrLn "Unrolled main:"
                               hPrint stderr (PP.vcat (map Im.docStm stms))
+--                              return () -- in case we want to exit before circuit generation
+
                               infile         <- getInFile
                               mb_outfile_opt <- getOutFile
                               let mb_outfile = fromMaybe Nothing
                                                          mb_outfile_opt
                                   gatesFile = fromMaybe (modFileExt infile "cct")
                                                          mb_outfile
-                              let cctFile      = "cct.gviz"
+                              let cctFile      = modFileExt infile "gviz"
                                   args         = CG.extractInputs prog
                                   (cct,gates)  = CG.genCircuit typ_table stms args
 --                              hPrint stderr cct; hFlush stderr
-                              putStrLn $ "Now writing the circuit out to " ++ cctFile
+{-
+                              putStrLn $ "Now generating the circuit out to " ++ cctFile
                               writeFile cctFile (CG.showCct cct)
+-}
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
+
+                              -- see if running the circuit was requested
                               mb_runfile_opt <- getRunFile
-                              maybeM (return ()) -- if no -r option given at all
+                              maybe  (return ()) -- if no -r option given at all
                                      ( \f -> do let fname = fromMaybe (modFileExt infile "run")
                                                                       f
                                                 putStrLn ("Now running the circuit into " ++ 
                                                           fname)
+                                                ins     <- Run.getUserInputs gates
                                                 h       <- openFile fname WriteMode
-                                                vals    <- Run.formatRun gates []
+                                                vals    <- Run.formatRun gates ins
                                                 mapM_ (hPutStrLn h) vals
                                                 hClose h )
                                      mb_runfile_opt
+
+
+
+
 
 modFileExt file newext = let name = takeWhile (/= '.') file
                          in  name ++ "." ++ newext

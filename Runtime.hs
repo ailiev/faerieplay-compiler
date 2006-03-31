@@ -4,7 +4,7 @@ import Maybe
 import Monad
 import Ix
 import List
-
+import IO               (hFlush, stdout)
 import Common (trace)
 
 import Array
@@ -18,8 +18,11 @@ import qualified Data.Graph.Inductive.Tree      as TreeGr
 
 import qualified Data.Array.MArray              as MArr
 import qualified Data.Array.IO                  as IOArr
+import           Control.Monad.Error    (MonadError(..))
 
 import qualified Debug.Trace                    as Trace
+
+import Data.Bits        ((.&.), (.|.), xor, shiftL, shiftR)
 
 import Text.Printf      (printf)
 
@@ -29,173 +32,313 @@ import CircGen
 import Intermediate
 
 
+
+type ValArrayType = Maybe GateVal
+
+
 -- general tactic:
 -- produce NodeFunc's for each gate, which is a simple map.
 -- go through graph with BFS and do the funcs
 
 formatRun gates ins = do out <- run gates ins
                          return $ map printOuts out
-    where printOuts (num, (op,flags), ins, val) = printf "%-6d%-16s%-8s%-30s%s"
+    where printOuts (num, (op,flags), ins, mb_val) =
+                                                  printf "%-6d%-16s%-8s%-30s%s"
                                                     num
                                                     (show op)
                                                     (if null flags then "" else show flags)
                                                     (concatMap ((++ ", ") . show) ins)
-                                                    (show val)
+                                                    (if (elem Output flags)
+                                                     then show_mb_val mb_val
+                                                     else show_mb_val mb_val)
+          show_mb_val Nothing   = "Nothing"
+          show_mb_val (Just v)  = showsValDetail 0 v ""
 
 
 -- run :: [Gate]       -- ^ The circuit
---     -> [Integer]    -- ^ input values
+--     -> [[Integer]]  -- ^ input values - singleton array for scalar inputs, larger array
+                       -- for array inputs.
 --     -> IO [(Int, (Op,[GateFlags]), GateVal)]    -- ^ values and numbers for all the gates
 run gates ins   = do let range = (0, length gates - 1)
-                     vals      <- (MArr.newArray range Blank)
-                               :: IO (IOArr.IOArray Int GateVal)
+                     valArr    <- (MArr.newArray range Nothing)
+                                       :: IO (IOArr.IOArray Int ValArrayType)
                      gateArr   <- (MArr.newListArray range $ zip gates (map gate2func gates))
-                               :: IO (IOArr.IOArray Int (Gate, NodeFunc))
-                     setRoots gateArr vals (map (VScalar . ScInt) ins)
-                     evalGates gateArr vals
+                                       :: IO (IOArr.IOArray Int (Gate, NodeFunc))
+                     setRoots gateArr valArr ins
+                     evalGates gateArr valArr
                      -- need the values sorted in gate order.
                      let gate_idxs = map gate_num gates
-                     vals_sorted <- mapM (MArr.readArray vals) gate_idxs
+                     vals_sorted <- mapM (MArr.readArray valArr) gate_idxs
                      -- the inputs to each gate
-                     inputs      <- mapM (mapM (MArr.readArray vals)) (map gate_inputs gates)
+                     inputs      <- mapM (mapM (MArr.readArray valArr)) (map gate_inputs gates)
                      return $ zip4 gate_idxs
                                    (map (pair2 gate_op gate_flags)
                                         (gates))
                                    inputs
                                    vals_sorted
 
--- get the input values 
-getInputs vals in_idxs = mapM (MArr.readArray vals) in_idxs
+-- get the input values
+-- getInputs vals in_idxs = mapM (MArr.readArray vals) in_idxs
+
+-- prompt user for inputs, and return as a list of lists of integers:
+-- a scalar value just gets a 1-element list,
+-- an array value gets a list with an integer for each element
+-- TODO: support scalar types other than int (structures)
+getUserInputs :: [Gate] -> IO [[Integer]]
+getUserInputs gates = let in_gates = filter (\g -> gate_op g == Input) gates
+                      in  mapM getOneInput in_gates
+
+    where getOneInput Gate { gate_typ = typ,
+                             gate_doc = doc }
+              =   let docstr = show $ head doc
+                  in  case typ of
+                        (ArrayT _ size_e)   ->
+                            let size  = evalStaticOrDie size_e
+                            in  replicateM (fromIntegral size) (getInt (docstr << ", array of size " << size))
+                        _                   ->
+                            getInt docstr >>== (:[]) -- make into a singleton list
+
+          getInt :: String -> IO Integer
+          getInt doc    = do putStr ("Integer value for " ++ doc ++ ": ")
+                             hFlush stdout
+                             getLine >>== read >>= return
+
 
 
 -- set the values of root gates, ie. those without input gates.
+-- gates: the circuit gates
+-- vals: the (blank) values array
+-- ins: [[Integer]]
 setRoots gates vals ins = do assocs <- MArr.getAssocs gates
                              -- should eat up all the inputs
                              []     <- foldM (addRoot vals) ins assocs
                              return ()
 
 -- set the value of one root gate (if it is a root gate)
-addRoot :: (MArr.MArray a GateVal m)
-           => a Int GateVal
-               -> [GateVal]
+-- TODO: only supporting plain integers (and arrays of them) for now. No structs.
+addRoot :: (MArr.MArray a ValArrayType m) =>
+                  a Int ValArrayType
+               -> [[Integer]]
                -> (Int, (Gate,NodeFunc))
-               -> m [GateVal]
+               -> m [[Integer]]
 addRoot vals ins (i, (gate,_)) =
     let g_i = gate_num gate in
     do case gate_op gate of
-         Lit l -> do MArr.writeArray vals g_i (VScalar $ case l of LInt i     -> ScInt i
-                                                                   LBool b    -> ScBool b)
-                     return ins
-                         `trace` ("Wrote lit to gate " << g_i)
-         Input -> let (v:vs) = ins in
-                  do MArr.writeArray vals g_i v
-                     return vs
+         Lit l -> do MArr.writeArray vals g_i (Just $ VScalar $ case l of LInt i     -> ScInt i
+                                                                          LBool b    -> ScBool b)
+                     return ins -- just pass on the input value list
+                         `trace` ("Wrote lit " << l << " to gate " << g_i)
+
+         -- will swallow one of the 'ins' values here
+         Input -> let 
+                      typ       = gate_typ gate
+                      (vs:ins') = ins `trace` ("Setting input value of gate " << gate
+                                               << " of type " << typ)
+                  in  do MArr.writeArray vals g_i
+                          (case (typ `trace` ("Input type is " << typ)) of
+                             (ArrayT _ size_e)   -> let size = evalStaticOrDie size_e
+                                                        arr  = listArray (0,size-1)
+                                                                         (map (Just . vint) vs)
+                                                    in  (Just $ VArr arr)
+                                                            `trace` ("Input array is " << arr)
+                             _                   -> let [i] = vs -- should be just one integer
+                                                    in  Just $ vint i )
+                         -- BUG: from the compiler I think - if this statement is not
+                         -- here, the previous writeArray is not evaluated!
+                         val <- MArr.readArray vals g_i
+                         return ins' `trace` ("vals after input added: " << val)
+                                                                              
          _     -> return ins
 
+
+
 evalGates :: (MArr.MArray a (Gate, NodeFunc) m,
-              MArr.MArray a2 GateVal m)
-             => a Int (Gate, NodeFunc)
-                 -> a2 Int GateVal
+              MArr.MArray a2 ValArrayType m) =>
+                    a Int (Gate, NodeFunc)
+                 -> a2 Int ValArrayType
                  -> m()
 evalGates gates vals = mapM_ (evalGate gates vals) (MArr.indices gates)
 
-evalGate :: (MArr.MArray a (Gate, NodeFunc) m,
-              MArr.MArray a2 GateVal m)
-             => a Int (Gate, NodeFunc)
-                 -> a2 Int GateVal
-                 -> Int
-                 -> m()
+evalGate :: (MArr.MArray a      (Gate, NodeFunc) m,
+             MArr.MArray a2     ValArrayType     m) =>
+                   a  Int (Gate, NodeFunc)
+                -> a2 Int ValArrayType
+                -> Int
+                -> m ()
 evalGate gates vals i =
     do (gate, gate_f)   <- MArr.readArray gates i
-       ins              <-  mapM (MArr.readArray vals) (gate_inputs gate)
-                              `trace` ("reading inputs for gate " << gate)
-       MArr.writeArray vals (gate_num gate) (gate_f ins)
+       ins              <- mapM (MArr.readArray vals) (gate_inputs gate)
+                              `trace` ("reading inputs for gate:" << gate)
+       let out = gate_f ins
+       -- no point in writing Blank values in there, in fact it's very bad in case of
+       -- Input gates
+       if (gate_op gate == Input && out == Just Blank)
+         then return ()
+         else MArr.writeArray vals (gate_num gate) (gate_f ins)
+                  `trace` ("Evaluating gate number:" << (gate_num gate))
 
 
 
 
 data GateVal = Blank |
                VScalar   Scalar |
-               VArr      (Array.Array Integer GateVal) |
-               VList [GateVal]  -- for output of a ReadDynArray
+               VArr      (Array.Array Integer (Maybe GateVal)) |
+               VList [Maybe GateVal]  -- for output of a ReadDynArray
+    deriving (Eq)
+
+
+
 
 
 
 data Scalar = ScInt Integer |
               ScBool Bool
+    deriving (Eq)
+
+
+-- helpers
+vint = VScalar . ScInt
 
 
 
+-- tristate logical operators
+triAnd, triOr  :: Maybe Bool -> Maybe Bool -> Maybe Bool
+triAnd x y = case (x,y) of
+               (Just False, _) -> Just False
+               (_, Just False) -> Just False
+               (Just True, Just True) -> Just True
+               (_, _)           -> Nothing
+
+triOr x y = case (x,y) of
+              (Just True, _)            -> Just True
+              (_, Just True)            -> Just True
+              (Just False, Just False)  -> Just False
+              (_, _)                    -> Nothing
 
 
-type NodeFunc = ([GateVal] -> GateVal)
+type NodeFunc = ([Maybe GateVal] -> Maybe GateVal)
 
 gate2func :: Gate -> NodeFunc
 gate2func Gate { gate_op = op,
-                 gate_flags = flags }
+                 gate_num = num }
     = case op of
-        Bin op              -> \[VScalar s1, VScalar s2]    -> VScalar $ binOpFunc op s1 s2
-        Un  op              -> \[VScalar s]                 -> VScalar $ opUnOp op s
-        Lit l               -> \[]                          -> case l of
-                                                                 (LInt i) -> VScalar $ ScInt i
-                                                                 (LBool b) -> VScalar $ ScBool b
-        Select              -> \[ VScalar (ScBool b),
-                                  v_true,
-                                  v_false ]                 -> if b
-                                                               then v_true
-                                                               else v_false
-        Slicer _ (off,len)  -> \[VList vs]                  -> head . take len . drop off $ vs
-        WriteDynArray _     -> \( VArr arr:
-                                  VScalar (ScInt idx):
-                                  vals )                    -> VArr $ arr // [(idx, head vals)]
-        InitDynArray _ len  -> \[]                          -> VArr $ listArray (0,len-1)
-                                                                                (repeat $ VScalar $
-                                                                                          ScInt 0)
-        ReadDynArray        -> \[VArr arr,
-                                 VScalar (ScInt idx)]       -> let val = arr ! idx in
-                                                               VList [VArr arr,
-                                                                      val]
-        Input               -> \[]                          -> Blank
+        Bin op
+            -- these are a bit complicated as they may not need both parameters, ie. are
+            -- well defined even if one of the params is Nothing
+            | elem op [And, Or]
+                            -> \[v1, v2]    -> let f = (case op of And  -> triAnd
+                                                                   Or   -> triOr)
+                                               in  do   b_out    <- f
+                                                                    (do VScalar (ScBool b1) <-  v1
+                                                                        return b1)
+                                                                    (do VScalar (ScBool b2) <-  v2
+                                                                        return b2)
+                                                        return $ VScalar $ ScBool b_out
+
+            | otherwise     -> \[v1, v2]    -> do VScalar s1 <- v1
+                                                  VScalar s2 <- v2
+                                                  ans <- binOpFunc op s1 s2
+                                                  return $ VScalar ans
+        
+        Un  op              -> \[v]         -> do VScalar s <- v
+                                                  return $ VScalar $ opUnOp op s
+
+        Lit l               -> \[]          -> return $ VScalar $ case l of
+                                                                    (LInt i)   -> ScInt i
+                                                                    (LBool b)  -> ScBool b
+
+        Select              -> \[v_b,
+                                 m_v_true,
+                                 m_v_false] -> do VScalar (ScBool b)    <- v_b
+                                                  if b
+                                                    then m_v_true  >>= return
+                                                    else m_v_false >>= return
+
+        Slicer _ (off,len)  -> \[args]      -> do VList m_vs    <- args
+                                                  [ans]         <- sequence $
+                                                                   take len . drop off $
+                                                                   m_vs
+                                                  return ans
+
+        WriteDynArray _     -> \(v_arr:
+                                 v_idx:
+                                 v_val1:_)  -> do VArr arr              <- v_arr
+                                                  VScalar (ScInt idx)   <- v_idx
+                                                  if not $ inRange (bounds arr) idx
+                                                    then fail "" -- the string is ignored
+                                                    else return $ VArr $ arr // [(idx, v_val1)]
+
+        InitDynArray _ len  -> \[]          -> return $
+                                               VArr $ listArray (0,len-1)
+                                                                (repeat (Just $ VScalar $ ScInt 0))
+        ReadDynArray        -> \[v_arr,
+                                 v_idx]     -> do VArr arr              <- v_arr
+                                                  let ans               =  Just $ VArr arr
+                                                  VScalar (ScInt idx)   <-
+                                                      v_idx `catchError`
+                                                            const (return $ VList [ans,Nothing])
+                                                  return $ VList [ans,
+                                                                  if not $ inRange (bounds arr) idx
+                                                                  then Nothing
+                                                                  else arr ! idx]
+{-
+        ReadDynArray        -> \arg         -> case arg `trace` ("ReadDynArray gate "
+                                                                                 << num
+                                                                                 << ", arg: "
+                                                                                 << arg) of
+                                                                 [VArr arr,
+                                                                  VScalar (ScInt idx)] -> inRange (bounds arr) idx
+                                                                 then VList [VArr arr,
+                                                                               arr ! idx]
+                                                                   else Blank
+-}
+
+        Input               -> \[]          -> return Blank
                                                                             
                                                                                    
                                   
 
-binOpFunc o x y = let opClass                       = classifyBinOp o
-                  in  case (opClass, x, y) of
-                        (Arith, ScInt i1, ScInt i2)     -> ScInt $ arithBinOp o i1 i2
-                        (Boolean, ScBool b1, ScBool b2) -> ScBool $ boolBinOp o b1 b2
-                        (Comp, ScBool b1, ScBool b2)    -> ScBool $ compBinOp o b1 b2
-                        (Comp, ScInt i1, ScInt i2)      -> ScBool $ compBinOp o i1 i2
+binOpFunc o x y
+    | (o == Div && let ScInt i2 = y in i2 == 0) =
+                  Nothing       -- division by zero
+    | otherwise =
+                  let opClass   = classifyBinOp o
+                  in  Just $ case (opClass, x, y) of
+                               (Arith, ScInt i1, ScInt i2)     -> ScInt $ arithBinOp o i1 i2
+                               (Boolean, ScBool b1, ScBool b2) -> ScBool $ boolBinOp o b1 b2
+                               (Comp, ScBool b1, ScBool b2)    -> ScBool $ compBinOp o b1 b2
+                               (Comp, ScInt i1, ScInt i2)      -> ScBool $ compBinOp o i1 i2
 
 
 arithBinOp o = case o of
-                 Times -> (*) 
-                 Plus  -> \x y -> x + y
+                              Times -> (*) 
+                              Plus  -> (+) {- \x y -> x + y
                                     `trace`
-                                     ("Adding " << x << " + " << y)
-                 Div   -> div
-                 Mod   -> mod
-                 Minus -> (-) 
-                 Max   -> max
+                                     ("Adding " << x << " + " << y) -}
+                              Div   -> div
+                              Mod   -> mod
+                              Minus -> (-) 
+                              Max   -> max
+
+                              SL     -> \x y -> x `shiftR` (fromIntegral y)
+                              SR     -> \x y -> x `shiftL` (fromIntegral y)
+
+                              BAnd   -> (.&.)
+                              BOr    -> (.|.)
+                              BXor   -> xor
+
+
 boolBinOp o = case o of
                 And -> (&&)
                 Or  -> (||)
                 
 compBinOp o = case o of
-              Lt    -> (<)
-              Gt    -> (>) 
-              LtEq  -> (<=)
-              GtEq  -> (>=) 
-              Eq    -> (==)
-              Neq   -> (/=) 
-                
-{-
--}
---               SL -> 
---               SR -> ">>" 
---               BAnd -> "&" 
---               BXor -> "^" 
---               BOr -> "|" 
+              Lt         -> (<)
+              Gt         -> (>) 
+              LtEq       -> (<=)
+              GtEq       -> (>=) 
+              Eq         -> (==)
+              Neq        -> (/=)
 
 opUnOp :: UnOp -> (Scalar -> Scalar)
 opUnOp o x = case o of
@@ -229,14 +372,21 @@ classifyBinOp o = case o of
                     Max   -> Arith
 
 
-instance (Show GateVal) where
-    showsPrec p g = case g of
+showsVal p g = case g of
                       Blank     -> str "Blank"
                       VScalar s -> rec s
                       VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
                       VList l   -> showList l
         where rec x = showsPrec p x
-              str = (++)
+              str   = (++)
+
+showsValDetail p val = case val of
+                         VArr arr  -> showsPrec p arr
+                         _         -> showsVal p val
+
+
+instance (Show GateVal) where
+    showsPrec = showsVal
 
 instance (Show Scalar) where
     showsPrec p s = case s of (ScInt i)  -> showsPrec p i

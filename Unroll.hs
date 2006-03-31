@@ -111,15 +111,14 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
 
 unroll s@(SBlock _ _) = genericUnroll unrollBlock s
     where unrollBlock scope (SBlock locals stms) =
-              do -- replace all local variables with Scoped ones, in stms
-                 let stms' = map (scopeVars locals scope) stms
-                 return stms'
+              -- replace all local variables with Scoped ones, in stms
+              return $ map (scopeVars locals scope) stms
 
 
 unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
-    where unrollFor scope (SFor countVar lo_exp hi_exp stms) =
-              do lo <- lift $ evalStatic lo_exp
-                 hi <- lift $ evalStatic hi_exp
+    where unrollFor scope (SFor countVar begin_exp end_exp stms) =
+              do begin  <- lift $ evalStatic begin_exp
+                 end    <- lift $ evalStatic end_exp
                  -- the only new local variable in a for-loop body is
                  -- the counter variable, so create a VarSet
                  -- containing just that
@@ -127,13 +126,16 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                                             scope)
                                  stms
                      -- have +1 here as the loop includes both end values
-                     stmss = replicate (fromInteger (hi-lo+1)) stms'
+                     stmss = replicate (fromInteger (abs(begin-end) + 1)) stms'
                      --
                      -- and subst correct counter values into all the statements
                      --
                      countVar' = addScope scope countVar
+                     -- can have the loop count forwards and backwards by 1
+                     countVals | begin <= end   = [begin..end]
+                               | otherwise      = [end..begin]
                      -- a version of subst for each unrolled block of stm's
-                     substs = [subst countVar' (lint val) | val <- [lo..hi]]
+                     substs = [subst countVar' (lint val) | val <- countVals]
                      -- each 'stms' list is mapped a subst with the correct counter value
                      stmss' = zipWith map substs stmss
                  return $ concat stmss'
