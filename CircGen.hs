@@ -62,7 +62,10 @@ import Intermediate as Im hiding (VarTable)
 
 
 -- gate flags
-data GateFlags = Output deriving (Eq,Ord)
+data GateFlags = Output         -- ^ an output gate
+               | Terminal       -- ^ a gate which has to be reached, ie not trimmed out of
+                                -- ^ the circuit. currently Output and Print gates
+    deriving (Eq,Ord)
 
 
 -- the gate operations
@@ -110,6 +113,9 @@ data Op =
            (Int,Int)            -- ^ GateVal locations
 
   | Lit Im.Lit                  -- a literal
+
+  | Print String                -- ^ a void-type print gate: prints a value preceded by a
+                                -- ^ fixed prompt
  deriving (Eq)
 
 
@@ -189,15 +195,15 @@ genCircuit type_table stms args =
     in (renum_circ, flat_circ)
 
 
--- keep only gates which are reverse-reachable from the output gates
+-- keep only gates which are reverse-reachable from terminal gates
 clip_circuit :: Circuit -> Circuit
 clip_circuit c = let c_rev          = GrBas.grev c
                      out_nodes      = map Gr.node' $
-                                      GrBas.gsel isOutCtx c_rev
+                                      GrBas.gsel isTerminal c_rev
                      reach_nodes    = GrBFS.bfsn out_nodes c_rev
                      reach_gr       = keepNodes reach_nodes c
                  in  reach_gr
-    where isOutCtx = elem Output . gate_flags . Gr.lab'
+    where isTerminal = elem Terminal . gate_flags . Gr.lab'
 
 
 
@@ -534,11 +540,25 @@ genStm circ stm =
                                                (locs1, locs2)
              return circ''
 
+      (SPrint prompt x)         -> do (circ', [x_n])    <- genExp circ x
+                                      i                 <- nextInt
+                                      depth             <- getDepth
+                                      let ctx           = mkCtx $ Gate i
+                                                                       VoidT
+                                                                       (Print prompt)
+                                                                       [x_n]
+                                                                       depth
+                                                                       [Terminal]
+                                                                       []
+                                      return (ctx & circ')
+                                                               
+                                                               
+
       s -> error $ "Unknow genStm on " << s
 
     where addOutputFlag var =
               case strip_var var of
-                (VSimple "main") -> Just (\gate -> gate {gate_flags = [Output]})
+                (VSimple "main") -> Just (\gate -> gate {gate_flags = [Output, Terminal]})
                 _                -> Nothing
 
 
@@ -615,6 +635,8 @@ checkOutputVars c var mb_gate_loc
                                                             "; vgates=" << vgates)
 
                         -- and update the Gate flags on those gates
+                        -- FIXME: for now we just strip the flags, which may be excessive
+                        -- when more flags are introduced.
                         c' = foldl (updateLabel (\g -> g{gate_flags = []}))
                                    c
                                    vgates'
@@ -1124,13 +1146,14 @@ instance Show Gate where
 
 instance Show GateFlags where
     show Output = "Output"
+    show Terminal = "Terminal"
 
 -- this requires -fallow-overlapping-instances to GHC, as we already
 -- have
 -- (Show a) => instance Show [a]
 instance Show [GateFlags] where
     show []     = "noflags"
-    show flags  = concatMap show flags
+    show flags  = concatMap ((++" ") . show) flags
 
 
 instance Show Op where
@@ -1150,6 +1173,7 @@ instance Show Op where
             (Slicer
              (boff,blen)
              (off, len) )   -> str "Slicer " . rec off . sp . rec len
+            (Print prompt)  -> str "Print " . rec prompt
           where rec y   = showsPrec x y
                 str     = (++)
                 sp      = (" " ++)

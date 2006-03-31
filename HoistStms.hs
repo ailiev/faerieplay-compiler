@@ -8,6 +8,8 @@
 --                        no complex expressions
 -- all function calls are alone on the right side of a SAss
 -- there are a lot of new temporary variables :)
+-- TODO: how "local" are these temp vars?? Do they ever span a conditional? Should
+-- figure out and specify here.
 
 
 -- Operations:
@@ -81,6 +83,10 @@ flatten s =
     case s of
       (SAss lval val)   -> do (stms,val_new) <- extrStms val
                               return $ stms ++ [(SAss lval val_new)]
+
+      (SPrint p val)    -> do (stms,val_new) <- extrStms val
+                              return $ stms ++ [(SPrint p val_new)]
+
       (SBlock vars stms)-> do pushScope
                               stmss <- mapM flatten stms
                               varset <- popScope

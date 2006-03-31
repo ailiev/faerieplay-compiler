@@ -202,6 +202,10 @@ checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
                                     return $ Im.SAss lval_new val_new
 
+checkStm (T.SPrint prompt val) = do val_new     <- checkExp val
+                                    return $ Im.SPrint prompt val_new
+
+
 
 checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
     do new_lo <- checkExp lo

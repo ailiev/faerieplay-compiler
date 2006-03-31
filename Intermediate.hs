@@ -124,6 +124,7 @@ data TypedName =
 data Stm =
    SBlock VarSet [Stm]
  | SAss Exp Exp
+ | SPrint String Exp
  | SFor Var Exp Exp [Stm]
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord)
@@ -386,8 +387,6 @@ evalStatic e = case e of
 
 
 -- try to evaluate an operation statically, fall back to an op on Exp if static fails
--- tryEvalStaticBin :: (MonadError MyError m) => (Integer -> Integer -> Integer) -> (Exp -> Exp -> Exp) ->
---                  Exp -> Exp -> Exp
 tryEvalStaticBin staticOp expOp x_e y_e = do [x, y] <- mapM evalStatic [x_e, y_e]
                                                           `catchError` const (return [-1, -1])
                                              return $ if x >= 0
@@ -462,7 +461,7 @@ transIntUnOp  op = case op of
 
 
 
-
+-- on how many parameters does an expression work?
 data Points a = P0 |
                 P1   (a -> a)         a |
                 P2   (a -> a -> a)   (a,a) |
@@ -492,6 +491,7 @@ stmChildren s =
       (SBlock vars ss)          -> ( ss,     [],         (\ss []        -> (SBlock vars ss)) )
       (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
       (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
+      (SPrint prompt val)       -> ( [],     [val],      (\[] [v_new]   -> (SPrint prompt v_new)) )
 
 
 -- some recursive structure for Stm's and Exp's. Make it monadic for
@@ -651,6 +651,9 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
                                               nest 4 $ vcat (map docStm s1s),
                                               text "else",
                                               nest 4 $ vcat (map docStm s2s)]
+
+docStm (SPrint prompt x)                = cat [text "print",
+                                               parens $ sep [ptext prompt, comma, docExp x]]
 
 
 docExp e = case e of

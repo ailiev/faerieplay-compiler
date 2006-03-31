@@ -27,15 +27,21 @@ PACKS = -package fgl -package Cabal
 
 all: sfdlc
 
+# basename of our grammar (.cf) file
+CF_ROOT = SFDL
+
+BNFCROOTS=Abs Lex Print Test ErrM Par Skel
+bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(BNFCROOTS))
 # bnfc produces a misnamed Makefile, hence specifying that name here.
-bnfc:
-	bnfc -haskell -m -d SFDL.cf
-	$(MAKE) -f Makefile. -C SFDL
+$(bnfc_files): $(CF_ROOT).cf
+	bnfc -haskell -m -d $<
+
+bnfc: $(bnfc_files)
 
 %.o: %.hs
 	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
 
-sfdlc:
+sfdlc: bnfc
 	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
 #	ghc --make $(GHCFLAGS) sfdlc
 
@@ -56,7 +62,7 @@ tags: TAGS
 TAGS: $(wildcard *.hs)
 	hasktags6 --etags $^
 
-#.PHONY: tags
+.PHONY: bnfc
 
 # to make postscript of a circuit (or any) gviz file:
 #  dot -Tps cct.gviz -o cct.ps

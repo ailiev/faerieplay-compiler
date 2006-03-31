@@ -27,12 +27,9 @@
 Prog.           Prog    ::= "program" Ident "{" [Dec] "}" ;
 
 -- how are lists of Dec treated
---[].             [Dec]   ::= ;
---(:).            [Dec]   ::= Dec ";" [Dec] ;
-separator Dec ";" ;
-
--- [].             [Stm]   ::= ;
--- (:).            [Stm]   ::= Stm [Stm] ;
+-- not all declarations need a ; terminator, so mention it in the actual definition if
+-- needed.
+terminator Dec "" ;
 
 -- only an Assignment statement needs a ";" terminator, so specify
 -- that only there
@@ -44,12 +41,14 @@ separator nonempty Ident "," ;
 
 
 -- declarations
-ConstDecl.      Dec     ::= "const" Ident "=" Exp ;
-TypeDecl.       Dec     ::= "type"  Ident "=" Typ ;
+ConstDecl.      Dec     ::= "const" Ident "=" Exp ";" ;
+TypeDecl.       Dec     ::= "type"  Ident "=" Typ ";" ;
 -- TypeDecl.       Dec     ::= "typedef"  Typ Ident ;
-VarDecl.        Dec     ::= "var"   Typ [Ident] ;
+VarDecl.        Dec     ::= "var"   Typ [Ident] ";" ;
+-- FunDecl is not semicolon-terminated
 FunDecl.        Dec     ::= "function" Typ Ident "(" [TypedName] ")"
                             "{" [Dec] [Stm] "}" ;
+
 TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [TypedName] ")" ":" Typ
                             "{" [Dec] [Stm] "}" ;
 
@@ -98,6 +97,10 @@ separator TypedName "," ;
 SBlock.   Stm      ::= "{" [Dec] [Stm] "}" ;
 
 SAss.     Stm      ::= LVal "=" Exp ";" ;
+
+-- and for debugging:
+-- the String in there is meant to be a fixed
+SPrint.     Stm     ::= "print" "(" String "," Exp ")" ;
 
 -- none of these statements need a trailing semicolon. so, only
 -- Assignment needs it (as specified above)

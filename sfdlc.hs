@@ -167,10 +167,10 @@ run v parser input =
                                   args         = CG.extractInputs prog
                                   (cct,gates)  = CG.genCircuit typ_table stms args
 --                              hPrint stderr cct; hFlush stderr
-{-
+
                               putStrLn $ "Now generating the circuit out to " ++ cctFile
                               writeFile cctFile (CG.showCct cct)
--}
+
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
 

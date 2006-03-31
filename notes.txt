@@ -97,3 +97,13 @@ installing Hat tracer:
 
 
 installed Buddha debugger in ~/minime/buddha. no further progress on it yet.
+
+
+
+<date>Fri Mar 31 16:20:12 2006</date>
+
+Adding print gates: they have nothing coming out of them, so need to take care
+that when the circuit is trimmed, they are not thrown out, as the output gates
+are not reachable from them. Ie. print gates are an "anchor" of sorts too, and
+all gates with a path to a print gate (as well as to an output gate) should be
+kept.

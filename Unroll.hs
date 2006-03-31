@@ -146,8 +146,10 @@ unroll s@(SIfElse test (locs1,stms1) (locs2,stms2)) =
        stmss2'  <- mapM unroll stms2
        return [SIfElse test (locs1, concat stmss1') (locs2, concat stmss2')]
 
--- all that remains is SAss without an EFunCall on the right                   
-unroll s@(SAss _ _) = return [s]
+-- simple leftovers: SAss without an EFunCall on the right, and SPrint
+unroll s            = return [s]
+
+
 
 
 
