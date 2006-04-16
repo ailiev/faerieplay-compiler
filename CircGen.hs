@@ -540,17 +540,42 @@ genStm circ stm =
                                                (locs1, locs2)
              return circ''
 
-      (SPrint prompt x)         -> do (circ', [x_n])    <- genExp circ x
+      -- we will wire all the variables in x to go through this gate
+      -- a bit of a hassle as there may be one or more gates feeding into here (in case of
+      -- a struct). So, add slice gates
+      (SPrint prompt x)         -> do (circ', x_ns)     <- genExp circ x
                                       i                 <- nextInt
+                                      slice_is          <- replicateM (length x_ns) nextInt
                                       depth             <- getDepth
+                                      let (t,var) = case (x `trace` "SPrint x = " << x) of
+                                                     (ExpT t (EVar v))   -> (t,v)
+                                                     _                   -> error "SPrint got a non-var"
+                                      t_full <- expandType t
+                                      let (ts, locs, blocs)    = case t_full of
+                                                                     (StructT (tn's, locs, blocs))
+                                                                         -> (map snd tn's,
+                                                                             locs,
+                                                                             blocs)
+                                                                     _   
+                                                                         -> ([t_full], [(0,1)], [(0,1)])
+                                          slicer_ctxs = [mkCtx $
+                                                         Gate si t (Slicer bloc loc) [i] depth [] []
+                                                              | si      <- slice_is
+                                                              | t       <- ts
+                                                              | bloc    <- blocs
+                                                              | loc     <- locs]
+
+                                      setVarAddrs slice_is var
+                                                               
                                       let ctx           = mkCtx $ Gate i
-                                                                       VoidT
+                                                                       t
                                                                        (Print prompt)
-                                                                       [x_n]
+                                                                       x_ns
                                                                        depth
-                                                                       [Terminal]
                                                                        []
-                                      return (ctx & circ')
+                                                                       []
+                                          
+                                      return $ addCtxs circ' (ctx:slicer_ctxs)
                                                                
                                                                
 
@@ -740,6 +765,10 @@ foo    ((x,y):rest)  (z:zs)
 foo    ((x,y):rest) []  = (x : map fst rest)
 foo [] _  = []
 
+
+
+-- add a list of contexts (ie. gates) to a circuit, return the new circuit
+addCtxs circ ctxs = foldl (flip (&)) circ ctxs
 
 
 

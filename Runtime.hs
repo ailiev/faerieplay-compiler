@@ -47,7 +47,7 @@ formatRun gates ins = do out <- run gates ins
                                                     num
                                                     (show op)
                                                     (if null flags then "" else show flags)
-                                                    (concatMap ((++ ", ") . show) ins)
+                                                    (concat . intersperse ", " . map show $ ins)
                                                     (if (elem Output flags)
                                                      then show_mb_val mb_val
                                                      else show_mb_val mb_val)
@@ -192,7 +192,8 @@ data GateVal = Blank |
 
 
 data Scalar = ScInt Integer |
-              ScBool Bool
+              ScBool Bool |
+              ScString String   -- this one only appears as the result of Print gates
     deriving (Eq)
 
 
@@ -201,7 +202,9 @@ vint = VScalar . ScInt
 
 
 
--- tristate logical operators
+-- tristate logical operators - it was hard to make them ride on top of the builtin || and
+-- && operators, because returning Nothing depends on the param values and not just their
+-- Nothing/Just status.
 triAnd, triOr  :: Maybe Bool -> Maybe Bool -> Maybe Bool
 triAnd x y = case (x,y) of
                (Just False, _) -> Just False
@@ -281,26 +284,26 @@ gate2func Gate { gate_op = op,
                                                                   if not $ inRange (bounds arr) idx
                                                                   then Nothing
                                                                   else arr ! idx]
-{-
-        ReadDynArray        -> \arg         -> case arg `trace` ("ReadDynArray gate "
-                                                                                 << num
-                                                                                 << ", arg: "
-                                                                                 << arg) of
-                                                                 [VArr arr,
-                                                                  VScalar (ScInt idx)] -> inRange (bounds arr) idx
-                                                                 then VList [VArr arr,
-                                                                               arr ! idx]
-                                                                   else Blank
--}
 
         Input               -> \[]          -> return Blank
+
+        -- print just passes the values along. We get the printed values when its input
+        -- values are shown by formatRun
+        Print prompt        -> \v_xs        -> return $ VList v_xs
+{-
+        Print prompt        -> \v_xs        -> let x_strs = map (maybe "Nothing" show) v_xs
+                                               in  Just $ VScalar $ ScString $
+                                                   prompt ++
+                                                   (concat . (List.intersperse ", ") $ x_strs)
+  -}                                                
                                                                             
                                                                                    
                                   
 
 binOpFunc o x y
-    | (o == Div && let ScInt i2 = y in i2 == 0) =
-                  Nothing       -- division by zero
+    | (o == Div && let ScInt i2 = y -- pull the Integer out
+                   in  i2 == 0)
+                = Nothing       -- division by zero
     | otherwise =
                   let opClass   = classifyBinOp o
                   in  Just $ case (opClass, x, y) of
@@ -386,9 +389,9 @@ showsValDetail p val = case val of
 
 
 instance (Show GateVal) where
-    showsPrec = showsVal
+    showsPrec = showsValDetail
 
 instance (Show Scalar) where
-    showsPrec p s = case s of (ScInt i)  -> showsPrec p i
-                              (ScBool b) -> showsPrec p b
-
+    showsPrec p s = case s of (ScInt i)     -> showsPrec p i
+                              (ScBool b)    -> showsPrec p b
+                              (ScString s)  -> showsPrec p s

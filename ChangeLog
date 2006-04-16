@@ -1,3 +1,9 @@
+2006-04-16  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* Unroll.hs: stuuupid bug in unrolling for-loops counting
+	backwards - was counting up instead of down as I forgot to reverse
+	the list.
+
 2006-03-23  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* Unroll.hs: enable the for-loop to count forwards and backwards

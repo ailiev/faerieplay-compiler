@@ -12,3 +12,12 @@ f = val;
 as if it were
 return val;
 in more normal languages (see how Pascal semantics are perhaps)
+
+
+
+<date>Sat Apr  1 22:53:23 2006</date>
+
+Maybe annotate invalid values somehow - eg division by zero, array read/write
+out of bounds, so if any make it to the output, we may know where the problem
+comes from. ie. use an Either value :)
+

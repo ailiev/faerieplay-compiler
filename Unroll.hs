@@ -133,7 +133,7 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                      countVar' = addScope scope countVar
                      -- can have the loop count forwards and backwards by 1
                      countVals | begin <= end   = [begin..end]
-                               | otherwise      = [end..begin]
+                               | otherwise      = reverse [end..begin]
                      -- a version of subst for each unrolled block of stm's
                      substs = [subst countVar' (lint val) | val <- countVals]
                      -- each 'stms' list is mapped a subst with the correct counter value

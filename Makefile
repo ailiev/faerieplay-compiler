@@ -4,13 +4,15 @@ GHCFLAGS += -fallow-overlapping-instances
 GHCFLAGS += -I$(HOME)/code/haskell
 GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 
+GHCFLAGS += -O2
+
 # this compiles a profiling executable, which can be run with:
 # +RTS -xc -RTS
 # options to have it dump a cost-center stack if a runtime error occurs.
 # 
 # see also section 5.1.1 "Inserting cost centres by hand" for how to add cost
 # centers for more detailed stack reports.
-GHCFLAGS += -prof -auto-all
+# GHCFLAGS += -prof -auto-all
 
 #GHCFLAGS += -v
 
