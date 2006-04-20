@@ -44,10 +44,10 @@ bnfc: $(bnfc_files)
 	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
 
 sfdlc: bnfc
-	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
-#	ghc --make $(GHCFLAGS) sfdlc
+#	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
+	ghc --make $(GHCFLAGS) sfdlc
 
-# this make shouldnt look at the sfdlc file
+# this make shouldnt look at the sfdlc file, hmake or ghc do that.
 .PHONY: sfdlc
 
 hat:
