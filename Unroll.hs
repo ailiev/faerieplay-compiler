@@ -83,28 +83,51 @@ unroll :: Stm -> StateWithErr [Stm]
 -- :::::::::::::::::::::
 
 -- unroll s@(SAss lv e@(EFunCall nm args)) = return [s]
+{-
+  Implementation of reference parameters:
+  Replace all their usages in the body with the actual parameter
+-}
 unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
               do (Func name locals t form_args stms) <- extractFunc nm
-                 let stms'      = map (scopeVars locals scope) stms
+                 let                      -- pair up the formal vars and their values
+                     arg_complex = zip form_vars args
+                     -- split up reference and non-ref args, and ditch the formal var type
+                     -- annotations
+                     (ref_args,
+                      nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (nm,val))) $
+                                      partition (isRefType . snd . fst) $
+                                      arg_complex
+{-
+                     non_ref_locals = filter (\locvar -> any (== locvar) ref_args)
+                                             (Cont.toList locals)
+-}
+                     -- add the local scope to *all* local var occurances
+                     stms'      = map (scopeVars locals scope) stms
                                         `trace`
                                         ("unroll func: name = " << nm <<
-                                         "; locals = " << locals <<
+                                         "; non ref locals = " << non_ref_locals <<
                                          "; scope = " << scope)
-                     -- slight HACK: recreating vars from the formal param list like this
-                     -- is not well structured, but for now needed to get the formal arg
-                     -- to look like its usage inside the function.
-                     form_vars  = map (\(name,typ) -> addScope scope $
-                                                      add_vflags [FormalParam] $
-                                                      VSimple name)
-                                      form_args
-                     -- assignments to the formal params
+                     -- replace reference local vars with their referrents
+                     stms''     = map (\refvar -> map subst refvar ) $
+                                  map formarg2var ref_args
+
+                     form_vars  = map formarg2var form_args
+             
+                     -- assignments to the non-ref formal params
                      ass's      = [SAss (EVar formarg)
-                                        actual_arg      | formarg    <- form_vars
-                                                        | actual_arg <- args]
+                                        actual_arg      | (formarg,actual_arg)
+                                                            <- map formarg2var non_ref_args]
                      -- assignment to lval from the function return parameter
                      retass     = [SAss lv (fcnRetVar nm scope)]
                  return $ ass's ++ stms' ++ retass
+
+          -- NOTE: this is how formal param vars in the function body are
+          -- marked in TypeChecker.hs, except there is no scope to deal with
+          -- there. Now, want to re-generate those vars in order to assign them
+          -- the actual param values, or replace them in the case of reference
+          -- args.
+          formarg2var (name,typ) = addScope scope $ Tc.name2var [FormalParam] name)
 
 
 
@@ -168,7 +191,7 @@ genericUnroll f stm = do St.modify incrScope'
 
 checkScopeDepth :: Scope -> ErrMonad ()
 checkScopeDepth scope
-    | length scope > cMAXSCOPE = Left $ Err 42 $ "Function recursion deeper than"
+    | length scope > cMAXSCOPE = Left $ Err 42 $ "while unrolling: Function/Block recursion deeper than "
                                                  << cMAXSCOPE
     | otherwise                = return ()
 
@@ -208,13 +231,13 @@ fcnRetVar fname scope = EVar (VScoped scope (VFlagged [RetVar] (VSimple fname)))
 extractFunc name = do ProgTables {funcs=fs} <- St.gets getsPT
                       case maybeLookup name [fs] of
                             (Just f)    -> return f
-                            _           -> throwErr 42 $ "Unroll.extractFunc failed!"
+                            _           -> throwErr 42 $ "Unroll.extractFunc "
+                                                          << name << " failed!"
 
 
 
 
 --unrollStms =  unrollFor
-
 
 
 
