@@ -109,6 +109,8 @@ data Typ =
  | FuncT Typ [Typ]
  | RedIntT Int                  -- RedIntT =def IntT . ELit . LInt
  | RedArrayT Typ Int            -- similar
+
+ | RefT Typ                     -- a reference type
   deriving (Eq,Ord)
 
 {-
@@ -159,7 +161,22 @@ data Exp =
   deriving (Eq,Ord)
 
 
+
+
+--
+-- helpers for types
+--
+
+isRefType (RefT _)  = True
+isRefType _         = False
+
+-- remove the reference qualification on a type
+stripRefQual (RefT t)   = t
+stripRefQual t          = t
+
+--
 -- helpers for expressions
+--
 
 -- deep-remove all mentions of ExpT
 stripExpT = mapExp f
@@ -169,13 +186,24 @@ stripExpT = mapExp f
 
 
 
+
+
 -- some expressions have to be static, hence not annotated with EStatic:
 -- arg of IntT
 
 
--- helpers for variables (without flags)
+--
+-- helpers for variables
+--
 var = EVar . VSimple
 tempVar = EVar . VTemp
+
+varName (VSimple nm)    = nm
+varName (VFlagged _ v)  = varName v
+varName (VScoped _ v)   = varName v
+varName (VTemp i)       = "temp_" ++ show i
+
+
 
 -- variables just need a name, and the scope stack will take care of
 -- making sure we get the correct instance of that name
@@ -282,6 +310,9 @@ expandType t =
                           s3))          -> do let (names,typs)   = unzip name_typs
                                               typs'             <- mapM expandType typs
                                               return $ StructT (zip names typs', s2, s3)
+
+                (RefT t)                -> do t'    <- expandType t
+                                              return $ RefT t'
 
                 _                       -> return t
 
@@ -711,6 +742,7 @@ docTyp t =
       (FuncT t ts)      -> cat [parens $ cat $ punctuate (text ", ") (map docTyp ts),
                                 text " -> ",
                                 docTyp t]
+      (RefT t)          -> docTyp t <+> text "&"
 
 docTypMachine t = 
     case t of

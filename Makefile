@@ -4,7 +4,7 @@ GHCFLAGS += -fallow-overlapping-instances
 GHCFLAGS += -I$(HOME)/code/haskell
 GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 
-GHCFLAGS += -O2
+# GHCFLAGS += -O2
 
 # this compiles a profiling executable, which can be run with:
 # +RTS -xc -RTS
@@ -37,18 +37,19 @@ bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(BNFCROOTS))
 # bnfc produces a misnamed Makefile, hence specifying that name here.
 $(bnfc_files): $(CF_ROOT).cf
 	bnfc -haskell -m -d $<
+	make -C SFDL -f Makefile. 
 
 bnfc: $(bnfc_files)
 
 %.o: %.hs
 	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
 
-sfdlc: bnfc
+sfdlc:
 #	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
-	ghc --make $(GHCFLAGS) sfdlc
+	ghc --make $(GHCFLAGS) -o $@ sfdlc.hs
 
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.
-.PHONY: sfdlc
+.PHONY: sfdlc bnfc
 
 hat:
 	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
@@ -57,14 +58,12 @@ clean:
 	HFLAGS="$(GHCFLAGS)" hmake -clean sfdlc
 
 install: sfdlc
-	install sfdlc ~/leeds_root/bin/
+	install -p sfdlc ~/leeds_root/bin/
 
 tags: TAGS
 
 TAGS: $(wildcard *.hs)
 	hasktags6 --etags $^
-
-.PHONY: bnfc
 
 # to make postscript of a circuit (or any) gviz file:
 #  dot -Tps cct.gviz -o cct.ps

@@ -90,7 +90,9 @@ getUserInputs gates = let in_gates = filter (\g -> gate_op g == Input) gates
 
     where getOneInput Gate { gate_typ = typ,
                              gate_doc = doc }
-              =   let docstr = show $ head doc
+                      -- the first annotation (which is at the end of the list) is likely
+                      -- to be the actual param name
+              =   let docstr = show $ last doc
                   in  case typ of
                         (ArrayT _ size_e)   ->
                             let size  = evalStaticOrDie size_e

@@ -288,6 +288,9 @@ checkTyp T.VoidT                = return Im.VoidT
 -- there, this will be done by the parent checkDec
 checkTyp (T.EnumT ids)          = return (Im.EnumT "" (bitsize $ length ids))
 
+checkTyp (T.RefT t)             = do im_t  <- checkTyp t
+                                     return $ Im.RefT im_t
+
 
 
 
@@ -615,8 +618,10 @@ checkBinary op e1 e2 =
     do let ( (Im.ExpT t1 _), (Im.ExpT t2 _) ) = (e1,e2)
        t1_full <- Im.expandType t1
        t2_full <- Im.expandType t2
-       -- set the type of the result expression - try to 
-       case (t1_full,t2_full) of
+       -- set the type of the result expression - try to
+       -- FIXME: need a more elegant way to remove the reference qualifier on arg types
+       -- here
+       case (Im.stripRefQual t1_full, Im.stripRefQual t2_full) of
              ((Im.IntT i1_e),
               (Im.IntT i2_e) )  -> do i_out <- Im.tryEvalStaticBin max Im.Max i1_e i2_e
                                       return $ annot (Im.IntT i_out) (Im.BinOp op e1 e2)
@@ -710,15 +715,19 @@ addToTypes name typ = St.modify $
                       Map.insert name typ
 
 
+-- make a Var from a variable name, with optional flags specified.
+name2var flags name = let v' = (Im.VSimple name)
+                      in
+                        if null flags
+                        then v'
+                        else (Im.VFlagged flags v')
+
+
 -- take care of constructing a VFlagged if there are flags
-addToVars typ flags name = let v' = (Im.VSimple name)
-                               v  = if null flags
-                                    then v'
-                                    else (Im.VFlagged flags v')
-                           in St.modify $
-                              projFromVars $
-                              modtop $
-                              Map.insert name (typ,v)
+addToVars typ flags name = St.modify $
+                           projFromVars $
+                           modtop $
+                           Map.insert name (typ, name2var flags name)
 
 
 lookupType :: String -> StateWithErr Im.Typ

@@ -3,25 +3,26 @@ module Unroll where
 
 -- import Debug.Trace
 
-import Control.Monad.Error (Error, noMsg, strMsg, throwError)
-import Control.Monad.Identity (Identity, runIdentity)
-import Control.Monad.Writer (Writer, runWriter, tell)
+import Control.Monad.Error              (Error, noMsg, strMsg, throwError)
+import Control.Monad.Identity           (Identity, runIdentity)
+import Control.Monad.Writer             (Writer, runWriter, tell)
 
 import Data.Bits
-import qualified Control.Monad.State as St
-import Control.Monad.Trans (lift)
-import Maybe (fromJust)
-import List  (unfoldr)
-import qualified Data.Map as Map
+import qualified Control.Monad.State    as St
+import Control.Monad.Trans              (lift)
+import Maybe                            (fromJust)
+import List                             (unfoldr, partition)
+import qualified Data.Map               as Map
 
-import SashoLib (maybeLookup, (<<), ilog2, unfoldrM, Stack(..))
-import qualified Container as Cont
+import SashoLib                         (maybeLookup, (<<), ilog2, unfoldrM,
+                                         Stack(..), mapTuple2)
+import qualified Container              as Cont
 
 import Common
 import Intermediate
-import HoistStms hiding (popScope, pushScope)
+import HoistStms                        hiding (popScope, pushScope)
 
-import qualified TypeChecker as Tc
+import qualified TypeChecker            as Tc
 
 
 
@@ -91,11 +92,12 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
     where unrollAss scope (SAss lv e@(EFunCall nm args)) =
               do (Func name locals t form_args stms) <- extractFunc nm
                  let                      -- pair up the formal vars and their values
-                     arg_complex = zip form_vars args
-                     -- split up reference and non-ref args, and ditch the formal var type
-                     -- annotations
+                     arg_complex = zip form_args args
+
+                     -- split up reference and non-ref args, ditch the formal var type
+                     -- annotations, and make var's from the formal names
                      (ref_args,
-                      nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (nm,val))) $
+                      nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (formarg2var scope nm,val))) $
                                       partition (isRefType . snd . fst) $
                                       arg_complex
 {-
@@ -106,28 +108,30 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                      stms'      = map (scopeVars locals scope) stms
                                         `trace`
                                         ("unroll func: name = " << nm <<
-                                         "; non ref locals = " << non_ref_locals <<
+                                         "; locals = " << locals <<
                                          "; scope = " << scope)
-                     -- replace reference local vars with their referrents
-                     stms''     = map (\refvar -> map subst refvar ) $
-                                  map formarg2var ref_args
 
-                     form_vars  = map formarg2var form_args
-             
-                     -- assignments to the non-ref formal params
+                     -- replace reference local vars with their referrents
+                     stms''     = map (\stm -> foldl (\s (var,val) -> subst var val s)
+                                                     stm
+                                                     ref_args)
+                                      stms'
+
+                     -- assignments to the non-ref formal params from their values
                      ass's      = [SAss (EVar formarg)
-                                        actual_arg      | (formarg,actual_arg)
-                                                            <- map formarg2var non_ref_args]
+                                        actual_arg      | (formarg,actual_arg) <- nonref_args]
+
                      -- assignment to lval from the function return parameter
                      retass     = [SAss lv (fcnRetVar nm scope)]
-                 return $ ass's ++ stms' ++ retass
+
+                 return $ ass's ++ stms'' ++ retass
 
           -- NOTE: this is how formal param vars in the function body are
           -- marked in TypeChecker.hs, except there is no scope to deal with
           -- there. Now, want to re-generate those vars in order to assign them
           -- the actual param values, or replace them in the case of reference
           -- args.
-          formarg2var (name,typ) = addScope scope $ Tc.name2var [FormalParam] name)
+          formarg2var scope name = addScope scope $ Tc.name2var [FormalParam] name
 
 
 
