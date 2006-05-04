@@ -97,9 +97,7 @@ data Typ =
  | BoolT
  | VoidT
  | StructT ([TypedName],        -- fields' name and type
-             [FieldLoc],        -- fields' location (offset and
-                                --     length) in primitive units
-             [FieldLoc])        -- fields' location in bytes
+             [FieldLoc])        -- fields' locations
                     
  | EnumT String Int             -- name and bitsize. the identifiers are in the
                                 -- global var table as instances of
@@ -131,9 +129,15 @@ data Stm =
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord)
 
+
 -- an offset-length pair (in units of "primitive types", ie Int, Enum
 -- and Bool) describing the location of a field in a struct
-type FieldLoc = (Int,Int)
+data FieldLoc = FieldLoc { byteloc :: (Int,Int), -- offset and length
+                           valloc  :: (Int,Int) }
+                deriving (Eq,Ord,Show)
+
+-- type FieldLoc = (Int,Int)
+
 
 data Exp =
    EVar Var
@@ -306,10 +310,9 @@ expandType t =
                            len)         -> do elem_t' <- expandType elem_t
                                               return $ ArrayT elem_t' len
                 (StructT (name_typs,
-                          s2,
-                          s3))          -> do let (names,typs)   = unzip name_typs
+                          locs))        -> do let (names,typs)   = unzip name_typs
                                               typs'             <- mapM expandType typs
-                                              return $ StructT (zip names typs', s2, s3)
+                                              return $ StructT (zip names typs', locs)
 
                 (RefT t)                -> do t'    <- expandType t
                                               return $ RefT t'
@@ -320,8 +323,8 @@ expandType t =
 -- for a structure, get a field name given the number
 -- TODO: may need to expand the type in case of a type alias which points to a struct
 -- type.
-getFieldName (StructT (names,_,_))  fld_idx = fst $ names !! fld_idx
-getFieldName t                      _       = "getFieldName called on non-struct type "
+getFieldName (StructT (names,_))  fld_idx = fst $ names !! fld_idx
+getFieldName t                    _       = "getFieldName called on non-struct type "
                                               ++ show t
 
 
@@ -334,7 +337,7 @@ typeLength f t =
     case t of
       (StructT fields)          -> sum $
                                    map (rec . snd) $
-                                   tup3_get1 fields
+                                   fst fields
       (SimpleT name)            -> error $ "Intermediate: typeLength of a SimpleT "
                                            << name
       -- NOTE: dynamic arrays take up just one gate, hence always one
@@ -345,10 +348,10 @@ typeLength f t =
       
 
 -- extract some of the parameters of a StructT, given the whole parameter tuple
--- the field locations:
-getStrTLocs     = tup3_get2
--- the locations in bytes
-getStrTByteLocs = tup3_get3
+-- the location in words:
+getStrTLocs     (_, locs)    = map valloc locs
+-- the location in bytes:
+getStrTByteLocs (_, locs)    = map byteloc locs
 
 
 -- byte-lengths of primitive types    
@@ -356,7 +359,7 @@ tblen (IntT _)          = 4
 tblen (BoolT)           = 1
 tblen (EnumT _ bits)    = bits `divUp` 8
 
-array_blen = 4::Int
+cARRAY_BLEN = 4::Int
 
 
 ------------------------
@@ -729,7 +732,7 @@ docTyp t =
       (BoolT)           -> text "bool"
       (VoidT)           -> text "void"
       (StructT (fields,
-                _, _ )) -> sep [text "struct",
+                _    )) -> sep [text "struct",
                                      braces $ sep $
                                      punctuate (text ",") $
                                      map docTypedName fields]
@@ -750,7 +753,7 @@ docTypMachine t =
     -- (int,bool) in its element type
       (ArrayT t size)   -> let size_i   = evalStaticOrDie size
                                size_elt = case t of
-                                            (StructT (_,locs,_))    -> length locs
+                                            (StructT (_,locs  ))    -> length locs
                                             _                       -> 1
                            in  sep [text "array", integer size_i, int size_elt]
       _                 -> text "scalar"

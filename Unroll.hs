@@ -100,22 +100,12 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                       nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (formarg2var scope nm,val))) $
                                       partition (isRefType . snd . fst) $
                                       arg_complex
-{-
-                     non_ref_locals = filter (\locvar -> any (== locvar) ref_args)
-                                             (Cont.toList locals)
--}
-                     -- add the local scope to *all* local var occurances
-                     stms'      = map (scopeVars locals scope) stms
-                                        `trace`
-                                        ("unroll func: name = " << nm <<
-                                         "; locals = " << locals <<
-                                         "; scope = " << scope)
 
-                     -- replace reference local vars with their referrents
-                     stms''     = map (\stm -> foldl (\s (var,val) -> subst var val s)
-                                                     stm
-                                                     ref_args)
-                                      stms'
+                     -- prepare the statements
+                     stms'      = removeRefQuals .
+                                  replaceRefs ref_args .
+                                  addLocalScope scope locals $
+                                  stms
 
                      -- assignments to the non-ref formal params from their values
                      ass's      = [SAss (EVar formarg)
@@ -124,7 +114,7 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                      -- assignment to lval from the function return parameter
                      retass     = [SAss lv (fcnRetVar nm scope)]
 
-                 return $ ass's ++ stms'' ++ retass
+                 return $ ass's ++ stms' ++ retass
 
           -- NOTE: this is how formal param vars in the function body are
           -- marked in TypeChecker.hs, except there is no scope to deal with
@@ -132,6 +122,20 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
           -- the actual param values, or replace them in the case of reference
           -- args.
           formarg2var scope name = addScope scope $ Tc.name2var [FormalParam] name
+
+          -- add the local scope to *all* local var occurances
+          addLocalScope scope locals stms  = map (scopeVars locals scope) stms
+                                                 `trace`
+                                                 ("unroll func: name = " << nm <<
+                                                  "; locals = " << locals <<
+                                                  "; scope = " << scope)
+          -- replace reference local vars with their referrents
+          replaceRefs ref_args  = map (\stm -> foldl (\s (var,val) -> subst var val s)
+                                                     stm
+                                                     ref_args)
+          -- remove RefT's in ExpT annotations (as the actual refs are already removed by
+          -- replaceRefs)
+          removeRefQuals        = map stmStripRefQual
 
 
 
@@ -260,6 +264,14 @@ substExp :: Var -> Exp -> Exp -> Exp
 substExp var val exp = mapExp f exp   -- `trace` ("try substExp " << var << " for " <<  val)
     where f (EVar var2) | var2 == var   = val    -- `trace` ("substExp " << var2 << " -> " << val)
           f e                           = e
+
+
+-- remove all RefT's in an Stm
+stmStripRefQual = mapStm id f_e
+    where f_e = mapExp f
+          -- remove RefT's in an Exp
+          f (ExpT (RefT t) e)   = (ExpT t e)
+          f e                   = e
 
 
 ------------------

@@ -264,8 +264,12 @@ checkTyp (T.StructT fields)     = do im_fields      <- mapM checkTypedName field
                                          offs       = init $ scanl (+) 0 lens
                                          byteoffs   = init $ scanl (+) 0 bytelens
                                          fields'    = (im_fields,
-                                                       zip offs lens,
-                                                       zip byteoffs bytelens)
+                                                       [Im.FieldLoc { Im.valloc = (off,len),
+                                                                      Im.byteloc = (boff,blen) }
+                                                        | off <- offs
+                                                        | len <- lens
+                                                        | boff <- byteoffs 
+                                                        | blen <- bytelens])
                                      return $ Im.StructT fields'
                                     
 checkTyp (T.ArrayT t sizeExp)   = do im_t       <- checkTyp t
@@ -358,7 +362,7 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
     where check arr@(Im.ExpT arr_t _) idx =
               do checkIdx idx
                  arr_t_full <- Im.expandType arr_t
-                 case arr_t of
+                 case (Im.stripRefQual arr_t) of
                    (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx)    )
                    (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx) )
                    _                  -> throwErr 42 ( "Array " << arr << " in " << e
@@ -384,7 +388,7 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
          -- find the field in this struct's definition
     where check (Im.StructT fields_info) new_str =
               do -- get just the [TypedName]
-                 let (fields,_,_) = fields_info
+                 let (fields,_)    = fields_info
                  case lookup fieldname fields of
                           (Just t) -> do let field_idx = fromJust $
                                                          findIndex ((== fieldname) . fst) $
@@ -501,13 +505,15 @@ mkVarInits local_table = do let varlist  = Map.toList local_table
           mkInit (name,t,lval)
               = trace ("mkInit " << lval << "::" << t) $
                             case t of
+                              -- NOTE: scalar default values defined here!
                               (Im.IntT i)          -> return [ass lval 0 t]
                               (Im.BoolT)           -> return [ass lval (Im.lbool False) t]
           -- for a struct, we first add an SAss for the whole struct,
           -- using Im.EStructInit,
           -- and then individual SAss for each member, recursively
                               (Im.StructT fields_info)    ->
-                                  do let (fields, locs, _)  = fields_info
+                                  do let (fields, flocs)    = fields_info
+                                         locs               = map Im.valloc flocs
                                          (_,lens)           = unzip locs
                                      inits <- zipWithM (mkStruct lval t)
                                                        fields

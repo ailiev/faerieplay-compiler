@@ -26,10 +26,12 @@ import Data.Bits        ((.&.), (.|.), xor, shiftL, shiftR)
 
 import Text.Printf      (printf)
 
+import Text.PrettyPrint                         as PP
+
 import SashoLib
 
 import CircGen
-import Intermediate
+import Intermediate                             as Im
 
 
 
@@ -40,10 +42,28 @@ type ValArrayType = Maybe GateVal
 -- produce NodeFunc's for each gate, which is a simple map.
 -- go through graph with BFS and do the funcs
 
-formatRun gates ins = do out <- run gates ins
-                         return $ map printOuts out
-    where printOuts (num, (op,flags), ins, mb_val) =
-                                                  printf "%-6d%-16s%-8s%-30s%s"
+formatRun gates ins = do outs <- run gates ins
+                         return $ map printOuts $ zip gates outs
+    where printOuts ( gate, (ins, mb_val) ) =
+              let flags     = gate_flags gate
+                  flagsStr  = if null flags then "" else show flags
+                  insStr    = concat . intersperse ", " . map show $ ins
+                  valStr    = if (elem Output flags)
+                              then show_mb_val mb_val
+                              else show_mb_val mb_val
+                  doc       = PP.hsep   [PP.int (gate_num gate),
+                                         PP.text $ show $ gate_op gate,
+                                         PP.text flagsStr,
+                                         PP.parens . PP.hcat . PP.punctuate PP.comma .
+                                             map PP.int . gate_inputs $
+                                             gate]                                      $$
+                              PP.nest 6
+                                    (PP.text insStr $$
+                                     PP.text valStr)
+              in
+                PP.render doc
+{-
+              printf "%-6d%-16s%-8s%-30s%s"
                                                     num
                                                     (show op)
                                                     (if null flags then "" else show flags)
@@ -51,6 +71,7 @@ formatRun gates ins = do out <- run gates ins
                                                     (if (elem Output flags)
                                                      then show_mb_val mb_val
                                                      else show_mb_val mb_val)
+-}
           show_mb_val Nothing   = "Nothing"
           show_mb_val (Just v)  = showsValDetail 0 v ""
 
@@ -71,11 +92,8 @@ run gates ins   = do let range = (0, length gates - 1)
                      vals_sorted <- mapM (MArr.readArray valArr) gate_idxs
                      -- the inputs to each gate
                      inputs      <- mapM (mapM (MArr.readArray valArr)) (map gate_inputs gates)
-                     return $ zip4 gate_idxs
-                                   (map (pair2 gate_op gate_flags)
-                                        (gates))
-                                   inputs
-                                   vals_sorted
+                     return $ zip inputs
+                                  vals_sorted
 
 -- get the input values
 -- getInputs vals in_idxs = mapM (MArr.readArray vals) in_idxs
@@ -265,27 +283,52 @@ gate2func Gate { gate_op = op,
                                                                    m_vs
                                                   return ans
 
-        WriteDynArray _     -> \(v_arr:
-                                 v_idx:
-                                 v_val1:_)  -> do VArr arr              <- v_arr
-                                                  VScalar (ScInt idx)   <- v_idx
-                                                  if not $ inRange (bounds arr) idx
-                                                    then fail "" -- the string is ignored
-                                                    else return $ VArr $ arr // [(idx, v_val1)]
-
+        -- this puts in an arbitrary value of 0, don't have information on what the array
+        -- type actually is, the proper writes should set that up.
         InitDynArray _ len  -> \[]          -> return $
                                                VArr $ listArray (0,len-1)
                                                                 (repeat (Just $ VScalar $ ScInt 0))
+
+        WriteDynArray slice -> \(v_arr:
+                                 v_idx:
+                                 v_vals)    -> do VArr arr              <- v_arr
+                                                  -- turn v_vals into a GateVal, using
+                                                  -- VList if needed
+                                                  -- For now, always
+                                                  val                   <- return $ VList v_vals
+                                                  let (off,len)         = Im.valloc slice
+                                                  ( do VScalar (ScInt idx)   <- v_idx
+                                                       let new_val = if (off,len) == (0,-1)
+                                                                     then val
+                                                                     -- elements must be
+                                                                     -- lists if a slice is specified
+                                                                     else let Just (VList vals) = arr ! idx
+                                                                          in
+                                                                            VList $ splice (off,len) v_vals vals
+                                                       if not $ inRange (bounds arr) idx
+                                                        then fail ""
+                                                        else return $ VArr $ arr // [(idx, Just new_val)] )
+                                                     `catchError` -- if v_idx is Nothing
+                                                                  -- or out of range
+                                                     ( const $ return $ VArr arr )
+
         ReadDynArray        -> \[v_arr,
                                  v_idx]     -> do VArr arr              <- v_arr
-                                                  let ans               =  Just $ VArr arr
-                                                  VScalar (ScInt idx)   <-
-                                                      v_idx `catchError`
-                                                            const (return $ VList [ans,Nothing])
-                                                  return $ VList [ans,
-                                                                  if not $ inRange (bounds arr) idx
-                                                                  then Nothing
-                                                                  else arr ! idx]
+                                                  let ans_arr           =  Just $ VArr arr
+                                                  -- if the index is Nothing or out of range, the value is
+                                                  -- Nothing
+                                                  let val = (do VScalar (ScInt idx)   <- v_idx
+                                                                val    <- if not $ inRange (bounds arr) idx
+                                                                            then fail ""
+                                                                            else arr ! idx
+                                                                return val
+                                                            )
+                                                      -- extract out of a VList
+                                                      -- FIXME: rather awkward
+                                                      vals = case val of Just (VList vs)    -> vs
+                                                                         Nothing            -> [Nothing]
+                                                                         Just v             -> [Just v]
+                                                  return $ VList (ans_arr:vals)
 
         Input               -> \[]          -> return Blank
 
@@ -381,7 +424,7 @@ showsVal p g = case g of
                       Blank     -> str "Blank"
                       VScalar s -> rec s
                       VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
-                      VList l   -> showList l
+                      VList l   -> str "vl " . showList l
         where rec x = showsPrec p x
               str   = (++)
 

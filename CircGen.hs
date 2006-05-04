@@ -82,7 +82,7 @@ data Op =
 
   -- initialize an array
   -- parameters:
-  -- 1) element size
+  -- 1) element size in bytes
   -- 2) number of elems
   | InitDynArray Int Integer
 
@@ -93,7 +93,7 @@ data Op =
   -- The input will consist of multiple gates in case of a complex
   -- type, and the runtime can just concat the values to get a lump to
   -- write to the (sliced) array location
-  | WriteDynArray (Int,Int)
+  | WriteDynArray Im.FieldLoc
 
   -- an input gate for a primitive type, IntT or BoolT
   | Input
@@ -109,6 +109,7 @@ data Op =
   -- into separate gates
   -- for internal use, want to also keep a more high-level interpretation: offset and
   -- length in GateVal's
+  -- TODO: have the Slicer gate use a FieldLoc parameter to describe the slice
   | Slicer (Int,Int)            -- ^ The byte locations
            (Int,Int)            -- ^ GateVal locations
 
@@ -119,7 +120,7 @@ data Op =
  deriving (Eq)
 
 
---          
+--
 
 -- QUESTION: do we include as part of Gate the numbers of the input
 -- Gate's? That info should be available in the graph structure, BUT
@@ -236,10 +237,10 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
               let (ins, others) = List.partition ((== Input) . gate_op)
                                                  gates
               in  ins ++ others
-                         
 
 
--- | remove the nodes (and associate edges) not in 'keeps' from 'g'. 
+
+-- | remove the nodes (and associate edges) not in 'keeps' from 'g'.
 keepNodes :: Gr.Graph gr => [Gr.Node] -> gr a b -> gr a b
 keepNodes keeps g = Gr.delNodes (Gr.nodes g \\ keeps) g
 
@@ -271,7 +272,7 @@ createInputGates addvars (name, typ) =
     do let var         = add_vflags [FormalParam] (VSimple name)
        type_table      <- getTypeTable
        case typ of
-        (StructT (fields,_,_))
+        (StructT (fields,_))
                 -> do gates <- concatMapM (createInputGates False) fields
                       let is = map gate_num gates
                       if addvars then setVarAddrs is var else return ()
@@ -292,7 +293,7 @@ createInputGates addvars (name, typ) =
                           else return ()
                         -- FIXME: this adds an incorrect doc
                         -- annotation to the gate - it show struct
-                        -- field names as variable names 
+                        -- field names as variable names
                         gate <- mkGate i typ (EVar var)
                         return [gate]
 
@@ -319,11 +320,6 @@ genComplexInit lval size =
       _                 -> return ()
 
 
--- update a range (offset and length) of a list.
--- more precisely, replace the range (offset,len) with 'news' (regardless of its length)
-splice (offset,len) news l = (take offset l) ++
-                             news ++
-                             (drop (offset + len) l)
 
 
 -- get the gates corresponding to expression 'e', if necessary adding
@@ -359,7 +355,7 @@ genExpWithDoc c ghook e e_doc =
                                 let c'' = foldl (updateLabel processGate)
                                                 c'
                                                 nodes
-                                              
+
                                 in  (c'', nodes)
        return (c'', nodes)
 
@@ -382,9 +378,10 @@ updateCtxLab new_label = tup4_proj_3 (const new_label)
 -- the 'loc_extr' parameter is a function which specifies which struct
 -- locations we use, primitive type (getStrTLocs) or byte (getStrTByteLocs)
 
-getRootvarOffset :: (TypeTableMonad m) =>
-                    ( ([TypedName], [FieldLoc], [FieldLoc]) -> [FieldLoc] ) ->
-                    Exp ->
+getRootvarOffset :: (TypeTableMonad m)                  =>
+                    ( ([TypedName], [FieldLoc]) -- the params of a StructT
+                          -> [(Int,Int)] )              ->
+                    Exp                                 ->
                     m (Var, Int)
 getRootvarOffset loc_extr exp =
     do let rec = getRootvarOffset loc_extr
@@ -402,7 +399,7 @@ getRootvarOffset loc_extr exp =
         e                   -> error $
                                "CircGen: getRootvarOffset: invalid lval "
                                << e
-                                                      
+
 
 -- get the field parameters of a StructT, from the expression carrying the struct
 getStrTParams      (ExpT t _)   = do (StructT field_params)  <- expandType t
@@ -418,7 +415,7 @@ genStm circ stm =
 
       -- do away with lval type annotations for now
       (SAss (ExpT _ lval) val) -> genStm circ (SAss lval val)
-             
+
       -- this is a message from the typechecker that a Struct or such
       -- will be coming along just now.
       (SAss lval (ExpT _ (EStructInit size))) ->
@@ -440,14 +437,13 @@ genStm circ stm =
 
       -- get the gates for this 'val', and set the address of 'lval'
       -- to those gates
-      
+
       s@(SAss lval@(EStruct str_e idx) val) ->
          {-# SCC "stm-ass-estruct" #-}
           do type_table    <- getTypeTable
-             (_,locs,_)    <- getStrTParams str_e
-             let (off,len)  = locs !! idx
-                               -- (off,len) are in primitive types, not bytes
-             (rv,lval_off)  <- getRootvarOffset tup3_get2 lval
+             (_,locs)      <- getStrTParams str_e
+             let (off,len)  = valloc $ locs !! idx
+             (rv,lval_off)  <- getRootvarOffset getStrTLocs lval
              c2             <- checkOutputVars circ rv (Just (lval_off,len))
              (c3, gates)    <- genExpWithDoc c2
                                              (addOutputFlag rv)
@@ -458,24 +454,27 @@ genStm circ stm =
                Nothing              -> -- just update the lval location(s)
                                        do spliceVar (lval_off,len) gates rv
                                           return c3
-               Just ((EArr arr_e idx_e), arr_off, blocs)
+               Just ((EArr arr_e idx_e), arr_off, locs)
                                     -> -- need to generate a WriteDynArray gate!
                                        -- eg: for x.y[i].z, we will:
                                        -- - add a WriteDynArray gate for x.y, limited to .z
-                                       -- - update one of x's gates (the array gate)
+                                       -- - update the gate location for x.y
                                        {-# SCC "have array in expression" #-}
                                        do (c4, [arr_n]) <- genExp c3 arr_e
                                           (c5, [idx_n]) <- genExp c4 idx_e
                                           depth         <- getDepth
                                           i             <- nextInt
-                                          let (ExpT arr_t _)  = arr_e
-                                              total_blen = sum $ map snd blocs
-                                              boff       = fst $ head blocs
+                                          let prep_slice locs   = (fst $ head locs, sum $ map snd locs)
+                                              -- get the slice parameters from the field
+                                              -- location info given by extractEArr above
+                                              slice             = Im.FieldLoc
+                                                                  { byteloc = prep_slice $ map Im.byteloc locs,
+                                                                    valloc  = prep_slice $ map Im.valloc  locs }
+                                              (ExpT arr_t _)    = arr_e
                                               ctx        = mkCtx $
                                                            Gate i
                                                                 arr_t
-                                                                (WriteDynArray (boff,
-                                                                                total_blen))
+                                                                (WriteDynArray slice)
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 depth
                                                                 [] []
@@ -488,7 +487,7 @@ genStm circ stm =
 
       -- quite similar to the above. really need to structure this better
       s@(SAss lval@(EArr arr_e idx_e) val) ->
-          {-# SCC "stm-ass-earr" #-} 
+          {-# SCC "stm-ass-earr" #-}
           do (rv,off)           <- getRootvarOffset getStrTLocs arr_e
              -- generate gates for the rval
              (c3, gates)        <- genExpWithDoc circ
@@ -506,14 +505,15 @@ genStm circ stm =
                                    (mkCtx $ Gate i
                                                  arr_t
                                                  -- NOTE: writing -1 here to mean "the end"
-                                                 (WriteDynArray (0, -1))
+                                                 (WriteDynArray $ Im.FieldLoc (0,-1) (0,-1))
                                                  ([arr_n, idx_n] ++ gates)
                                                  depth
                                                  [] [])
              spliceVar (off,1) [i] rv
-             return $ {-# SCC "ctx & c5" #-} (ctx & c5) {- `trace`
-                        ("SAss to EArr: circuit now = " ++ show c5 ++
-                         "; inserting " ++  show ctx) -}
+             return $ {-# SCC "ctx & c5" #-} (ctx & c5)
+                        `trace`
+                        ("SAss to EArr: \"" ++ show stm ++  "\"; circuit now = " ++ show c5 ++
+                         "\n; inserting " ++ show ctx)
 
 
       -- NOTE: after HoistStm.hs, all conditional tests are EVar
@@ -549,14 +549,16 @@ genStm circ stm =
                                       depth             <- getDepth
                                       let (t,var) = case (x `trace` "SPrint x = " << x) of
                                                      (ExpT t (EVar v))   -> (t,v)
-                                                     _                   -> error "SPrint got a non-var"
+                                                     _                   -> error ("SPrint \"" << prompt
+                                                                                   << "\" got a non-var: "
+                                                                                   << x)
                                       t_full <- expandType t
                                       let (ts, locs, blocs)    = case t_full of
-                                                                     (StructT (tn's, locs, blocs))
+                                                                     (StructT (tn's, locs))
                                                                          -> (map snd tn's,
-                                                                             locs,
-                                                                             blocs)
-                                                                     _   
+                                                                             map Im.valloc locs,
+                                                                             map Im.byteloc locs)
+                                                                     _
                                                                          -> ([t_full], [(0,1)], [(0,1)])
                                           slicer_ctxs = [mkCtx $
                                                          Gate si t (Slicer bloc loc) [i] depth [] []
@@ -566,7 +568,7 @@ genStm circ stm =
                                                               | loc     <- locs]
 
                                       setVarAddrs slice_is var
-                                                               
+
                                       let ctx           = mkCtx $ Gate i
                                                                        t
                                                                        (Print prompt)
@@ -574,10 +576,10 @@ genStm circ stm =
                                                                        depth
                                                                        []
                                                                        []
-                                          
+
                                       return $ addCtxs circ' (ctx:slicer_ctxs)
-                                                               
-                                                               
+
+
 
       s -> error $ "Unknow genStm on " << s
 
@@ -595,42 +597,46 @@ genStm circ stm =
 -- then, the outputs are
 -- ( the array expression x.y[i],
 --   the offset of .y under x,
---   the (byte offset, byte len)'s of .z under x.y[i]
+--   the SliceAddr's of .z under x.y[i]
 -- )
 -- return Nothing if there is no array subexpression
 extractEArr :: (TypeTableMonad m) => Exp -> m ( Maybe (Exp,
                                                        Int,
-                                                       [(Int,Int)]) 
+                                                       [Im.FieldLoc])
                                               )
 extractEArr = runMaybeT . extractEArr'
 
 -- the typechecker actually inferred a more general type on its own...
 extractEArr'    :: (TypeTableMonad m) => Exp -> MaybeT m (Exp,
                                                           Int,
-                                                          [(Int,Int)]) 
+                                                          [Im.FieldLoc])
 extractEArr' (ExpT elem_t exp@(EArr arr_e idx_e)) =
-    do  (blocs,_)   <- lift $ getTypByteLocs elem_t
-                              -- here we need the offset in primitive types
-        (rv,off)    <- lift $ getRootvarOffset getStrTLocs arr_e
-        return (exp, off, blocs)
+    do  (locs,_)   <- lift $ getTypLocs elem_t
 
--- get a recursive answer and return just the slice of this field
+        -- here we need the offset in words (int/bool)
+        (rv,off)    <- lift $ getRootvarOffset getStrTLocs arr_e
+        return (exp, off, locs )
+
+-- get a recursive answer and return just the slice of this field (idx)
 extractEArr' e@(EStruct str_e idx) =
               do (arr_exp,arr_off,sublocs) <- extractEArr' str_e
-                 (_,locs,_)                <- lift $ getStrTParams str_e
-                 let (off,len)              = locs !! idx
+                 -- this struct's field locations
+                 (_,locs)                  <- lift $ getStrTParams str_e
+                 -- pick out the location (in words) for this field
+                 let (off,len)              = Im.valloc $ locs !! idx
                  return (arr_exp,
                          arr_off,
                          (take len $ drop off sublocs))
                             `trace`
-                                ("extractEArr (" << e << ")" <<
+                                ("extractEArr' (" << e << ")" <<
                                  "; sublocs=" << sublocs <<
                                  "; off=" << off <<
                                  "; len=" << len)
 
 extractEArr' (ExpT _ e) = extractEArr' e
 
--- if we hit a primitive expression, there's no array in the exp.
+-- if we hit a primitive expression, there's no array in the exp. This ends up returning
+-- Nothing, not causing a runtime error.
 extractEArr'   e        = fail ""
 
 
@@ -642,7 +648,7 @@ extractEArr'   e        = fail ""
 -- optionally an offset and length to limit the flag removal to some
 -- of the gates, in case only part of a complex output var is being
 -- modified.
-checkOutputVars :: Circuit -> Var -> Maybe FieldLoc -> OutMonad Circuit
+checkOutputVars :: Circuit -> Var -> Maybe (Int,Int) -> OutMonad Circuit
 checkOutputVars c var mb_gate_loc
     | strip_var var == VSimple "main" =
         -- remove the output flags there
@@ -651,14 +657,9 @@ checkOutputVars c var mb_gate_loc
              Nothing        -> return c
              Just vgates    ->
                  -- take a slice of the gates if mb_gate_loc is not Nothing
-                 do let vgates' = case mb_gate_loc of
-                                    Nothing          -> vgates
-                                    (Just (off,len)) -> (take len $ drop off vgates)
-                                                           `trace`
-                                                           ("checkOutputVars (off,len)="
-                                                            << (off,len) <<
-                                                            "; vgates=" << vgates)
-
+                 do let vgates' = maybe vgates
+                                        (\(off,len) -> take len $ drop off vgates)
+                                        mb_gate_loc
                         -- and update the Gate flags on those gates
                         -- FIXME: for now we just strip the flags, which may be excessive
                         -- when more flags are introduced.
@@ -678,7 +679,7 @@ updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
                               Just ctx  -> (tup4_proj_3 f ctx) & gr'
 
 
-                            
+
 
 -- generate the gates needed when exiting a conditional block---to
 -- conditionally update free variables updated in this scope
@@ -696,7 +697,7 @@ genCondExit testGate
         sources = (map varSources vars) `trace` ("non-local scope vars: " << vars)
 
     in  foldM addSelect circ $ zip vars sources
-          
+
     where -- a var is non-local if was not declared in this scope,
           -- *and* it appears in the parent scope (needed in the case of
           -- generated vars)
@@ -710,7 +711,7 @@ genCondExit testGate
 
           notTemp (VTemp _) = False
           notTemp _         = True
-                          
+
           -- return a pair with the the gate numbers where this var
           -- can be found, if the cond
           -- is true, and if it's false. This depends on which branch
@@ -722,7 +723,7 @@ genCondExit testGate
                                        [False, True]       -> (parentScope, [elseScope]))
                                out   @(gates_true, gates_false) = mapTuple2 (gates var)
                                                                             scopes
-                                    
+
                            in  out `trace` ("varSources for " << var << ": "
                                             << out)
 
@@ -806,7 +807,7 @@ genExp c e = do (c', res) <- genExp' c e
                                                gateNums)
                                           `trace`
                                        ("genExp returning nodes " << gateNums)
-                  
+
 
 -- this one is a little nasty - it returns the expanded circuit, and:
 -- Left:    the context for this expression, which can be processed and
@@ -826,7 +827,7 @@ genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
                                                   [Gr.Node]))
 genExp' c exp =
  do depth <- getDepth
-    case exp `trace` ("genExp' " << stripExpT exp) of
+    case exp `trace` ("genExp' " << exp) of
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1, gates1) <- genExp c   e1
                               let gate1 = case gates1 of
@@ -852,11 +853,11 @@ genExp' c exp =
                               gates <- (getsVars $
                                         fromJustMsg ("CircGen: Lookup Var " << var) .
                                         maybeLookup var)
-                                            
+
                               return (c, Right gates)
-{-                                         `trace`
-                                     ("genExp' EVar " << var << ", vartable=" << var_table <<
-                                      " -> " << gates) -}
+                                         `trace`
+                                         ("genExp' EVar " << var << ", vartable=" << var_table <<
+                                          " -> " << gates)
 
       (ELit l)          -> do i         <- nextInt
                               let ctx   = mkCtx (Gate i VoidT (Lit l) [] depth [] [])
@@ -876,10 +877,10 @@ genExp' c exp =
                                 (Right node)    ->
                                     return (c', res)
 
-      (EStruct str_e idx) -> 
+      (EStruct str_e idx) ->
                            do (c', gates)       <- genExp c str_e
-                              (_,locs,_)        <- getStrTParams str_e
-                              let (off,len)      = locs !! idx
+                              (_,locs)          <- getStrTParams str_e
+                              let (off,len)      = Im.valloc $ locs !! idx
                               return (c', Right $ take len $ drop off gates)
 
       (EArr arr_e idx_e) ->
@@ -905,23 +906,23 @@ genExp' c exp =
                                                                   [arr_n, idx_n]
                                                                   depth
                                                                   [] [])
-                              (e_locs,e_typs)      <- getTypByteLocs elem_t
+                              (e_locs,e_typs)      <- getTypLocs elem_t
                               -- build the array pointer slicer gate. it will get the new
-                              -- array pointer value in the first array_blen bytes of the
+                              -- array pointer value in the first cARRAY_BLEN bytes of the
                               -- ReadDynArray output.
-                              arrptr_n            <- nextInt
+                              arrptr_n             <- nextInt
                               let arr_ptr_ctx      = mkCtx $ Gate arrptr_n
                                                                   arr_t
-                                                                  (Slicer (0, array_blen)
+                                                                  (Slicer (0, cARRAY_BLEN)
                                                                           (0, 1))
-                                                                  [readarr_n] 
+                                                                  [readarr_n]
                                                                   depth
                                                                   [] []
-                              -- add array_blen to all the offsets, as the array pointer
+                              -- add cARRAY_BLEN to all the byte offsets, as the array pointer
                               -- will be output first by the ReadDynArray gate
-                              let e_locs'           = map (projFst (+ array_blen)) e_locs
+                              let e_blocs'           = map (projFst (+ cARRAY_BLEN)) $ map Im.byteloc e_locs
                               -- slicer gates
-                              is <- replicateM (length e_locs') nextInt
+                              is <- replicateM (length e_blocs') nextInt
                               let slicer_ctxs = map mkCtx [Gate i
                                                                 t
                                                                 (Slicer (boff,blen)
@@ -929,7 +930,7 @@ genExp' c exp =
                                                                 [readarr_n]
                                                                 depth
                                                                 [] [] | i           <- is
-                                                                      | (boff,blen) <- e_locs'
+                                                                      | (boff,blen) <- e_blocs'
                                                                       | off         <- [1..]
                                                                       | t           <- e_typs]
 
@@ -976,37 +977,20 @@ mkCtx g@(Gate node _ _ srcs _ _ _) = let ctx = (map uAdj srcs,
 
 
 
--- get the ordered list of types in this type (complex or not)
-getStructFieldTypes :: (TypeTableMonad m) => Typ -> m [Typ]
-getStructFieldTypes t =
+
+-- return a type's list of contained types and their locations
+getTypLocs :: (TypeTableMonad m) => Typ -> m ([FieldLoc], [Typ])
+getTypLocs t =
     do t_full <- expandType t
        return $ case t_full of
-                  (StructT (fields,_,_))    -> map snd fields
-                  t                         -> [t]
-
-
--- return the Struct type's list of types and offsets.
--- For a scalar type t return [(0,t)]
--- WARN: uses GHC extension "parallel list comprehension"
-getStructFieldLocs :: (TypeTableMonad m) => Typ -> m [(Int, Typ)]
-getStructFieldLocs t = 
-    do t_full <- expandType t
-       return $ case t_full of
-                  (StructT (namedtypes,_,fieldlocs))    -> zip (map fst fieldlocs) (map snd namedtypes)
-                  t                                     -> [(0,t)]
-
-
-
--- similar to above but the locations (offset-length) are in bytes
-getTypByteLocs :: (TypeTableMonad m) => Typ -> m ([FieldLoc], [Typ])
-getTypByteLocs t =
-    do t_full <- expandType t
-       return (case t_full of
-                  (StructT (fields,_,bytelocs))  ->
+                  (StructT (fields,locs))  ->
                       let types          = map snd fields
-                      in  (bytelocs, types)
-                  t                              ->
-                          ([(0, tblen t)], [t]))
+                      in  (locs, types)
+                  t                        ->
+                      ([Im.FieldLoc { Im.valloc =(0, 1),
+                                      Im.byteloc=(0, tblen t) }], [t])
+
+
 
 -- make an unlabelled edge
 uAdj n = ((), n)
@@ -1030,7 +1014,7 @@ type MyState = ([VarTable],     -- stack of table Var -> [Node]
                                 -- sequentially
                 TypeTable       -- the type table is read-only, so
                                 -- could be in a Reader, but easier to
-                                -- stick it in here 
+                                -- stick it in here
                )
 {-
 instance St.MonadState Int (St.State MyState) where
@@ -1077,6 +1061,9 @@ setVarAddrs new_gates = updateVar (const new_gates)
 spliceVar loc@(off,len) new_gates var = updateVar (splice loc new_gates .
                                                    fromJustMsg ("spliceVar " << var))
                                                   var
+                                          `trace`
+                                          ("spliceVar " << var << " at " << off << "," << len
+                                           << " with " << new_gates)
 
 -- the current depth inside nested conditionals, 0-based
 getDepth = do len <- getsVars length -- the number of var tables (one per scope)
@@ -1103,7 +1090,7 @@ popScope  = do scope <- getsVars peek
 
 -- need a "instance Show Gate" easier for machine parsing in a weak language (C++)
 -- line-oriented format:
--- 
+--
 -- gate number
 -- flags, or "noflags"
 -- gate (output) type
@@ -1197,8 +1184,10 @@ instance Show Op where
                           len)  -> str "InitDynArray " . rec elemsize . sp .
                                                           rec len
             ReadDynArray    -> str "ReadDynArray"
-            (WriteDynArray
-             (off,len))     -> str "WriteDynArray " . rec off . sp . rec len
+
+            WriteDynArray
+              Im.FieldLoc { Im.valloc = (off,len) } 
+                            -> str "WriteDynArray " . rec off . sp . rec len
             (Slicer
              (boff,blen)
              (off, len) )   -> str "Slicer " . rec off . sp . rec len
@@ -1211,7 +1200,7 @@ instance Show Op where
 
 {-
 instance Show Gate where
-    show (Gate i typ op srcs flags doc) = i << (if not (null flags) then "#" << show flags else "") 
+    show (Gate i typ op srcs flags doc) = i << (if not (null flags) then "#" << show flags else "")
                                             << ": "
                                             << op << " [:" << typ << ":] "
                                             << srcs

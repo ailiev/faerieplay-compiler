@@ -12,7 +12,7 @@ GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 # 
 # see also section 5.1.1 "Inserting cost centres by hand" for how to add cost
 # centers for more detailed stack reports.
-# GHCFLAGS += -prof -auto-all
+GHCFLAGS += -prof -auto-all
 
 #GHCFLAGS += -v
 

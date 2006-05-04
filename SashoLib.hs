@@ -41,7 +41,7 @@ module SashoLib (
 
         applyWithDefault,
 
-        interleave,
+        splice,
 
         filterList,
         breakList,
@@ -454,7 +454,15 @@ fib             = 1 : 1 : [ a+b | (a,b) <- zip fib (tail fib) ]
 sumOp f a b = sum . map f $ [a..b]
 
 
-interleave = foldr (\(a,b) xs -> (a:b:xs)) [] ... zip
+-- same as List.intersperse
+-- interleave = foldr (\(a,b) xs -> (a:b:xs)) [] ... zip
+
+
+-- update a range (offset and length) of a list.
+-- more precisely, replace the range (offset,len) with 'news' (regardless of its length)
+splice (offset,len) news l = (take offset l) ++
+                             news ++
+                             (drop (offset + len) l)
 
 
 -- have a list of functions on 2 params, run them over a fixed pair of
