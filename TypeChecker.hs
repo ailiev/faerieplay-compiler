@@ -18,7 +18,7 @@ import Control.Monad.Trans (lift)
 import Common (MyError(..), ErrMonad)
 
 import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
-                 myLiftM, concatMapM, (>>==))
+                 myLiftM, concatMapM, (>>==), mapTuple2)
 import qualified Container as Cont
 
 
@@ -198,9 +198,13 @@ checkStm (T.SBlock decs stms) = do pushScope
                                                       (init_stms ++ new_stms)
 
 
-checkStm (T.SAss lval val)     = do lval_new <- checkLVal lval
+checkStm s@(T.SAss lval val)   = do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
-                                    return $ Im.SAss lval_new val_new
+                                    [lv', v'] <- mapM (canonicalize . Im.getExpTyp) [lval_new, val_new]
+                                    if lv' == v'
+                                       then return $ Im.SAss lval_new val_new
+                                       else throwErr 42 $ "Type mismatch in assignment " << s
+
 
 checkStm (T.SPrint prompt val) = do val_new     <- checkExp val
                                     return $ Im.SPrint prompt val_new
@@ -257,7 +261,7 @@ checkTyp (T.StructT fields)     = do im_fields      <- mapM checkTypedName field
                                      -- note that by the time expandType is called here,
                                      -- checkTypedName has already checked the sub-types
                                      -- in the struct fields, so we cannot get an error 
-                                     full_ts        <- mapM (Im.expandType . snd)
+                                     full_ts        <- mapM (Im.expandType [Im.DoAll] . snd)
                                                             im_fields
                                      let lens       = map (Im.typeLength (const 1)) full_ts
                                          bytelens   = map (Im.typeLength Im.tblen) full_ts
@@ -361,7 +365,7 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
     -- returns the type of the array elements
     where check arr@(Im.ExpT arr_t _) idx =
               do checkIdx idx
-                 arr_t_full <- Im.expandType arr_t
+                 arr_t_full <- Im.expandType [Im.DoAll] arr_t
                  case (Im.stripRefQual arr_t) of
                    (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx)    )
                    (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx) )
@@ -369,7 +373,7 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
                                                        << " is not an array or int!")
           -- index type has to be int
           checkIdx idx = let (Im.ExpT idx_t _) = idx
-                         in  do idx_t_full <- Im.expandType idx_t
+                         in  do idx_t_full <- Im.expandType [Im.DoTypeDefs] idx_t
                                 case idx_t_full of
                                     (Im.IntT _)  -> return ()
                                     _            -> throwErr 42 ("Array index in " <<
@@ -378,24 +382,20 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
 
 checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
     = do new_str@(Im.ExpT strT _) <- checkExp str
-         -- FIXME: here it is not so good that the type is fully expanded, as then we
-         -- include it into the expression
-         typ_full                <- Im.expandType strT
+         typ_full                <- Im.expandType [Im.DoTypeDefs, Im.DoRefs] strT
          (typ,new_e)             <- check typ_full new_str
          return $ annot typ new_e
 
          -- ** check: return the expression's type and value
          -- find the field in this struct's definition
-    where check (Im.StructT fields_info) new_str =
-              do -- get just the [TypedName]
-                 let (fields,_)    = fields_info
-                 case lookup fieldname fields of
-                          (Just t) -> do let field_idx = fromJust $
-                                                         findIndex ((== fieldname) . fst) $
-                                                         fields
-                                         return (t, Im.EStruct new_str field_idx)
-                          _        -> throwErr 42 $ "in " << e << ", struct has no field "
-                                                      << fieldname
+    where check :: Im.Typ       -- the type of the struct
+                -> Im.Exp       -- the struct expression
+                -> StateWithErr (Im.Typ,     -- the type of the field
+                                 Im.Exp)     -- the field expression
+
+          -- same thing for struct and reference to struct
+          check (Im.StructT fields_info) new_str            = doStruct fields_info new_str
+          check (Im.RefT (Im.StructT fields_info)) new_str  = doStruct fields_info new_str
 
           -- if it's an i.bitSize expression, just return an Int
           check (Im.IntT size) _
@@ -410,9 +410,20 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
                                                   " is not a struct, it is " <<
                                                   typ)
 
+          doStruct fields_info new_str = 
+              do -- get just the [TypedName]
+                 let (fields,_)    = fields_info
+                 case lookup fieldname fields of
+                          (Just t) -> do let field_idx = fromJust $
+                                                         findIndex ((== fieldname) . fst) $
+                                                         fields
+                                         return (t, Im.EStruct new_str field_idx)
+                          _        -> throwErr 42 $ "in " << e << ", struct has no field "
+                                                      << fieldname
 
 
-checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not a simple name"
+checkExp e@(T.EStruct str _)
+    = throwErr 42 $ "struct field in " << e << " is not a simple name"
 
 
 -- to check a function call:
@@ -421,9 +432,21 @@ checkExp e@(T.EStruct str _) = throwErr 42 $ "struct field in " << e << " is not
 -- TODO: not finished with the checking here! need to check that the
 -- actual args in the call have the correct types
 checkExp e@(T.EFunCall (T.Ident fcnName) args) =
-    do (Im.Func _ _ t _ _)      <- extractFunc e fcnName
-       im_args                  <- mapM (checkExp . extrExp) args
+    do (Im.Func _ _ t form_args _)      <- extractFunc e fcnName
+       im_args                          <- mapM (checkExp . extrExp) args
+       form_types                       <- mapM (canonicalize . snd)          form_args
+       act_types                        <- mapM (canonicalize . Im.getExpTyp) im_args
+       let mismatch                     = findIndex (uncurry (/=) . mapTuple2 Im.stripRefQual)
+                                                    (zip form_types act_types)
+       -- if a mismatch found above, report the error.
+       maybe (return ())
+             (\i -> throwErr 42 ("function call " << e
+                                 << ": type error at param " << i
+                                 << ", expected " << (form_types !! i)
+                                 << ", got " << (act_types !! i)))
+             mismatch
        return (Im.ExpT t (Im.EFunCall fcnName im_args))
+
     where extrExp (T.FunArg e) = e
 
 
@@ -440,11 +463,25 @@ checkExp e
                                True  -> Im.ExpT t (Im.EStatic new_e)
                                False -> Im.ExpT t             new_e
               return static_e
-    | Just (op, e) <- analyzeUnaryOp e       = do new_e <- checkExp e
+
+    | Just (op, arg_e) <- analyzeUnaryOp e   = do new_arg_e <- checkExp arg_e
+                                                  res_t     <- getUnaryOpTyp op new_arg_e
+                                                  let new_e = (Im.ExpT res_t $ Im.UnOp op new_arg_e)
                                                   typ <- checkUnary new_e
                                                   return $ annot typ new_e
+
     where isStaticExp (Im.EStatic _)    = True
           isStaticExp _                 = False
+          -- get the Im.Typ for an operator
+          getUnaryOpTyp :: Im.UnOp -- the operator
+                        -> Im.Exp -- the full Im.Exp for the param
+                        -> StateWithErr Im.Typ
+          getUnaryOpTyp Im.Not (Im.ExpT Im.BoolT _) = return $ Im.BoolT
+          getUnaryOpTyp op     (Im.ExpT (Im.IntT i) _)
+              | op /= Im.Not                        = return $ Im.IntT i
+          getUnaryOpTyp op      e                   = throwErr 42 ("Unary expression arg " << e
+                                                                   << " to operator " << op
+                                                                   << " has bad type")
 
 
 
@@ -495,6 +532,24 @@ checkLoopCounter ctx name =
          _                                        -> return ()
          
 
+
+-- | canonicalize a type for the purpose of assignment
+-- type mismatch checking, and function-call argument checking:
+-- set all int sizes to be the same,
+-- strip RefT's
+-- substitute all top-level typedefs referring to simple scalar types (Int and
+-- Bool),
+canonicalize :: Im.Typ -> StateWithErr Im.Typ
+canonicalize (Im.IntT i)          = return $ Im.IntT 32
+canonicalize (Im.RefT t)          = canonicalize t
+canonicalize t                    = do t'    <- Im.expandType [Im.DoTypeDefs] t
+                                       case t' of
+                                         (Im.IntT _)      -> canonicalize t'
+                                         (Im.BoolT)       -> return t
+                                         _                -> return t
+
+
+
 -- create initialization statements for local variables
 -- needs to be in StateWithErr because it calls (lookupType)
 mkVarInits :: Im.VarTable -> StateWithErr [Im.Stm]
@@ -521,7 +576,7 @@ mkVarInits local_table = do let varlist  = Map.toList local_table
                                      return $ (ass lval (Im.EStructInit (sum lens)) t) :
                                               concat inits
                               (Im.ArrayT elem_t len_e)    ->
-                                   do elem_len   <- Im.expandType elem_t >>== 
+                                   do elem_len   <- Im.expandType [Im.DoAll] elem_t >>== 
                                                     Im.typeLength Im.tblen
                                       len        <- Im.evalStatic len_e >>== fromInteger
                                       return [ass lval (Im.EArrayInit name elem_len len) t]
@@ -600,20 +655,21 @@ extractFunc ctx name = do TCS {funcs=fs} <- St.get
 -- check a unary opeartion, and return its type.
 -- here 'e' is the whole unary expression, not just the parameter
 checkUnary e@(Im.ExpT t inner_e) =
-         do t_full <- Im.expandType t
+         do t_full <- checkExpExpand t
             case (inner_e, t_full) of
                          ( (Im.UnOp Im.Not _),     (Im.BoolT) )   -> return Im.BoolT
                          ( (Im.UnOp Im.BNot _), it@(Im.IntT _) )  -> return it
                          ( (Im.UnOp Im.Neg  _), it@(Im.IntT _) )  -> return it
-                         (_           , _             )  -> throwErr 42 $ "Unary operation "
-                                                                         << e << " has invalid param type"
+                         ( _                  , _              )  ->
+                             throwErr 42 $ "Unary operation " << inner_e
+                                          << " has invalid param type " << t_full
                                  
 
 
 -- check a logical expression. quite easy
 checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
-    do t1_full <- Im.expandType t1
-       t2_full <- Im.expandType t2
+    do t1_full <- checkExpExpand t1
+       t2_full <- checkExpExpand t2
        case (t1_full, t2_full) of
                 (Im.BoolT, Im.BoolT) -> return (Im.ExpT Im.BoolT (Im.BinOp op e1 e2))
                 _                    -> throwErr 42 $ "Logical expression " << (Im.BinOp op e1 e2)
@@ -622,8 +678,8 @@ checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
 -- check an arithmetic expression whose components e1 and e2 are already checked.
 checkBinary op e1 e2 =
     do let ( (Im.ExpT t1 _), (Im.ExpT t2 _) ) = (e1,e2)
-       t1_full <- Im.expandType t1
-       t2_full <- Im.expandType t2
+       t1_full <- checkExpExpand t1
+       t2_full <- checkExpExpand t2
        -- set the type of the result expression - try to
        -- FIXME: need a more elegant way to remove the reference qualifier on arg types
        -- here
@@ -639,6 +695,7 @@ checkBinary op e1 e2 =
 -- output by 1
 -- FIXME: how about with multiplication?? this seems like a dirty area, the bit size *may*
 -- expand a lot, but probably wont, but how do we know?
+-- in fact, expanding bit size when adding is dodgy too, could build up quickly
 checkArith op e1 e2 = do (Im.ExpT (Im.IntT i) e) <- checkBinary op e1 e2
                          return $ Im.ExpT (Im.IntT (i+1)) e
 {-
@@ -653,8 +710,8 @@ checkArith op e1 e2 =
 
 -- the parameters must have the same type, and can be Bool, Int or Enum
 checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
-    do full_t1 <- Im.expandType t1
-       full_t2 <- Im.expandType t2
+    do full_t1 <- checkExpExpand t1
+       full_t2 <- checkExpExpand t2
        let answer = (Im.ExpT Im.BoolT (Im.BinOp op e1 e2))
        case (full_t1, full_t2) of
           (Im.BoolT,  Im.BoolT)                         -> return answer
@@ -665,6 +722,8 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
                                                   << " are invalid; the two types are "
                                                   << full_t1 << " and " << full_t2
 
+-- a type expand function for the check expression functions above
+checkExpExpand = Im.expandType [Im.DoRefs, Im.DoTypeDefs]
 
 mkVarSet :: Im.VarTable -> Im.VarSet
 -- toAscList gives a sorted list of (key,value), and the values are
@@ -781,11 +840,11 @@ analyzeBinExp e = case e of
                      (T.EAnd e1 e2)    -> Just (Logical,Im.And,e1,e2)
                      (T.EOr e1 e2)     -> Just (Logical,Im.Or,e1,e2)
 
-                     (T.ESL e1 e2)        -> Just (Binary,Im.SL,e1,e2)
-                     (T.ESR e1 e2)        -> Just (Binary,Im.SR,e1,e2)
-                     (T.EBOr e1 e2)        -> Just (Binary,Im.BOr,e1,e2)
-                     (T.EBAnd e1 e2)        -> Just (Binary,Im.BAnd,e1,e2)
-                     (T.EBXor e1 e2)        -> Just (Binary,Im.BXor,e1,e2)
+                     (T.ESL e1 e2)   -> Just (Binary,Im.SL,e1,e2)
+                     (T.ESR e1 e2)   -> Just (Binary,Im.SR,e1,e2)
+                     (T.EBOr e1 e2)  -> Just (Binary,Im.BOr,e1,e2)
+                     (T.EBAnd e1 e2) -> Just (Binary,Im.BAnd,e1,e2)
+                     (T.EBXor e1 e2) -> Just (Binary,Im.BXor,e1,e2)
 
                      _                  -> Nothing
 

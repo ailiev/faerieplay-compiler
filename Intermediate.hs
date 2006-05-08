@@ -187,6 +187,11 @@ stripExpT = mapExp f
     where f (ExpT t e)  = e
           f e           = e
 
+-- get the type annotation of an expression. All should have one.
+getExpTyp (ExpT t e) = t
+getExpTyp e             = error $ "getExpTyp called on expression without type annotation: "
+                                  << e
+
 
 
 
@@ -299,25 +304,40 @@ type Scope = [Int]
 -- helpers for Typ
 ------------------
 
--- fully expand a type, recursing into complex types
-expandType :: (TypeTableMonad m) => Typ -> m Typ
-expandType t =
-       case t of
-                (SimpleT name)          -> do type_table <- getTypeTable
-                                              let t' = fromJust $ Map.lookup name type_table
-                                              expandType t'
-                (ArrayT elem_t
-                           len)         -> do elem_t' <- expandType elem_t
-                                              return $ ArrayT elem_t' len
-                (StructT (name_typs,
-                          locs))        -> do let (names,typs)   = unzip name_typs
-                                              typs'             <- mapM expandType typs
-                                              return $ StructT (zip names typs', locs)
 
-                (RefT t)                -> do t'    <- expandType t
-                                              return $ RefT t'
+data ExpandTypFlags = DoFields | DoRefs | DoArrayElems | DoTypeDefs | DoAll
+    deriving (Eq,Show)
+
+-- fully expand a type, recursing into complex types
+expandType :: (TypeTableMonad m) => [ExpandTypFlags] -> Typ -> m Typ
+expandType flags t =
+    let rec = expandType flags
+    in
+      case t of
+                (SimpleT name)          -> worker DoTypeDefs
+                                               (do type_table <- getTypeTable
+                                                   let t' = fromJust $ Map.lookup name type_table
+                                                   rec t')
+                (ArrayT elem_t
+                           len)         -> worker DoArrayElems
+                                               (do elem_t' <- rec elem_t
+                                                   return $ ArrayT elem_t' len)
+
+                (StructT (name_typs,
+                          locs))        -> worker DoFields
+                                               (do let (names,typs)   = unzip name_typs
+                                                   typs'             <- mapM rec typs
+                                                   return $ StructT (zip names typs', locs))
+
+                (RefT t)                -> worker DoRefs
+                                                (do t'  <- rec t
+                                                    return $ RefT t')
 
                 _                       -> return t
+
+    where worker flag proc = do (if elem DoAll flags || elem flag flags
+                                 then proc
+                                 else return t)
 
 
 -- for a structure, get a field name given the number

@@ -228,4 +228,4 @@ comment "/*" "*/" ;
 comment "//" ;
 
 -- Typ is an entry point just for debugging
-entrypoints TypedName, Prog, Stm, Exp ;
+entrypoints Prog, Stm, Exp ;

@@ -297,7 +297,7 @@ createInputGates addvars (name, typ) =
                         gate <- mkGate i typ (EVar var)
                         return [gate]
 
-    where mkGate i typ doc_exp = do typ_full <- expandType typ
+    where mkGate i typ doc_exp = do typ_full <- Im.expandType [DoAll] typ
                                     return $ Gate i
                                                   typ_full
                                                   Input
@@ -402,7 +402,7 @@ getRootvarOffset loc_extr exp =
 
 
 -- get the field parameters of a StructT, from the expression carrying the struct
-getStrTParams      (ExpT t _)   = do (StructT field_params)  <- expandType t
+getStrTParams      (ExpT t _)   = do (StructT field_params)  <- Im.expandType [DoTypeDefs] t
                                      return field_params
 getStrTParams     e             = error $
                                   "getStrTParams: unexpected expression "
@@ -512,7 +512,7 @@ genStm circ stm =
              spliceVar (off,1) [i] rv
              return $ {-# SCC "ctx & c5" #-} (ctx & c5)
                         `trace`
-                        ("SAss to EArr: \"" ++ show stm ++  "\"; circuit now = " ++ show c5 ++
+                        ("SAss to EArr: \"" ++ show stm ++
                          "\n; inserting " ++ show ctx)
 
 
@@ -552,7 +552,7 @@ genStm circ stm =
                                                      _                   -> error ("SPrint \"" << prompt
                                                                                    << "\" got a non-var: "
                                                                                    << x)
-                                      t_full <- expandType t
+                                      t_full <- Im.expandType [DoAll] t
                                       let (ts, locs, blocs)    = case t_full of
                                                                      (StructT (tn's, locs))
                                                                          -> (map snd tn's,
@@ -778,7 +778,7 @@ addCtxs circ ctxs = foldl (flip (&)) circ ctxs
 getSelType gr (node1, node2)
     = do let gates = map (fromJust . Gr.lab gr) [node1, node2]
          -- expanding types into a canonical form
-         types <- mapM expandType $ map gate_typ gates
+         types <- mapM (Im.expandType [DoTypeDefs]) $ map gate_typ gates
          case types `trace` ("getSelType of gates " << gates) of
                     [Im.BoolT          , Im.BoolT          ]    -> return Im.BoolT
                     [Im.IntT i1_e      , Im.IntT i2_e      ]    ->
@@ -806,7 +806,7 @@ genExp c e = do (c', res) <- genExp' c e
                   (Right gateNums)  -> return (c',
                                                gateNums)
                                           `trace`
-                                       ("genExp returning nodes " << gateNums)
+                                       ("genExp " << e << " returning nodes " << gateNums)
 
 
 -- this one is a little nasty - it returns the expanded circuit, and:
@@ -880,20 +880,30 @@ genExp' c exp =
       (EStruct str_e idx) ->
                            do (c', gates)       <- genExp c str_e
                               (_,locs)          <- getStrTParams str_e
-                              let (off,len)      = Im.valloc $ locs !! idx
+                                                   `trace`
+                                                   ("genExp' EStruct " << exp
+                                                    << " struct gates = " << gates)
+                              let (off,len)      = (Im.valloc $ locs !! idx)
+                                                   `trace`
+                                                   ("genExp' EStruct " << exp << " locs = " << locs)
+                                                   
                               return (c', Right $ take len $ drop off gates)
 
       (EArr arr_e idx_e) ->
                            do (c1, arr_ns)  <- genExp c arr_e
+{-
                                                `trace` ("Circuit before array gate generated:"
                                                         << c)
+-}
                               let arr_n      = case arr_ns of
                                                  [arr_n] -> arr_n
-                                                 _       -> error ("Array " << arr_e <<
-                                                                   " got too many wires: " <<
-                                                                   arr_ns)
-                                                           `trace` ("circuit at error: "
-                                                                    ++ showCct c1)
+                                                 _       ->
+                                                     error ("Array " << arr_e <<
+                                                            " should get one wire but got: "
+                                                            << arr_ns
+                                                            {- << "; circuit at error: "
+                                                            ++ showCct c1 -}
+                                                           )
                               (c2, [idx_n])        <- genExp c1 idx_e
                               readarr_n            <- nextInt
                               depth                <- getDepth
@@ -981,7 +991,7 @@ mkCtx g@(Gate node _ _ srcs _ _ _) = let ctx = (map uAdj srcs,
 -- return a type's list of contained types and their locations
 getTypLocs :: (TypeTableMonad m) => Typ -> m ([FieldLoc], [Typ])
 getTypLocs t =
-    do t_full <- expandType t
+    do t_full <- Im.expandType [DoTypeDefs] t
        return $ case t_full of
                   (StructT (fields,locs))  ->
                       let types          = map snd fields

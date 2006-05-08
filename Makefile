@@ -4,7 +4,22 @@ GHCFLAGS += -fallow-overlapping-instances
 GHCFLAGS += -I$(HOME)/code/haskell
 GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 
-# GHCFLAGS += -O2
+GHCFLAGS += -v0
+
+GHCFLAGS += -odir $(ODIR)
+
+
+#
+# optimized or debug build?
+#
+
+ifdef OPT
+	ODIR = opt
+	GHCFLAGS += -O2
+else
+	GHCFLAGS += -cpp
+	GHCFLAGS += -DDEBUG
+	ODIR = dbg
 
 # this compiles a profiling executable, which can be run with:
 # +RTS -xc -RTS
@@ -12,9 +27,8 @@ GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 # 
 # see also section 5.1.1 "Inserting cost centres by hand" for how to add cost
 # centers for more detailed stack reports.
-GHCFLAGS += -prof -auto-all
-
-#GHCFLAGS += -v
+# GHCFLAGS += -prof -auto-all
+	GHCFLAGS += -prof -auto-all
 
 # from the manual:
 # 
@@ -22,12 +36,16 @@ GHCFLAGS += -prof -auto-all
 # runtime turns on numerous assertions and sanity checks, and provides extra
 # options for producing debugging output at runtime (run the program with +RTS
 # -? to see a list).
-GHCFLAGS += -debug
+	GHCFLAGS += -debug
+
+endif
+
+
 
 
 PACKS = -package fgl -package Cabal
 
-all: sfdlc
+all: $(ODIR)/sfdlc
 
 # basename of our grammar (.cf) file
 CF_ROOT = SFDL
@@ -37,14 +55,18 @@ bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(BNFCROOTS))
 # bnfc produces a misnamed Makefile, hence specifying that name here.
 $(bnfc_files): $(CF_ROOT).cf
 	bnfc -haskell -m -d $<
-	make -C SFDL -f Makefile. 
+	make -C SFDL
 
 bnfc: $(bnfc_files)
 
 %.o: %.hs
-	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
+#	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
+	ghc -c $(GHCFLAGS) -o $@ $<
 
-sfdlc:
+%.hi: %.hs
+	ghc -E -ddump-minimal-imports $(GHCFLAGS) $< > $@
+
+$(ODIR)/sfdlc:
 #	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
 	ghc --make $(GHCFLAGS) -o $@ sfdlc.hs
 
@@ -58,7 +80,7 @@ clean:
 	HFLAGS="$(GHCFLAGS)" hmake -clean sfdlc
 
 install: sfdlc
-	install -p sfdlc ~/leeds_root/bin/
+	install -p $(ODIR)/sfdlc ~/leeds_root/bin/
 
 tags: TAGS
 

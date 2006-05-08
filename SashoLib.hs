@@ -418,16 +418,19 @@ ilog2 x
 isqrt = integerize sqrt
 
 
--- given 2 functions f and g, produce one func h s.t. h x = (f x, g x)
+-- | given 2 functions 'f' and 'g', produce one function 'h' s.t. h x = (f x, g x)
 pair2 :: (a -> b) -> (a -> c) -> (a -> (b,c))
 pair2 f g = \x -> (f x, g x)
 
 pair3 :: (a -> b) -> (a -> c) -> (a -> d) -> (a -> (b,c,d))
 pair3 f g h = \x -> (f x, g x, h x)
 
+
+-- | map a function over a pair, returning the resulting pair
 mapTuple2 :: (a -> b) -> (a,a) -> (b,b)
 mapTuple2 f (x,y) = (f x, f y)
 
+-- | map a monadic function over a pair, returning the result pair in the Monad
 mapTupleM2 :: (Monad m) => (a -> m b) -> (a,a) -> m (b,b)
 mapTupleM2 f (x,y) = do x' <- f x
                         y' <- f y
@@ -463,6 +466,7 @@ sumOp f a b = sum . map f $ [a..b]
 splice (offset,len) news l = (take offset l) ++
                              news ++
                              (drop (offset + len) l)
+
 
 
 -- have a list of functions on 2 params, run them over a fixed pair of
