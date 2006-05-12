@@ -206,8 +206,8 @@ checkStm s@(T.SAss lval val)   = do lval_new <- checkLVal lval
                                        else throwErr 42 $ "Type mismatch in assignment " << s
 
 
-checkStm (T.SPrint prompt val) = do val_new     <- checkExp val
-                                    return $ Im.SPrint prompt val_new
+checkStm (T.SPrint prompt vals) = do vals_new   <- mapM checkExp vals
+                                     return $ Im.SPrint prompt vals_new
 
 
 

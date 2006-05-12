@@ -107,3 +107,12 @@ that when the circuit is trimmed, they are not thrown out, as the output gates
 are not reachable from them. Ie. print gates are an "anchor" of sorts too, and
 all gates with a path to a print gate (as well as to an output gate) should be
 kept.
+
+
+<date>Thu May 11 11:51:22 2006</date>
+
+
+How should a Select gate treat a Nothing condition? Seems correct to treat it
+same as False, rather than just produce a Nothing. A Nothing condition should
+only be produced on a non-taken branch, in which case that branch's values
+should be discarded *and* the peer branch's values (perhaps unchanged) taken.

@@ -124,7 +124,7 @@ data TypedName =
 data Stm =
    SBlock VarSet [Stm]
  | SAss Exp Exp
- | SPrint String Exp
+ | SPrint String [Exp]
  | SFor Var Exp Exp [Stm]
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord)
@@ -136,7 +136,7 @@ data FieldLoc = FieldLoc { byteloc :: (Int,Int), -- offset and length
                            valloc  :: (Int,Int) }
                 deriving (Eq,Ord,Show)
 
--- type FieldLoc = (Int,Int)
+data FieldLocRecord = Byteloc | Valloc
 
 
 data Exp =
@@ -191,6 +191,11 @@ stripExpT = mapExp f
 getExpTyp (ExpT t e) = t
 getExpTyp e             = error $ "getExpTyp called on expression without type annotation: "
                                   << e
+
+
+-- project a function on a fieldloc
+proj_FL_val_off  f loc@(FieldLoc { valloc  = (off,len) })    = loc { valloc = (f off, len) }
+proj_FL_byte_off f loc@(FieldLoc { byteloc = (off,len) })    = loc { byteloc = (f off, len) }
 
 
 
@@ -363,7 +368,8 @@ typeLength f t =
       -- NOTE: dynamic arrays take up just one gate, hence always one
       -- doesnt make sense to ask for the binary size of a dynamic array, but need to
       -- rethink this
-      (ArrayT t len)            -> 1
+      -- FIXME: should return the size of the binary array pointer, 4 bytes?
+--      (ArrayT t len)            -> 1
       t                         -> f t
       
 
@@ -375,9 +381,10 @@ getStrTByteLocs (_, locs)    = map byteloc locs
 
 
 -- byte-lengths of primitive types    
-tblen (IntT _)          = 4
+tblen (IntT _)          = 4     -- NOTE: 32-bit integers!
 tblen (BoolT)           = 1
 tblen (EnumT _ bits)    = bits `divUp` 8
+tblen (ArrayT t len)    = 4     -- NOTE: array pointer byte size
 
 cARRAY_BLEN = 4::Int
 
@@ -545,7 +552,7 @@ stmChildren s =
       (SBlock vars ss)          -> ( ss,     [],         (\ss []        -> (SBlock vars ss)) )
       (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
       (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
-      (SPrint prompt val)       -> ( [],     [val],      (\[] [v_new]   -> (SPrint prompt v_new)) )
+      (SPrint prompt vals)      -> ( [],     vals,       (\[] vs_new   -> (SPrint prompt vs_new)) )
 
 
 -- some recursive structure for Stm's and Exp's. Make it monadic for
@@ -706,8 +713,11 @@ docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
                                               text "else",
                                               nest 4 $ vcat (map docStm s2s)]
 
-docStm (SPrint prompt x)                = cat [text "print",
-                                               parens $ sep [ptext prompt, comma, docExp x]]
+docStm (SPrint prompt xs)               = cat [text "print",
+                                               parens $ sep [ptext prompt,
+                                                             comma,
+                                                             sep $ punctuate comma
+                                                                             (map docExp xs)]]
 
 
 docExp e = case e of

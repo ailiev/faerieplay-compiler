@@ -188,14 +188,14 @@ evalGate :: (MArr.MArray a      (Gate, NodeFunc) m,
 evalGate gates vals i =
     do (gate, gate_f)   <- MArr.readArray gates i
        ins              <- mapM (MArr.readArray vals) (gate_inputs gate)
-                              `trace` ("reading inputs for gate:" << gate)
+                              `trace` ("reading inputs for gate: " << gate)
        let out = gate_f ins
        -- no point in writing Blank values in there, in fact it's very bad in case of
        -- Input gates
        if (gate_op gate == Input && out == Just Blank)
          then return ()
          else MArr.writeArray vals (gate_num gate) (gate_f ins)
-                  `trace` ("Evaluating gate number:" << (gate_num gate))
+                  `trace` ("Evaluating gate number: " << (gate_num gate))
 
 
 
@@ -270,14 +270,21 @@ gate2func Gate { gate_op = op,
                                                                     (LInt i)   -> ScInt i
                                                                     (LBool b)  -> ScBool b
 
-        Select              -> \[v_b,
+        -- if the condition is Nothing, pass on the m_v_false
+        Select              -> \[m_v_b,
                                  m_v_true,
-                                 m_v_false] -> do VScalar (ScBool b)    <- v_b
-                                                  if b
-                                                    then m_v_true  >>= return
-                                                    else m_v_false >>= return
+                                 m_v_false] -> case m_v_b of
+                                                 Nothing    -> m_v_false
+                                                 Just v_b   -> let (VScalar (ScBool b)) = v_b
+                                                               in
+                                                                 case b of
+                                                                   True   -> m_v_true
+                                                                   False  -> m_v_false
 
-        Slicer _ (off,len)  -> \[args]      -> do VList m_vs    <- args
+
+
+        Slicer (Im.FieldLoc { Im.valloc = (off,len) })
+                            -> \[args]      -> do VList m_vs    <- args
                                                   [ans]         <- sequence $
                                                                    take len . drop off $
                                                                    m_vs

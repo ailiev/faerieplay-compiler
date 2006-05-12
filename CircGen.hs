@@ -109,9 +109,7 @@ data Op =
   -- into separate gates
   -- for internal use, want to also keep a more high-level interpretation: offset and
   -- length in GateVal's
-  -- TODO: have the Slicer gate use a FieldLoc parameter to describe the slice
-  | Slicer (Int,Int)            -- ^ The byte locations
-           (Int,Int)            -- ^ GateVal locations
+  | Slicer FieldLoc
 
   | Lit Im.Lit                  -- a literal
 
@@ -543,41 +541,67 @@ genStm circ stm =
       -- we will wire all the variables in x to go through this gate
       -- a bit of a hassle as there may be one or more gates feeding into here (in case of
       -- a struct). So, add slice gates
-      (SPrint prompt x)         -> do (circ', x_ns)     <- genExp circ x
-                                      i                 <- nextInt
-                                      slice_is          <- replicateM (length x_ns) nextInt
+      (SPrint prompt xs)        -> do i                 <- nextInt
                                       depth             <- getDepth
-                                      let (t,var) = case (x `trace` "SPrint x = " << x) of
-                                                     (ExpT t (EVar v))   -> (t,v)
-                                                     _                   -> error ("SPrint \"" << prompt
-                                                                                   << "\" got a non-var: "
-                                                                                   << x)
-                                      t_full <- Im.expandType [DoAll] t
-                                      let (ts, locs, blocs)    = case t_full of
-                                                                     (StructT (tn's, locs))
-                                                                         -> (map snd tn's,
-                                                                             map Im.valloc locs,
-                                                                             map Im.byteloc locs)
-                                                                     _
-                                                                         -> ([t_full], [(0,1)], [(0,1)])
+
+                                      -- generate parameters for each expression separately.
+                                      (circs,
+                                       x_gates's,
+                                       ts's,
+                                       slice_is's,
+                                       locs's)          <- scanM (doSPrintExp prompt . \(f1,_,_,_,_)->f1)
+                                                                 (circ,[],[],[],[])
+                                                                 xs
+                                                              >>== tail >>== unzip5
+                                      -- now need to shift the offsets of the slicers,
+                                      -- as each was made assuming it starts at 0
+                                      -- this is quite awkward, as we need to dig inside
+                                      -- the FieldLoc's and change the GateVal and byte
+                                      -- offsets only
+                                      -- 'extrLen' is to get the length out of the
+                                      -- FieldLoc struct
+                                      -- 'proj' is to project the addition onto the
+                                      -- correct offset field of the FieldLoc
+                                      let shiftlocs extrLen proj locss
+                                                     = let lens     = map (extrLen . last) locss
+                                                           shifts   = runSumFrom0 lens
+                                                       in zipWith (\shift locs ->
+                                                                       map (proj (+ shift))
+                                                                           locs)
+                                                                  shifts
+                                                                  locss
+                                          locs's2           = shiftlocs (snd . Im.valloc)
+                                                                        proj_FL_val_off
+                                                                        locs's
+                                                              `trace`
+                                                              ("Stm SPrint: locs's = " << locs's)
+                                          locs's3           = shiftlocs (snd . Im.byteloc)
+                                                                        proj_FL_byte_off
+                                                                        locs's2
+
                                           slicer_ctxs = [mkCtx $
-                                                         Gate si t (Slicer bloc loc) [i] depth [] []
-                                                              | si      <- slice_is
-                                                              | t       <- ts
-                                                              | bloc    <- blocs
-                                                              | loc     <- locs]
+                                                         Gate si t (Slicer loc) [i] depth [] []
+                                                              | si      <- concat slice_is's
+                                                              | t       <- concat ts's
+                                                              | loc     <- concat locs's3]
 
-                                      setVarAddrs slice_is var
-
+                                      -- and the actual print context
+                                      -- NOTE: can't really give it a type, as it can return
+                                      -- several values, noone should access it directly
+                                      -- anyway, just through the slicers.
                                       let ctx           = mkCtx $ Gate i
-                                                                       t
+                                                                       VoidT
                                                                        (Print prompt)
-                                                                       x_ns
+                                                                       (concat x_gates's)
                                                                        depth
                                                                        []
                                                                        []
 
-                                      return $ addCtxs circ' (ctx:slicer_ctxs)
+                                      return (addCtxs (last circs) (ctx:slicer_ctxs)
+                                             `trace` 
+                                              ("On SPrint, adding contexts " << (ctx:slicer_ctxs)
+                                               << ", with current circuit " << (last circs))
+                                             )
 
 
 
@@ -587,6 +611,35 @@ genStm circ stm =
               case strip_var var of
                 (VSimple "main") -> Just (\gate -> gate {gate_flags = [Output, Terminal]})
                 _                -> Nothing
+
+
+
+-- do most of the work for a single expression in an SPrint
+doSPrintExp prompt circ e =        do (circ', x_ns)     <- genExp circ e
+                                      slice_is          <- replicateM (length x_ns) nextInt
+                                      let (t,var) = case (e `trace` "SPrint e = " << e) of
+                                                     (ExpT t (EVar v))   -> (t,v)
+                                                     _                   -> error ("SPrint \"" << prompt
+                                                                                   << "\" got a non-var: "
+                                                                                   << e)
+                                      t_full <- Im.expandType [DoAll] t
+                                      let tinfo@(ts, locs)      = case t_full of
+                                                                     (StructT (tn's, locs))
+                                                                         -> (map snd tn's,
+                                                                             locs)
+                                                                     _
+                                                                         -> let blen =
+                                                                                    Im.typeLength Im.tblen
+                                                                                                  t_full
+                                                                            in
+                                                                              ([t_full],
+                                                                               [Im.FieldLoc (0,blen)
+                                                                                            (0,1)])
+
+                                      setVarAddrs slice_is var
+
+                                      return (circ', x_ns, ts, slice_is, locs)
+
 
 
 -- extract an array sub-expression from the given Exp
@@ -921,13 +974,16 @@ genExp' c exp =
                               -- array pointer value in the first cARRAY_BLEN bytes of the
                               -- ReadDynArray output.
                               arrptr_n             <- nextInt
-                              let arr_ptr_ctx      = mkCtx $ Gate arrptr_n
-                                                                  arr_t
-                                                                  (Slicer (0, cARRAY_BLEN)
-                                                                          (0, 1))
-                                                                  [readarr_n]
-                                                                  depth
-                                                                  [] []
+                              let arr_ptr_ctx      = mkCtx $
+                                                     Gate arrptr_n
+                                                          arr_t
+                                                          (Slicer $ FieldLoc {
+                                                                              Im.byteloc = (0, cARRAY_BLEN),
+                                                                              Im.valloc  = (0, 1)
+                                                                           })
+                                                          [readarr_n]
+                                                          depth
+                                                          [] []
                               -- add cARRAY_BLEN to all the byte offsets, as the array pointer
                               -- will be output first by the ReadDynArray gate
                               let e_blocs'           = map (projFst (+ cARRAY_BLEN)) $ map Im.byteloc e_locs
@@ -935,8 +991,10 @@ genExp' c exp =
                               is <- replicateM (length e_blocs') nextInt
                               let slicer_ctxs = map mkCtx [Gate i
                                                                 t
-                                                                (Slicer (boff,blen)
-                                                                        (off,1))
+                                                                (Slicer $ FieldLoc {
+                                                                                    Im.byteloc = (boff,blen),
+                                                                                    Im.valloc = (off,1)
+                                                                                   })
                                                                 [readarr_n]
                                                                 depth
                                                                 [] [] | i           <- is
@@ -1198,9 +1256,10 @@ instance Show Op where
             WriteDynArray
               Im.FieldLoc { Im.valloc = (off,len) } 
                             -> str "WriteDynArray " . rec off . sp . rec len
-            (Slicer
-             (boff,blen)
-             (off, len) )   -> str "Slicer " . rec off . sp . rec len
+            Slicer
+              (Im.FieldLoc { Im.byteloc = (boff,blen),
+                             Im.valloc  = (off, len) })
+                            -> str "Slicer " . rec off . sp . rec len
             (Print prompt)  -> str "Print " . rec prompt
           where rec y   = showsPrec x y
                 str     = (++)

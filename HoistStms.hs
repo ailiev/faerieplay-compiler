@@ -29,7 +29,7 @@ module HoistStms where
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import SashoLib (Stack, push, pop, peek, mapTuple2)
+import SashoLib (Stack, push, pop, peek, mapTuple2, (>>==))
 import qualified Container as Cont
 
 import Intermediate
@@ -84,8 +84,8 @@ flatten s =
       (SAss lval val)   -> do (stms,val_new) <- extrStms val
                               return $ stms ++ [(SAss lval val_new)]
 
-      (SPrint p val)    -> do (stms,val_new) <- extrStms val
-                              return $ stms ++ [(SPrint p val_new)]
+      (SPrint p vals)   -> do (stmss,vals_new)  <- mapM extrStms vals >>== unzip
+                              return $ concat stmss ++ [(SPrint p vals_new)]
 
       (SBlock vars stms)-> do pushScope
                               stmss <- mapM flatten stms

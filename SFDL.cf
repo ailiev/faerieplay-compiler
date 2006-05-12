@@ -101,7 +101,8 @@ SAss.     Stm      ::= LVal "=" Exp ";" ;
 
 -- and for debugging:
 -- the String in there is meant to be a fixed
-SPrint.     Stm     ::= "print" "(" String "," Exp ")" ;
+SPrint.     Stm     ::= "print" "(" String "," [Exp] ")" ;
+separator Exp "," ;
 
 -- none of these statements need a trailing semicolon. so, only
 -- Assignment needs it (as specified above)

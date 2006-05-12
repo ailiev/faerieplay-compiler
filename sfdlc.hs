@@ -92,9 +92,10 @@ optionControl =
     , Opt.Option ['h']      ["help"]    (Opt.NoArg Help)            "Print help (this text)"
     , Opt.Option ['r']      ["run"]     (Opt.OptArg Runfile "<file>") "Run circuit into <file>"
      ]
-usage name = Opt.usageInfo ("Usage: " ++ name ++ " <options> <input file>\n\
-                                                 \Produces <output> and cct.gviz\n\
-                                                 \Options:")
+usage name = Opt.usageInfo ("Usage: " ++ name ++
+                            " <options> <input file>\n" ++
+                            "Produces <output> and cct.gviz\n" ++
+                            "Options:")
                            optionControl
 
 

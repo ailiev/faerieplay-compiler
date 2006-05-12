@@ -8,6 +8,7 @@ GHCFLAGS += -v0
 
 GHCFLAGS += -odir $(ODIR)
 
+GHCFLAGS += -cpp
 
 #
 # optimized or debug build?
@@ -17,7 +18,6 @@ ifdef OPT
 	ODIR = opt
 	GHCFLAGS += -O2
 else
-	GHCFLAGS += -cpp
 	GHCFLAGS += -DDEBUG
 	ODIR = dbg
 
@@ -71,7 +71,7 @@ $(ODIR)/sfdlc:
 	ghc --make $(GHCFLAGS) -o $@ sfdlc.hs
 
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.
-.PHONY: sfdlc bnfc
+.PHONY: $(ODIR)/sfdlc bnfc
 
 hat:
 	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
@@ -79,7 +79,7 @@ hat:
 clean:
 	HFLAGS="$(GHCFLAGS)" hmake -clean sfdlc
 
-install: sfdlc
+install: $(ODIR)/sfdlc
 	install -p $(ODIR)/sfdlc ~/leeds_root/bin/
 
 tags: TAGS
