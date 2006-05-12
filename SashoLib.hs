@@ -24,6 +24,8 @@ module SashoLib (
          divUp,
          subtr,
 
+         hex,
+
          tr,
 
 --         mkList,
@@ -42,7 +44,7 @@ module SashoLib (
         applyWithDefault,
 
         splice,
-
+        runSumFrom0,
         filterList,
         breakList,
         spanList,
@@ -59,13 +61,17 @@ module SashoLib (
                  projSnd,
                  projFst,
 
+        tuple2list2,
+
         myLiftM,
+        scanM,
         unfoldrM,
         replicateM,
         sumM,
         concatMapM,
 
         strictList,
+        iterateList,
 
 		 factorial,
                  choose,
@@ -76,7 +82,9 @@ module SashoLib (
                 tup3_proj1, tup3_proj2, tup3_proj3,
 
                 tup4_get1, tup4_get2, tup4_get3, tup4_get4, 
-                tup4_proj_1,  tup4_proj_2,  tup4_proj_3,  tup4_proj_4
+                tup4_proj_1,  tup4_proj_2,  tup4_proj_3,  tup4_proj_4,
+
+                tup5_get1
 
 		)
     where
@@ -88,6 +96,8 @@ import Monad (MonadPlus, mzero, mplus, msum, liftM)
 import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT, MonadError(..))
 
 import Control.Monad.Trans (MonadTrans, lift)
+
+import Numeric                      (showHex)
 
 import qualified Data.Map as Map
 
@@ -147,11 +157,10 @@ k >>== f    = k >>= return . f
 -- using the subtraction operator applied to one arg is tricky (needs a flip, and
 -- something like (- x) is taken as (negate x)), hence:
 subtr x = \y -> y - x
--- flip (-)  -- for some unknown reason, this definition fixes the type of subtr to only
--- Integer
 
 
-
+hex :: Integral a => a -> String
+hex x = ("0x"++) . Numeric.showHex x $ ""
 
 {-
 instance Show String where
@@ -198,6 +207,15 @@ filterList _   [] = []
 filterList bad xs = let (pre,badL) = breakList (bad `isPrefixOf`) xs
                         postBad    = drop (length bad) badL
                     in pre ++ (filterList bad postBad)
+
+
+-- iterate a function which produces a finite list, by re-applying it on each output, and
+-- then concatenating
+iterateList :: (a -> [a]) -> a -> [a]
+iterateList f x = let fx = f x
+                  in 
+                    fx ++ concatMap (iterateList f) fx
+
 
 
 -- a version of unfoldr for use in a Monad
@@ -295,7 +313,16 @@ findInStack f stack = msum (map f stack)
 -- lift a function into a monad. The difference from liftM is that the result of myLiftM
 -- takes a value not in the monad, so it's useful on the RHS of >>= (among others)
 myLiftM :: (Monad m) => (a -> b) -> (a -> m b)
-myLiftM f = \x -> return (f x)
+myLiftM f x = return (f x)
+
+
+-- like scanl, but for monadic functions
+scanM            :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m [a]
+scanM f a []     =  return [a]
+scanM f a (x:xs) =  do y    <- f a x
+                       rest <- scanM f y xs
+                       return (a:rest)
+
 
 
 -- force a Map.lookup in the Maybe monad
@@ -457,8 +484,8 @@ fib             = 1 : 1 : [ a+b | (a,b) <- zip fib (tail fib) ]
 sumOp f a b = sum . map f $ [a..b]
 
 
--- same as List.intersperse
--- interleave = foldr (\(a,b) xs -> (a:b:xs)) [] ... zip
+runSumFrom0 :: (Num a) => [a] -> [a]
+runSumFrom0 = init . scanl (+) 0
 
 
 -- update a range (offset and length) of a list.
@@ -467,6 +494,9 @@ splice (offset,len) news l = (take offset l) ++
                              news ++
                              (drop (offset + len) l)
 
+
+-- make a list from a tuple
+tuple2list2 (x,y) = [x,y]
 
 
 -- have a list of functions on 2 params, run them over a fixed pair of
@@ -513,6 +543,11 @@ tup4_get2 (x1,x2,x3,x4) = x2
 tup4_get3 (x1,x2,x3,x4) = x3
 tup4_get4 (x1,x2,x3,x4) = x4
 
+tup5_get1 (x1,x2,x3,x4,x5)  = x1
+tup5_get2 (x1,x2,x3,x4,x5)  = x2
+tup5_get3 (x1,x2,x3,x4,x5)  = x3
+tup5_get4 (x1,x2,x3,x4,x5)  = x4
+tup5_get5 (x1,x2,x3,x4,x5)  = x5
 
 tup4_proj_1 f (x1,x2,x3,x4) = (f x1, x2  , x3  , x4  )
 tup4_proj_2 f (x1,x2,x3,x4) = (x1  , f x2, x3  , x4  )
