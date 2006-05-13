@@ -94,10 +94,11 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                  let                      -- pair up the formal vars and their values
                      arg_complex = zip form_args args
 
-                     -- split up reference and non-ref args, ditch the formal var type
+                     -- split up reference and non-ref args (paired with their values),
+                     -- ditch the formal var type
                      -- annotations, and make var's from the formal names
                      (ref_args,
-                      nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (formarg2var scope nm,val))) $
+                      nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (formarg2var scope nm , val))) $
                                       partition (isRefType . snd . fst) $
                                       arg_complex
 
@@ -130,7 +131,11 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                                                   "; locals = " << locals <<
                                                   "; scope = " << scope)
           -- replace reference local vars with their referrents
-          replaceRefs ref_args  = map (\stm -> foldl (\s (var,val) -> subst var val s)
+          -- remove the ExpT on the value before subbing it in, as there should already be
+          -- an equivalent ExpT around the var
+          replaceRefs ref_args  = map (\stm -> foldl (\s (var,val) -> let (ExpT _ val_e) = val
+                                                                      in
+                                                                        subst var val_e s)
                                                      stm
                                                      ref_args)
           -- remove RefT's in ExpT annotations (as the actual refs are already removed by

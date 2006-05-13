@@ -375,8 +375,8 @@ arithBinOp o = case o of
                               Minus -> (-) 
                               Max   -> max
 
-                              SL     -> \x y -> x `shiftR` (fromIntegral y)
-                              SR     -> \x y -> x `shiftL` (fromIntegral y)
+                              SL     -> \x y -> x `shiftL` (fromIntegral y)
+                              SR     -> \x y -> x `shiftR` (fromIntegral y)
 
                               BAnd   -> (.&.)
                               BOr    -> (.|.)

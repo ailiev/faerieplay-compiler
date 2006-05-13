@@ -1,3 +1,7 @@
+2006-05-12  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* Runtime.hs: Had swapped right shift and left shift, fixed.
+
 2006-04-16  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* Unroll.hs: stuuupid bug in unrolling for-loops counting

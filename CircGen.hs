@@ -619,9 +619,11 @@ doSPrintExp prompt circ e =        do (circ', x_ns)     <- genExp circ e
                                       slice_is          <- replicateM (length x_ns) nextInt
                                       let (t,var) = case (e `trace` "SPrint e = " << e) of
                                                      (ExpT t (EVar v))   -> (t,v)
-                                                     _                   -> error ("SPrint \"" << prompt
-                                                                                   << "\" got a non-var: "
-                                                                                   << e)
+                                                     (ExpT t _)          -> error ("SPrint `" << prompt
+                                                                                   << "' got a non-var: "
+                                                                                   << e
+                                                                                   << " of type "
+                                                                                   << t)
                                       t_full <- Im.expandType [DoAll] t
                                       let tinfo@(ts, locs)      = case t_full of
                                                                      (StructT (tn's, locs))

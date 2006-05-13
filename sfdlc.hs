@@ -146,16 +146,17 @@ run v parser input =
                 (Right prog@(Im.Prog pname
                              Im.ProgTables {Im.types=typ_table,
                                             Im.funcs=fs}))      ->
-                   do putStrLn "After typechecking:"
-                      hPrint stderr prog
+                   do hPrint stderr prog
+                      putStrLn "Typechecking done"
+
                       let prog_flat = Ho.flattenProg prog
-                      putStrLn "Flattened program:"
                       hPrint stderr prog_flat
+                      putStrLn "Flattened program"
                       case Ur.unrollProg prog_flat of
                         (Left err)       -> print $ "Unrolling Error! " << err
                         (Right stms)     ->
-                           do putStrLn "Unrolled main:"
-                              hPrint stderr (PP.vcat (map Im.docStm stms))
+                           do hPrint stderr (PP.vcat (map Im.docStm stms))
+                              putStrLn "Unrolled main"
 --                              return () -- in case we want to exit before circuit generation
 
                               infile         <- getInFile

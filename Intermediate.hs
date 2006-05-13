@@ -162,7 +162,7 @@ data Exp =
               Integer           -- array length
  | EStructInit Int              -- prepare a struct with that many primitive (Int) fields
                                 -- and subfields
-  deriving (Eq,Ord)
+  deriving (Eq,Ord,Show)
 
 
 
@@ -850,8 +850,10 @@ docBinOp o = text (case o of
 instance Show Stm where
     showsPrec i = showsPrec i . docStm
 
+{-
 instance Show Exp where
     showsPrec i = showsPrec i . docExp
+-}
 
 instance Show Typ where
     showsPrec i = showsPrec i . docTyp
