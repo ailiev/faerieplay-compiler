@@ -6,9 +6,8 @@ GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 
 GHCFLAGS += -v0
 
-GHCFLAGS += -odir $(ODIR)
+GHCFLAGS += -odir $(ODIR) -hidir $(ODIR) 
 
-GHCFLAGS += -cpp
 
 #
 # optimized or debug build?
@@ -17,8 +16,11 @@ GHCFLAGS += -cpp
 ifdef OPT
 	ODIR = opt
 	GHCFLAGS += -O2
-else
-	GHCFLAGS += -DDEBUG
+else ifdef PROF
+	ODIR = prof
+	GHCFLAGS += -prof -auto-all
+else ifdef DBG			
+	GHCFLAGS += -DTRACE
 	ODIR = dbg
 
 # this compiles a profiling executable, which can be run with:
@@ -38,6 +40,8 @@ else
 # -? to see a list).
 	GHCFLAGS += -debug
 
+else				#non-optimized, non-debug, non-profiled
+	ODIR = default
 endif
 
 
@@ -59,15 +63,15 @@ $(bnfc_files): $(CF_ROOT).cf
 
 bnfc: $(bnfc_files)
 
-%.o: %.hs
+$(ODIR)/%.o: %.hs
 #	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
-	ghc -c $(GHCFLAGS) -o $@ $<
+	ghc -c $(GHCFLAGS) $<
 
 %.hi: %.hs
 	ghc -E -ddump-minimal-imports $(GHCFLAGS) $< > $@
 
 $(ODIR)/sfdlc:
-#	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) sfdlc
+#	HFLAGS="$(GHCFLAGS)" hmake -d$(ODIR) -ghc $(PACKS) sfdlc
 	ghc --make $(GHCFLAGS) -o $@ sfdlc.hs
 
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.

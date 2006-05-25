@@ -30,7 +30,7 @@ import Text.PrettyPrint                         as PP
 
 import SashoLib
 
-import CircGen
+import           CircGen                        as CG
 import Intermediate                             as Im
 
 
@@ -160,13 +160,13 @@ addRoot vals ins (i, (gate,_)) =
                                                         arr  = listArray (0,size-1)
                                                                          (map (Just . vint) vs)
                                                     in  (Just $ VArr arr)
-                                                            `trace` ("Input array is " << arr)
+                                                            `trace` ("Input array is " << show arr)
                              _                   -> let [i] = vs -- should be just one integer
                                                     in  Just $ vint i )
                          -- BUG: from the compiler I think - if this statement is not
                          -- here, the previous writeArray is not evaluated!
                          val <- MArr.readArray vals g_i
-                         return ins' `trace` ("vals after input added: " << val)
+                         return ins' `trace` ("vals after input added: " << show val)
                                                                               
          _     -> return ins
 

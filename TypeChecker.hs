@@ -18,7 +18,10 @@ import Control.Monad.Trans (lift)
 import Common (MyError(..), ErrMonad)
 
 import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
-                 myLiftM, concatMapM, (>>==), mapTuple2)
+                 myLiftM, concatMapM, (>>==), mapTuple2,
+                 StreamShow(..)
+                )
+
 import qualified Container as Cont
 
 
@@ -519,7 +522,7 @@ checkLVal (T.LVal e) =
 
 
 
-checkLoopCounter :: (Show a) => a -> Im.Ident -> StateWithErr ()
+checkLoopCounter :: (StreamShow a) => a -> Im.Ident -> StateWithErr ()
 checkLoopCounter ctx name =
     -- if extractEnt returns an error, that's fine, we don't want to
     -- propagate it, hence we replace it with a dummy Entity value
@@ -622,7 +625,7 @@ data Entity = EntConst Integer
             | EntVar   (Im.Typ,Im.Var)
             | EntType  Im.Typ
 
-extractEnt :: (Show a) => a -> Im.EntName -> StateWithErr Entity
+extractEnt :: (StreamShow a) => a -> Im.EntName -> StateWithErr Entity
 extractEnt ctx name = do TCS {types=ts,
                               consts=cs,
                               funcs=fs,
@@ -874,6 +877,12 @@ doOp (T.EPlus _ _) = (+)
 doOp (T.EMinus _ _) = (-)
 doOp (T.ETimes _ _) = (*)
 
+
+-- give quick StreamShow instances to the concrete syntax types which need it here, via
+-- their provided Show instances
+instance StreamShow T.Stm   where strShows  = showsPrec 0
+instance StreamShow T.Exp   where strShows  = showsPrec 0
+instance StreamShow T.LVal  where strShows  = showsPrec 0
 
 
 testDecs = [ T.ConstDecl (T.Ident "x") (T.EInt 10),

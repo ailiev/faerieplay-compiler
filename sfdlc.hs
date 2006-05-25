@@ -5,7 +5,7 @@ import Maybe    (isJust, fromJust, fromMaybe, listToMaybe)
 import System   (getArgs, exitWith, ExitCode(..), getProgName)
 
 import IO ( stdin, stderr,
-            hGetContents, hPrint, hFlush, hPutStrLn,
+            hGetContents, hPrint, hFlush, hPutStrLn, hPutStr,
             openFile, hClose,
             IOMode(..),
             ioeGetErrorString)
@@ -47,15 +47,19 @@ main = do argv          <- getArgs
                                        hPutStrLn stderr $ usage name
                                        exitWith ExitSuccess
                                else return ()
-          if elemIndex Help opts /= Nothing then do name     <- getProgName
-                                                    hPutStrLn stderr $ usage name
-                                                    exitWith ExitSuccess
-                                            else return ()
+
+          if elem Help opts then do name     <- getProgName
+                                    hPutStrLn stderr $ usage name
+                                    exitWith ExitSuccess
+                            else return () -- carry on with main
+
           let mb_infile = listToMaybe args
 
+          -- save away the flags and input file name
           writeIORef g_Flags (opts, mb_infile)
 
-          hInfile       <- maybeM (return stdin)
+          -- get the input handle, a file or stdin
+          hInfile       <- maybe  (return stdin)
                                   (\infile ->
                                        (openFile infile ReadMode)
                                            `catch`
@@ -67,7 +71,15 @@ main = do argv          <- getArgs
                                                  exitWith $ ExitFailure 2))
                                   mb_infile
 
-          (hGetContents hInfile >>= run 1 pProg)
+          let mb_runfile    = extrRunFile opts
+          case mb_runfile of (Just mb_f)-> let -- default output will be to a.run
+                                               infile   = fromMaybe "a.cct" mb_infile
+                                               fname    = fromMaybe (modFileExt infile "run")
+                                                                    mb_f
+                                           in
+                                             doRunCct hInfile fname
+
+                             Nothing    -> hGetContents hInfile >>= run 1 pProg
 
 
 
@@ -107,14 +119,17 @@ getOutFile = do (flags,_)   <- readIORef g_Flags
           isOut _           = False
 
 getRunFile = do (flags,_)   <- readIORef g_Flags
-                return ( do (Runfile f) <- find isRunFile flags -- Maybe monad
-                            return f )
-    where isRunFile (Runfile _) = True
-          isRunFile _           = False
+                return $ extrRunFile flags
 
 getInFile = do (_,mb_infile) <- readIORef g_Flags
-               return $ fromJustMsg "No input file specified"
+               return $ fromJustMsg "No actual input file specified"
                                     mb_infile
+
+
+extrRunFile flags =     do (Runfile f) <- find isRunFile flags -- Maybe monad
+                           return f
+    where isRunFile (Runfile _) = True
+          isRunFile _           = False
 
 
 type Verbosity = Int
@@ -161,37 +176,42 @@ run v parser input =
 
                               infile         <- getInFile
                               mb_outfile_opt <- getOutFile
-                              let mb_outfile = fromMaybe Nothing
-                                                         mb_outfile_opt
-                                  gatesFile = fromMaybe (modFileExt infile "cct")
-                                                         mb_outfile
-                              let cctFile      = modFileExt infile "gviz"
-                                  args         = CG.extractInputs prog
-                                  (cct,gates)  = CG.genCircuit typ_table stms args
---                              hPrint stderr cct; hFlush stderr
+                              let mb_outfile    = fromMaybe Nothing
+                                                            mb_outfile_opt
+                                  gatesFile     = fromMaybe (modFileExt infile "cct")
+                                                            mb_outfile
+                                  runtimeFile   = modFileExt gatesFile "runtime"
+                                  cctFile       = modFileExt infile "gviz"
 
-                              putStrLn $ "Now generating the circuit out to " ++ cctFile
+                                  -- and compile the circuit
+                                  args          = CG.extractInputs prog
+                                  (cct,gates)   = CG.genCircuit typ_table stms args
+
+
+                              putStrLn $ "Now generating the circuit graph out to " ++ cctFile
                               writeFile cctFile (CG.showCct cct)
 
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
 
-                              -- see if running the circuit was requested
-                              mb_runfile_opt <- getRunFile
-                              maybe  (return ()) -- if no -r option given at all
-                                     ( \f -> do let fname = fromMaybe (modFileExt infile "run")
-                                                                      f
-                                                putStrLn ("Now running the circuit into " ++ 
-                                                          fname)
-                                                ins     <- Run.getUserInputs gates
-                                                h       <- openFile fname WriteMode
-                                                vals    <- Run.formatRun gates ins
-                                                mapM_ (hPutStrLn h) vals
-                                                hClose h )
-                                     mb_runfile_opt
+                              putStrLn $ "Writing the circuit runtime form to " ++ runtimeFile
+                              h     <- openFile runtimeFile WriteMode
+                              mapM_ (hPutStr h . CG.cctShow) gates
+                              hClose h
 
 
 
+doRunCct cct_fh outfile = 
+    do putStrLn ("Now running the circuit into " ++ 
+                 outfile)
+       gates    <- hGetContents cct_fh >>= readIO
+       ins      <- Run.getUserInputs gates
+       h        <- openFile outfile WriteMode
+       vals     <- Run.formatRun gates ins
+       mapM_ (hPutStrLn h) vals
+       hClose h
+
+       
 
 
 modFileExt file newext = let name = takeWhile (/= '.') file
@@ -212,7 +232,8 @@ modFileExt file newext = let name = takeWhile (/= '.') file
 -}
 
 writeGates file gates = do h        <- openFile file WriteMode
-                           mapM (hPrint h) gates
+                           -- mapM (hPrint h) gates
+                           hPrint h gates
                            hClose h
 
 

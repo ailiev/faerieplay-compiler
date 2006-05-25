@@ -17,7 +17,7 @@ import qualified Data.Map as Map
 import SashoLib
 import qualified Container as Cont
 
-import Common (ErrMonad, MyError(..))
+import Common (ErrMonad, MyError(..), trace)
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -43,7 +43,9 @@ data Func = Func Ident          -- func name
                  Typ            -- return type
                  [TypedName]    -- arguments
                  [Stm]          -- and the function body
-            deriving (Eq,Ord)
+            deriving (Eq,Ord
+                     , Show, Read
+                     )
 
 
 -- and the full name for an entity: its original name and an optional qualifier
@@ -56,7 +58,9 @@ data VarFlag =
   | Global
   | RetVar                      -- a return variable, ie. a var
                                 -- representing its enclosing function
-   deriving (Show,Ord,Eq)
+   deriving (Ord,Eq
+            , Show, Read
+            )
 
 
 type TypeTable = Map.Map EntName Typ
@@ -73,10 +77,12 @@ type FuncTable = Map.Map EntName Func
 type VarTable = Map.Map EntName (Typ,Var)
 
 
-
+-- NOTE: Data.Map does not export a Read instance :(
 data ProgTables = ProgTables { types  :: TypeTable,
                                funcs  :: FuncTable }
-    deriving (Show,Eq,Ord)
+    deriving (Eq,Ord
+             , Show
+             )
 
 
 
@@ -86,7 +92,9 @@ type Ident = String
 
 data Prog =
    Prog Ident ProgTables
-  deriving (Eq,Ord)
+  deriving (Eq,Ord
+           , Show
+           )
 
 
 type TypedName = (Ident, Typ)
@@ -109,7 +117,9 @@ data Typ =
  | RedArrayT Typ Int            -- similar
 
  | RefT Typ                     -- a reference type
-  deriving (Eq,Ord)
+  deriving (Eq,Ord
+           ,Show,Read
+           )
 
 {-
 data TypedName =
@@ -127,14 +137,18 @@ data Stm =
  | SPrint String [Exp]
  | SFor Var Exp Exp [Stm]
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
-  deriving (Eq,Ord)
+  deriving (Eq,Ord
+           , Show, Read
+           )
 
 
 -- an offset-length pair (in units of "primitive types", ie Int, Enum
 -- and Bool) describing the location of a field in a struct
 data FieldLoc = FieldLoc { byteloc :: (Int,Int), -- offset and length
                            valloc  :: (Int,Int) }
-                deriving (Eq,Ord,Show)
+                deriving (Eq,Ord
+                         , Show, Read
+                         )
 
 data FieldLocRecord = Byteloc | Valloc
 
@@ -162,7 +176,9 @@ data Exp =
               Integer           -- array length
  | EStructInit Int              -- prepare a struct with that many primitive (Int) fields
                                 -- and subfields
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord
+           , Show, Read
+           )
 
 
 
@@ -229,7 +245,9 @@ data Var =
   | VScoped Scope Var           -- during unrolling, everything ends
                                 -- up in one scope; thus add a
                                 -- list of the pre-unroll scope id's
-    deriving (Eq,Ord)
+    deriving (Eq,Ord
+             , Show, Read
+             )
 
 -- CONVENTION: VScoped goes on the outside of VFlagged (as illustrated in
 -- vflags), and they don't recurse further (that'd be a mess!)
@@ -237,7 +255,9 @@ data Var =
 data Lit =                      -- literals
     LInt Integer                -- TODO: change to Integer
   | LBool Bool
-   deriving (Eq,Ord)
+   deriving (Eq,Ord
+            , Show, Read
+            )
              
 -- some helpers
 lint = ELit . LInt
@@ -265,7 +285,7 @@ data BinOp =
   | Or
 --  and internal ones
   | Max
-   deriving (Eq,Ord)
+   deriving (Eq,Ord,Show,Read)
 
 
 data UnOp =
@@ -275,7 +295,7 @@ data UnOp =
 -- and internal:
   | Log2
   | Bitsize
-   deriving (Eq,Ord)
+   deriving (Eq,Ord,Show,Read)
 
 
 
@@ -310,39 +330,53 @@ type Scope = [Int]
 ------------------
 
 
-data ExpandTypFlags = DoFields | DoRefs | DoArrayElems | DoTypeDefs | DoAll
+data ExpandTypFlags = DoFields  -- ^ recurse into Struct fields
+                    | DoRefs    -- ^ recurse into the target type of a reference
+                    | DoArrayElems -- ^ recurse into array element types
+                    | DoTypeDefs  -- ^ recurse into type defs (SimpleT)
+                    | DoAll     -- ^ recurse in all cases
     deriving (Eq,Show)
 
--- fully expand a type, recursing into complex types
+
+-- fully expand a type, recursing into complex types as specified by the flags
 expandType :: (TypeTableMonad m) => [ExpandTypFlags] -> Typ -> m Typ
 expandType flags t =
-    let rec = expandType flags
+    do type_table <- getTypeTable
+       return $ expandType' type_table flags t
+
+
+
+expandType' :: TypeTable -> [ExpandTypFlags] -> Typ -> Typ
+expandType' type_table flags t =
+    let rec = expandType' type_table flags
     in
       case t of
                 (SimpleT name)          -> worker DoTypeDefs
-                                               (do type_table <- getTypeTable
-                                                   let t' = fromJust $ Map.lookup name type_table
-                                                   rec t')
+                                               (let t' = fromJustMsg
+                                                           ("Intermediate.expandType " ++ name) $
+                                                         Map.lookup name type_table
+                                                in
+                                                  rec t')
                 (ArrayT elem_t
                            len)         -> worker DoArrayElems
-                                               (do elem_t' <- rec elem_t
-                                                   return $ ArrayT elem_t' len)
+                                               (ArrayT (rec elem_t) len)
 
                 (StructT (name_typs,
                           locs))        -> worker DoFields
-                                               (do let (names,typs)   = unzip name_typs
-                                                   typs'             <- mapM rec typs
-                                                   return $ StructT (zip names typs', locs))
+                                               (let (names,typs)    = unzip name_typs
+                                                    typs'           = map rec typs
+                                                in
+                                                  StructT (zip names typs', locs))
 
                 (RefT t)                -> worker DoRefs
-                                                (do t'  <- rec t
-                                                    return $ RefT t')
+                                                (RefT $ rec t)
 
-                _                       -> return t
+                _                       -> t
 
-    where worker flag proc = do (if elem DoAll flags || elem flag flags
-                                 then proc
-                                 else return t)
+    where worker flag proc = if elem DoAll flags || elem flag flags
+                             then proc
+                             else t
+
 
 
 -- for a structure, get a field name given the number
@@ -353,18 +387,32 @@ getFieldName t                    _       = "getFieldName called on non-struct t
                                               ++ show t
 
 
--- return the length of a type,
+-- | return the total (summed) length of a type,
 -- which has already been expanded (ie. no SimpleT)
 -- use 'tblen' for f to get the length of simple types: Int, Bool, EnumT
 typeLength :: (Typ -> Int) -> Typ -> Int
 typeLength f t =
     let rec = typeLength f in
     case t of
-      (StructT fields)          -> sum $
-                                   map (rec . snd) $
-                                   fst fields
-      (SimpleT name)            -> error $ "Intermediate: typeLength of a SimpleT "
-                                           << name
+      (StructT (ts,
+                locs))          -> (sum $
+                                    map (rec . snd) $ -- snd pulls out the field's type
+                                    ts)
+                                     `trace`
+                                     ("Intermediate.typeLength: got a StructT with fields "
+                                      ++ (show . map fst) ts
+                                      ++ "; and locs " ++ show locs)
+                                   {- (sum $ map (snd . valloc) $ locs)
+                                   `trace`
+                                     ("Intermediate.typeLength: got a StructT with fields "
+                                      ++ (show . map fst) ts
+                                      ++ show locs) -}
+                                   
+      (SimpleT name)            -> 987654321
+                                   `trace`
+                                     ("ERROR: Intermediate.typeLength of SimpleT " << name)
+                                      {-error $ "Intermediate: typeLength of a SimpleT "
+                                           << name-}
       -- NOTE: dynamic arrays take up just one gate, hence always one
       -- doesnt make sense to ask for the binary size of a dynamic array, but need to
       -- rethink this
@@ -752,7 +800,7 @@ docExp e = case e of
 --    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
     (ExpT t e)          -> docExp e
 
-
+-- print a Typ for human eyes
 docTyp :: Typ -> Doc
 docTyp t =
     case t of
@@ -777,15 +825,17 @@ docTyp t =
                                 docTyp t]
       (RefT t)          -> docTyp t <+> text "&"
 
+-- print a Typ for the C++ runtime
 docTypMachine t = 
     case t of
-    -- an array is here specified by its length, and the number of primitive types
-    -- (int,bool) in its element type
-      (ArrayT t size)   -> let size_i   = evalStaticOrDie size
-                               size_elt = case t of
-                                            (StructT (_,locs  ))    -> length locs
-                                            _                       -> 1
-                           in  sep [text "array", integer size_i, int size_elt]
+    -- an array is here specified by its length, and the byte size of its elements
+      (ArrayT t size_e) -> let size     = evalStaticOrDie size_e
+                               elt_size = typeLength tblen t
+                                        {- case t of
+                               (           StructT (_,locs  ))    -> sum $ map (snd . byteloc) $ locs
+                                            _                       -> tblen t -}
+                           in
+                             sep [text "array", integer size, int elt_size]
       _                 -> text "scalar"
 
 
@@ -794,7 +844,7 @@ docTypedName (name,t) = sep [docTyp t, text name]
 docVar v =
     case v of
       (VSimple name)    -> text name
-      (VTemp i)         -> text "temp" <> (parens (int i))
+      (VTemp i)         -> text "temp" <> parens (int i)
       -- the scope list is reversed so we see the outermost scope (which is at
       -- the list end) first
       (VScoped scopes v)-> parens $ cat $ punctuate (text "/") (map int (reverse scopes)) ++ [text "/", docVar v]
@@ -846,32 +896,38 @@ docBinOp o = text (case o of
                     Or          -> "||"
                     Max         -> "`m`")
 
+docFieldLoc (FieldLoc { valloc  = (voff,vlen),
+                        byteloc = (boff,blen) })    = parens $ hcat [int voff,
+                                                                     comma,
+                                                                     int vlen]
 
-instance Show Stm where
-    showsPrec i = showsPrec i . docStm
+instance StreamShow Prog where
+    strShows = showsPrec 0 . docProg
 
-{-
-instance Show Exp where
-    showsPrec i = showsPrec i . docExp
--}
+instance StreamShow Stm where
+    strShows = showsPrec 0 . docStm
 
-instance Show Typ where
-    showsPrec i = showsPrec i . docTyp
 
-instance Show Var where
-    showsPrec i = showsPrec i . docVar
+instance StreamShow Exp where
+    strShows = showsPrec 0 . docExp
 
-instance Show Prog where
-    showsPrec i = showsPrec i . docProg
+instance StreamShow Typ where
+    strShows = showsPrec 0 . docTyp
 
-instance Show Func where
-    showsPrec i = showsPrec i . docFunc
+instance StreamShow Var where
+    strShows = showsPrec 0 . docVar
 
-instance Show Lit where
-    showsPrec i = showsPrec i . docLit
+instance StreamShow Func where
+    strShows = showsPrec 0 . docFunc
 
-instance Show BinOp where
-    showsPrec i = showsPrec i . docBinOp
+instance StreamShow Lit where
+    strShows = showsPrec 0 . docLit
 
-instance Show UnOp where
-    showsPrec i = showsPrec i . docUnOp
+instance StreamShow BinOp where
+    strShows = showsPrec 0 . docBinOp
+
+instance StreamShow UnOp where
+    strShows = showsPrec 0 . docUnOp
+
+instance StreamShow FieldLoc where
+    strShows = showsPrec 0 . docFieldLoc

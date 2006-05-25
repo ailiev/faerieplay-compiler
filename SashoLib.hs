@@ -4,6 +4,7 @@ module SashoLib (
 		 (.*),
                  (...),
 
+                 StreamShow (..),
                  (<<),
 
                  (>>==),
@@ -89,7 +90,7 @@ module SashoLib (
 		)
     where
 
-import List (isPrefixOf, union)
+import List (isPrefixOf, union, intersperse)
 
 import Monad (MonadPlus, mzero, mplus, msum, liftM)
 
@@ -143,9 +144,37 @@ notp f = not . f
 
 
 -- operator to build strings
-(<<) :: (Show a, Show b) => (a -> b -> String)
-x << y = cleanup $ (show x) ++ (show y)
-    where cleanup = (filter ((/= '"')))
+
+-- first a cousin of the Show class specially for this purpose
+class StreamShow a where
+    strShows :: a -> ShowS
+    strShow  :: a -> String
+    -- and default definitions
+    strShows x = ((strShow x) ++)
+    strShow  x = strShows x ""
+
+instance StreamShow String where
+    strShows s = (s ++)
+    strShow  s = s
+
+instance StreamShow Int     where strShows = showsPrec 0
+instance StreamShow Integer where strShows = showsPrec 0
+
+
+instance (StreamShow a) => StreamShow [a] where
+    strShows = foldl1 (.) . intersperse (", " ++) . map strShows
+
+instance (StreamShow a, StreamShow b) => StreamShow (a,b) where
+    strShows (x,y) =    strShows "(" .
+                        strShows x . strShows ", " . strShows y .
+                        strShows ")"
+
+
+(<<) :: (StreamShow a, StreamShow b) => (a -> b -> String)
+x << y = strShow x ++ strShow y
+--    where cleanup = (filter ((/= '"')))
+
+
 
 
 -- like >>= except the function is outside the monad, so this puts in a "return" for us

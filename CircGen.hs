@@ -27,6 +27,7 @@ module CircGen (
                 clip_circuit,
                 extractInputs,
                 showCct,
+                CctShow(..),
                 testNextInt
                ) where
 
@@ -61,11 +62,17 @@ import Intermediate as Im hiding (VarTable)
 
 
 
+-- should we generate SPrint gates for print() statements?
+cDOPRINT = False
+
+
 -- gate flags
 data GateFlags = Output         -- ^ an output gate
                | Terminal       -- ^ a gate which has to be reached, ie not trimmed out of
                                 -- ^ the circuit. currently Output and Print gates
-    deriving (Eq,Ord)
+    deriving (Eq,Ord
+             , Show, Read
+             )
 
 
 -- the gate operations
@@ -107,15 +114,15 @@ data Op =
   -- zero-based offset and a length, in bytes;
   -- used after a ReadDynArray, to collect the output of ReadDynArray
   -- into separate gates
-  -- for internal use, want to also keep a more high-level interpretation: offset and
-  -- length in GateVal's
+  -- for internal use (in Runtime.hs), want to also keep a more high-level interpretation:
+  -- offset and length in GateVal's
   | Slicer FieldLoc
 
   | Lit Im.Lit                  -- a literal
 
   | Print String                -- ^ a void-type print gate: prints a value preceded by a
                                 -- ^ fixed prompt
- deriving (Eq)
+ deriving (Eq, Show, Read)
 
 
 --
@@ -135,6 +142,8 @@ data Gate = Gate {gate_num   :: Int,            -- the gate number
                   gate_depth :: Int, -- depth in nested conditionals
                   gate_flags :: [GateFlags],
                   gate_doc :: GateDoc } -- some documentation, eg. a var name
+            deriving (Show, Read)
+
 
 type GateDoc = [Exp]
 
@@ -181,16 +190,23 @@ genCircuit :: TypeTable ->      -- the type table
               Circuit           -- the resulting circuit
 -}
 
+
 genCircuit type_table stms args =
-    let startState      = ([Map.empty], 0, type_table)
+    let startState      = MyState { vartable    = [Map.empty],
+                                    counter     = 0,
+                                    typetable   = type_table,
+                                    lit_table   = Map.empty
+                                  }
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
         clipped_circ    = clip_circuit circ
-                                `trace` ("The full circuit: " << circ)
+                                `trace` ("The full circuit: " << show circ)
         renum_circ      = renumber clipped_circ
-                                `trace` ("The clipped circuit " << clipped_circ)
-        flat_circ       = flatten_cicrcuit renum_circ
-                                `trace` ("The renumbered circuit " << renum_circ)
+                                `trace` ("The clipped circuit " << show clipped_circ)
+        -- expand all Typ fields in the gates, as it helps with printing out the types
+        -- (using docTypMachine)
+        flat_circ       = (map (expandGateTyp type_table) $ flatten_cicrcuit renum_circ)
+                                `trace` ("The renumbered circuit " << show renum_circ)
     in (renum_circ, flat_circ)
 
 
@@ -236,8 +252,15 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
                                                  gates
               in  ins ++ others
 
+expandGateTyp :: TypeTable -> Gate -> Gate
+expandGateTyp typetable g@(Gate { gate_typ = t })    =
+    let t' = Im.expandType' typetable [Im.DoAll] t
+    in
+      g { gate_typ = t'
+                     `trace` ("expandGateTyp " << t << " -> " << t')
+        }
 
-
+    
 -- | remove the nodes (and associate edges) not in 'keeps' from 'g'.
 keepNodes :: Gr.Graph gr => [Gr.Node] -> gr a b -> gr a b
 keepNodes keeps g = Gr.delNodes (Gr.nodes g \\ keeps) g
@@ -541,7 +564,10 @@ genStm circ stm =
       -- we will wire all the variables in x to go through this gate
       -- a bit of a hassle as there may be one or more gates feeding into here (in case of
       -- a struct). So, add slice gates
-      (SPrint prompt xs)        -> do i                 <- nextInt
+      (SPrint prompt xs)      -> if not cDOPRINT
+                                 then return circ
+                                 else
+                                   do i              <- nextInt
                                       depth             <- getDepth
 
                                       -- generate parameters for each expression separately.
@@ -597,11 +623,12 @@ genStm circ stm =
                                                                        []
                                                                        []
 
-                                      return (addCtxs (last circs) (ctx:slicer_ctxs)
-                                             `trace` 
-                                              ("On SPrint, adding contexts " << (ctx:slicer_ctxs)
-                                               << ", with current circuit " << (last circs))
-                                             )
+                                      return $ addCtxs (last circs) (ctx:slicer_ctxs)
+                                          {-   `trace` 
+                                              -- FIXME: add StreamShow instances for tuples...
+                                               ("On SPrint, adding contexts " << (ctx:slicer_ctxs)
+                                                 << ", with current circuit " << show (last circs))
+                                                 ) -}
 
 
 
@@ -865,7 +892,7 @@ genExp c e = do (c', res) <- genExp' c e
 
 
 -- this one is a little nasty - it returns the expanded circuit, and:
--- Left:    the context for this expression, which can be processed and
+-- Left:    the Context for this expression, which can be processed and
 --          added to the circuit by the caller, or
 -- Right:   the gate number where this
 --          expression can be found (in case it was already in the circuit)
@@ -911,12 +938,17 @@ genExp' c exp =
 
                               return (c, Right gates)
                                          `trace`
-                                         ("genExp' EVar " << var << ", vartable=" << var_table <<
+                                         ("genExp' EVar " << var << ", vartable=" << show var_table <<
                                           " -> " << gates)
 
-      (ELit l)          -> do i         <- nextInt
-                              let ctx   = mkCtx (Gate i VoidT (Lit l) [] depth [] [])
-                              return (c, Left [ctx])
+      (ELit l)          -> do mb_lit_addr   <- getLit l
+                              case mb_lit_addr of
+                                Just addr   -> return (c, Right [addr])
+                                Nothing     -> do i         <- nextInt
+                                                  addLit l i
+                                                  let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
+                                                  return (c, Left [ctx])
+
 
       -- here we try to update the Typ annotation on the Gate
       -- generated recursively
@@ -1079,13 +1111,18 @@ extractInputs (Prog pname (ProgTables {funcs=fs})) =
 --------------------
 
 -- the state in these computations:
-type MyState = ([VarTable],     -- stack of table Var -> [Node]
-                Int,            -- a counter to number the gates
-                                -- sequentially
-                TypeTable       -- the type table is read-only, so
-                                -- could be in a Reader, but easier to
-                                -- stick it in here
-               )
+data MyState = MyState { vartable   :: [VarTable], -- stack of table Var -> [Node]
+                         counter    :: Int,        -- a counter to number the gates
+                                                   -- sequentially
+                         typetable  :: TypeTable,  -- the type table is read-only, so
+                                                   -- could be in a Reader, but easier to
+                                                   -- stick it in here
+                         lit_table  :: Map.Map Im.Lit Gr.Node  -- a map of literals (Integer
+                                                               -- or Bool)
+                                                               -- to Node number, so we can
+                                                               -- stick to one gate per
+                                                               -- literal.
+                       }
 {-
 instance St.MonadState Int (St.State MyState) where
     get = getInt
@@ -1094,21 +1131,32 @@ instance St.MonadState Int (St.State MyState) where
 
 
 
-getsVars        f = St.gets $ f . tup3_get1
-getsTypeTable   f = St.gets $ f . tup3_get3
+getsVars        f   = St.gets $ f . vartable
+getsTypeTable   f   = St.gets $ f . typetable
+
+getInt              = St.gets counter
+getVars = getsVars id
+
+
+-- get the gate for a literal, in a Monad
+-- fails if the literal does not yet have a gate
+getLit l = St.gets $ Map.lookup l . lit_table
+
 
 -- modify the various parts of the state with some function
-modifyVars = St.modify . tup3_proj1
-modifyInt  = St.modify . tup3_proj2
+modifyVars f = St.modify $ \st@(MyState{ vartable = x }) -> st { vartable = f x }
+modifyInt  f = St.modify $ \st@(MyState{ counter  = x }) -> st { counter = f x }
+modifyLits f = St.modify $ \st@(MyState{ lit_table  = x }) -> st { lit_table = f x }
 
 -- OutMonad does carry a TypeTable around
 instance TypeTableMonad OutMonad where
     getTypeTable = getsTypeTable id
 
 
---getTypeTable = getsTypeTable id
-getInt = St.gets tup3_get2
-getVars = getsVars id
+-- add a gate number for this literal
+addLit l addr = modifyLits $ Map.insert l addr
+
+
 
 
 -- update the location of 'var' by some function of (Maybe [Node])
@@ -1157,8 +1205,33 @@ popScope  = do scope <- getsVars peek
 
 
 
+-- ---------------
+-- output stuff
+-- ---------------
 
--- need a "instance Show Gate" easier for machine parsing in a weak language (C++)
+
+-- StreamShow instances
+
+instance StreamShow Gate where
+    strShows = cctShowsGate " :: " " ** "
+
+
+
+--
+-- a look-alike of the Show class to serialize the circuit for the C++ runtime, so we can
+-- use the
+-- builtin Show and Read to serialize circuits within Haskell
+--
+class CctShow a where
+    cctShows :: a -> ShowS
+    cctShow  :: a -> String
+
+    -- and the same mutually recursive definitions: one or both must be provided
+    cctShow x  = (cctShows x) ""
+    cctShows x = ((cctShow x) ++)
+
+
+
 -- line-oriented format:
 --
 -- gate number
@@ -1168,45 +1241,35 @@ popScope  = do scope <- getsVars peek
 -- sources, or "nosrc"
 -- comment (the name of the output wire usually)
 -- <blank line>
-
-
-instance Show Gate where
-    showsPrec x g@(Gate i typ op srcs depth flags doc)
+cctShowsGate sep delim
+              g@(Gate i typ op srcs depth flags doc)
                    = (delim ++)                                          .
                      -- 1: gate number
-                     rec i                                  .   (sep ++) .
+                     rec' i                                 .   (sep ++) .
                      -- 2: gate flags
                      rec flags                              .   (sep ++) .
                      -- 3: gate result type
-                     (PP.render (Im.docTyp typ) ++)  .   (sep ++) .
+                     (rec typ)                              .   (sep ++) .
                      -- 4: gate operation
                      rec op                                 .   (sep ++) .
                      -- 5: source gates
                      (if null srcs
                       then ("nosrc" ++)
                       else (foldr1 (\f1 f2 -> f1 . (" " ++) . f2)
-                                   (map rec srcs)))         .   (sep ++) .
+                                   (map rec' srcs)))        .   (sep ++) .
                      -- 6: gate depth
-                     rec depth                              .   (sep ++) .
+                     showsPrec 0 depth                      .   (sep ++) .
                      -- 7: comment
                      (if null doc
                       then ("nocomm" ++)
-                      -- FIXME: may not be correct to use the latest (top of stack)
-                      -- annotation here
---                      else ((show $ strip $ peek doc) ++))               .
-                      else ((show $ map strip doc) ++))               .
+                      -- FIXME: outputting the latest addition to the comment stack here
+                      --(the one at the top), not sure if this is best
+                      else ((strShow $ strip $ peek doc) ++))             .
+--                      else ((strShow $ map strip doc) ++))               .
                      (delim ++)
 
-        where rec          :: (Show a) => a -> ShowS
-              rec           = showsPrec x -- recurse
-
-
-{-
-              sep           = "\n"
-              delim         = "\n"
--}
-              sep           = " :: "
-              delim         = " ** "
+        where rec x         = cctShows x -- recurse
+              rec'          = showsPrec 0 -- and go into the Show class
 
               -- get rid of variable annotations in an expression
               strip         = mapExp f
@@ -1214,94 +1277,59 @@ instance Show Gate where
               f e           = e
 
 
-
---     show (Gate i typ op srcs depth flags doc)
---                                         = show i ++ sep ++
---                                           show flags ++ sep ++
---                                           PP.render (Im.docTypMachine typ) ++ sep ++
---                                           show op ++ sep ++
---                                           (if null srcs
---                                            then "nosrc"
---                                            else (foldr1 (\s1 s2 -> s1 ++ " " ++  s2)
---                                                         (map show srcs)))              ++ sep ++
---                                           show depth ++ sep ++
---                                           (if null doc
---                                            then "nocomm"
---                                            else show (strip $ peek doc)) ++
---                                           sep ++ sep
-
-instance Show GateFlags where
-    show Output = "Output"
-    show Terminal = "Terminal"
-
--- this requires -fallow-overlapping-instances to GHC, as we already
--- have
--- (Show a) => instance Show [a]
-instance Show [GateFlags] where
-    show []     = "noflags"
-    show flags  = concatMap ((++" ") . show) flags
+-- need a different rendition of Typ's for the runtime
+instance CctShow Typ where
+    cctShow = PP.render . Im.docTypMachine
 
 
-instance Show Op where
-    showsPrec x o
-        = case o of
-            (Bin op)        -> str "BinOp "    . rec op
-            (Un  op)        -> str "UnOp "     . rec op
+
+instance CctShow Gate where
+    cctShows = cctShowsGate "\n" "\n"
+
+
+instance CctShow GateFlags where
+    cctShows f = case f of Output   -> ("Output" ++)
+                           Terminal -> ("Terminal" ++)
+
+
+
+instance CctShow [GateFlags] where
+    cctShow []     = "noflags"
+    cctShow flags  = concat $ intersperse " " $ map cctShow $ flags
+
+
+
+cctShowsOp o =
+    case o of
+            (Bin op)        -> str "BinOp "    . strShows op
+            (Un  op)        -> str "UnOp "     . strShows op
             Input           -> str "Input"
             Select          -> str "Select"
-            (Lit l)         -> str "Lit "      . rec l
+            (Lit l)         -> str "Lit "      . strShows l
             (InitDynArray elemsize
-                          len)  -> str "InitDynArray " . rec elemsize . sp .
-                                                          rec len
+                          len)  -> str "InitDynArray " . rec' elemsize . sp .
+                                                         rec' len
             ReadDynArray    -> str "ReadDynArray"
 
             WriteDynArray
-              Im.FieldLoc { Im.valloc = (off,len) } 
-                            -> str "WriteDynArray " . rec off . sp . rec len
+              Im.FieldLoc { Im.byteloc = (off,len) } 
+                            -> str "WriteDynArray " . rec' off . sp . rec' len
             Slicer
-              (Im.FieldLoc { Im.byteloc = (boff,blen),
-                             Im.valloc  = (off, len) })
-                            -> str "Slicer " . rec off . sp . rec len
-            (Print prompt)  -> str "Print " . rec prompt
-          where rec y   = showsPrec x y
+              (Im.FieldLoc { Im.byteloc = (off,len) })
+                            -> str "Slicer " . rec' off . sp . rec' len
+
+            (Print prompt)  -> str "Print " . str prompt
+          where rec y   = cctShows y
+                rec' y  = showsPrec 0 y
                 str     = (++)
                 sp      = (" " ++)
 
 
-
-{-
-instance Show Gate where
-    show (Gate i typ op srcs flags doc) = i << (if not (null flags) then "#" << show flags else "")
-                                            << ": "
-                                            << op << " [:" << typ << ":] "
-                                            << srcs
-                                            << (if not (null doc) then " ~" << doc << "~"
-                                                                  else "")
+instance CctShow Op where
+    cctShows = cctShowsOp
 
 
-instance Show GateFlags where
-    show Output = "o"
 
--- this requires -fallow-overlapping-instances to GHC, as we already
--- have
--- (Show a) => instance Show [a]
-instance Show [GateFlags] where
-    show flags = concatMap show flags
-
-
-instance Show Op where
-    show (Bin op)           = show op
-    show (Un  op)           = show op
-    show Input              = "in"
-    show Select             = "sel"
-    show (Lit l)            = "lit " << l
-    show ReadDynArray       = "readarr"
-    show (WriteDynArray
-             (off,len))     = "writearr " << len << "@" << off
-    show (Slicer (off,len)) = "slice " << len << "@" << off
-
-
--}
 
 
 -- need to get rid of newlines in the nodes
@@ -1324,7 +1352,11 @@ instance XDR Gate where
 -- some tests
 -------------------------------------
 
-testNextInt = let startState    = ([Map.empty], 0, Map.empty)
+testNextInt = let startState    = MyState { vartable    = [Map.empty],
+                                            counter     = 0,
+                                            typetable   = Map.empty,
+                                            lit_table   = Map.empty
+                                          }
                   (out,st)      = St.runState test_f startState
               in  (out,st)
     where test_f = do is <- replicateM 5 nextInt
