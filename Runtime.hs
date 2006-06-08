@@ -56,9 +56,11 @@ formatRun gates ins = do outs <- run gates ins
                                          PP.text flagsStr,
                                          PP.parens . PP.hcat . PP.punctuate PP.comma .
                                              map PP.int . gate_inputs $
-                                             gate]                                      $$
+                                             gate,
+                                         PP.text insStr]
+                              $$
                               PP.nest 6
-                                    (PP.text insStr $$
+                                    ({- PP.text insStr $$ -}
                                      PP.text valStr)
               in
                 PP.render doc

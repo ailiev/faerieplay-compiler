@@ -187,17 +187,20 @@ run v parser input =
                                   args          = CG.extractInputs prog
                                   (cct,gates)   = CG.genCircuit typ_table stms args
 
+                              putStrLn $ "Generating the circuit ..."
+                              h     <- openFile runtimeFile WriteMode
+                              mapM_ (hPutStr h . CG.cctShow) gates
+                              hClose h
+                              putStrLn $ "Wrote the circuit runtime form to " ++ runtimeFile
 
+{-
                               putStrLn $ "Now generating the circuit graph out to " ++ cctFile
                               writeFile cctFile (CG.showCct cct)
 
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
+-}
 
-                              putStrLn $ "Writing the circuit runtime form to " ++ runtimeFile
-                              h     <- openFile runtimeFile WriteMode
-                              mapM_ (hPutStr h . CG.cctShow) gates
-                              hClose h
 
 
 

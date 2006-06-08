@@ -428,13 +428,18 @@ getStrTLocs     (_, locs)    = map valloc locs
 getStrTByteLocs (_, locs)    = map byteloc locs
 
 
--- byte-lengths of primitive types    
-tblen (IntT _)          = 4     -- NOTE: 32-bit integers!
-tblen (BoolT)           = 1
-tblen (EnumT _ bits)    = bits `divUp` 8
-tblen (ArrayT t len)    = 4     -- NOTE: array pointer byte size
+-- byte-lengths of primitive types
+-- Added 1 byte to all the scalar byte sizes, used by the runtime to indicate if it's a
+-- Just value or Nothing
+tblen (IntT _)          = 4+1     -- NOTE: 32-bit integers!
+tblen (BoolT)           = 1+1
+tblen (EnumT _ bits)    = (bits `divUp` 8) + 1
+tblen (ArrayT t len)    = cARRAY_BLEN
 
-cARRAY_BLEN = 4::Int
+-- NOTE: array pointer byte size, including the Just indicator byte
+-- This is used in other places too, so needs to be set to the full amount (ie. 5 not 4)
+cARRAY_BLEN :: Int
+cARRAY_BLEN = 4+1
 
 
 ------------------------

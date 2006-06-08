@@ -41,8 +41,11 @@ module SashoLib (
                     
         modifyListHead,
         mapOnTail,
+        interleave,
 
         applyWithDefault,
+
+        strictEval,
 
         splice,
         runSumFrom0,
@@ -296,6 +299,11 @@ applyWithDefault f def x = case x of
                                Nothing  -> def
 
 
+-- ! force a strict evaluation of a value, returning it
+strictEval x = x `seq` x
+
+
+
 maybeApply :: Maybe (a -> a) -> a -> a
 maybeApply (Just f) x = f x
 maybeApply Nothing  x = x
@@ -388,6 +396,10 @@ modifyListHead f (x:xs) = (f x : xs)
 
 mapOnTail f []          = error "mapOnTail on empty list!"
 mapOnTail f (x:xs)      = x : (map f xs)
+
+interleave [] []            = []
+interleave (x:xs) (y:ys)    = (x:y:interleave xs ys)
+
 
 
 {-

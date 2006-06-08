@@ -8,20 +8,23 @@ GHCFLAGS += -v0
 
 GHCFLAGS += -odir $(ODIR) -hidir $(ODIR) 
 
+ODIR = build
+
 
 #
-# optimized or debug build?
+# which build?
 #
 
 ifdef OPT
-	ODIR = opt
+	ODIR := $(ODIR)/opt
 	GHCFLAGS += -O2
 else ifdef PROF
-	ODIR = prof
-	GHCFLAGS += -prof -auto-all
+	ODIR := $(ODIR)/prof
+	GHCFLAGS += -prof -auto-all -O
 else ifdef DBG			
+	ODIR := $(ODIR)/dbg
+
 	GHCFLAGS += -DTRACE
-	ODIR = dbg
 
 # this compiles a profiling executable, which can be run with:
 # +RTS -xc -RTS
@@ -40,8 +43,8 @@ else ifdef DBG
 # -? to see a list).
 	GHCFLAGS += -debug
 
-else				#non-optimized, non-debug, non-profiled
-	ODIR = default
+else				#non-optimized, non-debug, non-profiled, quickest to compile
+	ODIR := $(ODIR)/default
 endif
 
 

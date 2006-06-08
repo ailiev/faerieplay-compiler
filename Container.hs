@@ -22,3 +22,5 @@ instance (Eq a) => Container [] a where
     fromList    = id
     empty       = []
     singleton x = [x]
+
+

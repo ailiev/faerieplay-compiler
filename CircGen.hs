@@ -55,7 +55,9 @@ import qualified Control.Monad.State            as St
 import SashoLib
 -- import Sasho.XDR
 
-import qualified Container as Cont
+import qualified    Container                   as Cont
+import              Mapping
+
 import Common (trace)
 
 import Intermediate as Im hiding (VarTable)
@@ -64,6 +66,10 @@ import Intermediate as Im hiding (VarTable)
 
 -- should we generate SPrint gates for print() statements?
 cDOPRINT = False
+
+-- should we store ELit gate locations, and only generate one gate per literal?
+cSTORE_LITS = True
+
 
 
 -- gate flags
@@ -195,7 +201,7 @@ genCircuit type_table stms args =
     let startState      = MyState { vartable    = [Map.empty],
                                     counter     = 0,
                                     typetable   = type_table,
-                                    lit_table   = Map.empty
+                                    lit_table   = Mapping.empty
                                   }
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
@@ -369,6 +375,7 @@ genExpWithDoc c ghook e e_doc =
                                 let ctxs'   = map processCtx ctxs
                                 in ( foldl (flip (&)) c' ctxs',
                                      map Gr.node' ctxs' )
+                                 `trace` "genExpWithDoc on multiple contexts"
 
                             (Right nodes) ->
                                 -- no new gate generated, but we will
@@ -380,10 +387,8 @@ genExpWithDoc c ghook e e_doc =
                                 in  (c'', nodes)
        return (c'', nodes)
 
-    where addGateDoc exp = gateProjDoc (push (stripExpT exp))
-          processGate g     = let g'  = maybeApply ghook g
-                                  g'' = (addGateDoc e_doc g')
-                              in  g''
+    where addGateDoc exp    = gateProjDoc $ push $ stripExpT exp
+          processGate g     = addGateDoc e_doc $ maybeApply ghook g
           processCtx        = tup4_proj_3 processGate
 
 
@@ -480,7 +485,7 @@ genStm circ stm =
                                        -- eg: for x.y[i].z, we will:
                                        -- - add a WriteDynArray gate for x.y, limited to .z
                                        -- - update the gate location for x.y
-                                       {-# SCC "have array in expression" #-}
+                                       {-# SCC "have_array_in_expression" #-}
                                        do (c4, [arr_n]) <- genExp c3 arr_e
                                           (c5, [idx_n]) <- genExp c4 idx_e
                                           depth         <- getDepth
@@ -531,7 +536,7 @@ genStm circ stm =
                                                  depth
                                                  [] [])
              spliceVar (off,1) [i] rv
-             return $ {-# SCC "ctx & c5" #-} (ctx & c5)
+             return $ {-# SCC "ctx-&-c5" #-} (ctx & c5)
                         `trace`
                         ("SAss to EArr: \"" ++ show stm ++
                          "\n; inserting " ++ show ctx)
@@ -745,20 +750,34 @@ checkOutputVars c var mb_gate_loc
                         -- and update the Gate flags on those gates
                         -- FIXME: for now we just strip the flags, which may be excessive
                         -- when more flags are introduced.
+                        -- 
+                        -- FIXME: we get non-existant node numbers passed (with number
+                        -- -12345678), for non-initialized struct fields. The filter is a
+                        -- HACK around this
                         c' = foldl (updateLabel (\g -> g{gate_flags = []}))
                                    c
-                                   vgates'
+                                   (filter (/= -12345678) vgates')
                     return c'
     | otherwise =
         return c `trace` ("checkOutputVars non-matching var: " << var)
 
 
 -- update the label for a given node in a graph, if this node is present
+-- NOTE: strict evaluation
 updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
-updateLabel f gr node = let (mctx,gr')                  = Gr.match node gr
-                        in  case mctx of
-                              Nothing   -> gr
-                              Just ctx  -> (tup4_proj_3 f ctx) & gr'
+updateLabel f gr node = let (mctx,gr')      = {-# SCC "#extract" #-}
+                                              strictEval $
+                                                       Gr.match ({-# SCC "#node" #-} node)
+                                                                ({-# SCC "#gr"   #-} gr)
+                            ctx             = fromJustMsg ("updateLabel " << node)
+                                                          mctx
+                        in {-# SCC "re-insert" #-} (tup4_proj_3 (strictEval f) $! ctx) & (strictEval gr')
+{-                          
+                        in  case id $! mctx of
+                              Nothing   -> {-# SCC "ret-id" #-}     gr
+                              Just ctx  -> {-# SCC "ret-new-gr" #-} (tup4_proj_3 f ctx) &
+                                                                    (strictEval gr')
+-}
 
 
 
@@ -903,7 +922,6 @@ genExp c e = do (c', res) <- genExp' c e
 -- also need to be able to return a list of newly generated Contexts,
 -- for a ReadDynArray gate with all its following Slicer gates
 
-
 genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
                                                   [CircuitCtx]
                                                   [Gr.Node]))
@@ -941,13 +959,35 @@ genExp' c exp =
                                          ("genExp' EVar " << var << ", vartable=" << show var_table <<
                                           " -> " << gates)
 
-      (ELit l)          -> do mb_lit_addr   <- getLit l
+
+      (ELit l)        -> {-# SCC "Exp-ELit" #-}
+                         if cSTORE_LITS
+                         then
+                           do mb_lit_addr   <- getLit l
                               case mb_lit_addr of
                                 Just addr   -> return (c, Right [addr])
-                                Nothing     -> do i         <- nextInt
+                                Nothing     -> do i     <- nextInt
                                                   addLit l i
-                                                  let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
+                                                  let ctx   = mkCtx (Gate i
+                                                                          (IntT 32)
+                                                                          (Lit l)
+                                                                          []
+                                                                          depth
+                                                                          [] [])
                                                   return (c, Left [ctx])
+                         else   -- not cSTORE_LITS
+                           do i         <- nextInt
+                              let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
+                              return (c, Left [ctx])                           
+
+
+
+{-
+      (ELit l)          -> do i         <- nextInt
+                              let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
+                              return (c, Left [ctx])
+-}
+
 
 
       -- here we try to update the Typ annotation on the Gate
@@ -1117,11 +1157,13 @@ data MyState = MyState { vartable   :: [VarTable], -- stack of table Var -> [Nod
                          typetable  :: TypeTable,  -- the type table is read-only, so
                                                    -- could be in a Reader, but easier to
                                                    -- stick it in here
-                         lit_table  :: Map.Map Im.Lit Gr.Node  -- a map of literals (Integer
+                         lit_table  :: [(Im.Lit,Gr.Node)]      -- a Mapping of literals (Integer
                                                                -- or Bool)
                                                                -- to Node number, so we can
                                                                -- stick to one gate per
                                                                -- literal.
+                                                               -- instantiated as a list
+                                                               -- for now
                        }
 {-
 instance St.MonadState Int (St.State MyState) where
@@ -1140,7 +1182,7 @@ getVars = getsVars id
 
 -- get the gate for a literal, in a Monad
 -- fails if the literal does not yet have a gate
-getLit l = St.gets $ Map.lookup l . lit_table
+getLit l = St.gets $ Mapping.lookup l . lit_table
 
 
 -- modify the various parts of the state with some function
@@ -1154,7 +1196,7 @@ instance TypeTableMonad OutMonad where
 
 
 -- add a gate number for this literal
-addLit l addr = modifyLits $ Map.insert l addr
+addLit l addr = modifyLits $ Mapping.insert l addr
 
 
 
@@ -1355,7 +1397,7 @@ instance XDR Gate where
 testNextInt = let startState    = MyState { vartable    = [Map.empty],
                                             counter     = 0,
                                             typetable   = Map.empty,
-                                            lit_table   = Map.empty
+                                            lit_table   = Mapping.empty
                                           }
                   (out,st)      = St.runState test_f startState
               in  (out,st)
