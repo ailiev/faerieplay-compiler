@@ -35,18 +35,28 @@ import TypeChecker
 
 import SashoLib
 
+-- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
+-- section at the end.
+-- g_timestamp = "2006-06-12 13:05:49 sasho"
+
+g_svn_id = "subversion $Revision$"
+
 import qualified Text.PrettyPrint.HughesPJ as PP
 
 
 main = do argv          <- getArgs
+          name          <- getProgName
           let o@(opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
 --          hPrint stderr o
-          if (not $ null errs) then do name     <- getProgName
-                                       hPutStrLn stderr "Command line errors:"
+          if (not $ null errs) then do hPutStrLn stderr "Command line errors:"
                                        mapM_ (hPutStrLn stderr) errs
                                        hPutStrLn stderr $ usage name
                                        exitWith ExitSuccess
                                else return ()
+          -- bring the action to the front by sorting
+          let (action:_)    = sort opts
+          case action of
+            Version     -> do putStrLn $ name ++ " Version " ++ version
 
           if elem Help opts then do name     <- getProgName
                                     hPutStrLn stderr $ usage name
@@ -91,19 +101,29 @@ g_Flags :: IORef ([Flag],       -- flags
 g_Flags = unsafePerformIO $ newIORef ([], Nothing)
 
 data Flag 
-    = Verbose  | Version | Help
-    | Input String | Output (Maybe String) | LibDir String |
-      Runfile (Maybe String)
-      deriving (Eq,Show)
+    = 
+      -- actions:
+      Version
+    | Runfile (Maybe String)
+    | Graph   (Maybe String)
+      -- options:
+    | Verbose
+    | Help
+    | Input String
+    | Output (Maybe String)
+    | LibDir String
+      deriving (Eq,Ord,Show)
     
 optionControl :: [Opt.OptDescr Flag]
 optionControl =
-    [ Opt.Option ['v']      ["verbose"] (Opt.NoArg Verbose)       "chatty output on stderr"
-    , Opt.Option ['V','?']  ["version"] (Opt.NoArg Version)       "show version number"
-    , Opt.Option ['o']      ["output"]  (Opt.OptArg Output "<file>")  "output circuit to <file>"
-    , Opt.Option ['h']      ["help"]    (Opt.NoArg Help)            "Print help (this text)"
-    , Opt.Option ['r']      ["run"]     (Opt.OptArg Runfile "<file>") "Run circuit into <file>"
+    [ Opt.Option ['v']      ["verbose"] (Opt.NoArg Verbose)             "Chatty output on stderr"
+    , Opt.Option ['V','?']  ["version"] (Opt.NoArg Version)             "Show version number"
+    , Opt.Option ['o']      ["output"]  (Opt.OptArg Output "<file>")    "Output circuit to <file>"
+    , Opt.Option ['h']      ["help"]    (Opt.NoArg Help)                "Print help (this text)"
+    , Opt.Option ['r']      ["run"]     (Opt.OptArg Runfile "<file>")   "Run circuit into <file>"
+    , Opt.Option ['g']      ["graph"]   (Opt.NoArg Graph)               "Generate a gviz graph file"
      ]
+
 usage name = Opt.usageInfo ("Usage: " ++ name ++
                             " <options> <input file>\n" ++
                             "Produces <output> and cct.gviz\n" ++
@@ -181,7 +201,7 @@ run v parser input =
                                   gatesFile     = fromMaybe (modFileExt infile "cct")
                                                             mb_outfile
                                   runtimeFile   = modFileExt gatesFile "runtime"
-                                  cctFile       = modFileExt infile "gviz"
+                                  graphFile       = modFileExt infile "gviz"
 
                                   -- and compile the circuit
                                   args          = CG.extractInputs prog
@@ -193,10 +213,9 @@ run v parser input =
                               hClose h
                               putStrLn $ "Wrote the circuit runtime form to " ++ runtimeFile
 
+                              putStrLn $ "Now generating the circuit graph out to " ++ graphFile
+                              writeFile graphFile (CG.showCct cct)
 {-
-                              putStrLn $ "Now generating the circuit graph out to " ++ cctFile
-                              writeFile cctFile (CG.showCct cct)
-
                               putStrLn $ "Writing the gate list to " ++ gatesFile
                               writeGates gatesFile gates
 -}
@@ -253,3 +272,11 @@ testFlatten (Im.Prog pname (Im.ProgTables {Im.funcs=fs})) fname =
 --                                 Prog _ decls -> case head decls of
 --                                                      FunDecl _ _ _ _ stms -> print $ unrollStms stms
                                                  --                                                                    showTree v $ Fun TInt (Ident "unrolled") unrolled
+
+
+{-
+Local Variables:
+time-stamp-start:"g_timestamp[ 	]*=[ 	][\"]"
+time-stamp-line-limit:60
+End:
+-}
