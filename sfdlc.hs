@@ -37,9 +37,11 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-06-12 13:05:49 sasho"
+-- g_timestamp = "2006-06-12 13:07:23 sasho"
 
+-- this updated by subversion
 g_svn_id = "subversion $Revision$"
+
 
 import qualified Text.PrettyPrint.HughesPJ as PP
 
