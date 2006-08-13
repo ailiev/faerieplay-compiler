@@ -35,7 +35,7 @@ type ErrMonad = Either MyError
 -- reversed order is much better!
 trace = flip Trace.trace
 #else
-trace = const
+trace = flip Trace.trace
 #endif
 
 infix 0 `trace`

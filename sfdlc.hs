@@ -1,10 +1,11 @@
 module Main where
 
-import List     (unfoldr, find, elemIndex)
-import Maybe    (isJust, fromJust, fromMaybe, listToMaybe)
+import List     (intersect, sort)
+import Maybe    (isJust, fromJust, fromMaybe, listToMaybe, maybeToList)
 import System   (getArgs, exitWith, ExitCode(..), getProgName)
 
-import IO ( stdin, stderr,
+import IO ( Handle,
+            stdin, stdout, stderr,
             hGetContents, hPrint, hFlush, hPutStrLn, hPutStr,
             openFile, hClose,
             IOMode(..),
@@ -13,6 +14,11 @@ import IO ( stdin, stderr,
 import qualified Distribution.GetOpt    as Opt
 import Data.IORef                       (IORef,newIORef,readIORef,writeIORef)
 import System.IO.Unsafe                 (unsafePerformIO)
+
+import qualified Data.Graph.Inductive.Graph as Gr
+import qualified Data.Graph.Inductive.Tree  as TreeGr
+
+import qualified Debug.Trace                as Trace
 
 
 import SFDL.Abs                  -- the abstract syntax types from BNFC
@@ -29,7 +35,8 @@ import qualified HoistStms      as Ho
 import qualified Unroll         as Ur
 import qualified CircGen        as CG
 import qualified Runtime        as Run
-
+import           UDraw
+import           Common
 
 import TypeChecker
 
@@ -37,62 +44,93 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-06-12 13:07:23 sasho"
+-- g_timestamp = "2006-06-16 18:12:59 sasho"
 
 -- this updated by subversion
 g_svn_id = "subversion $Revision$"
+g_version = g_svn_id
 
 
-import qualified Text.PrettyPrint.HughesPJ as PP
+data LogPrio = PROGRESS | INFO | DEBUG
+   deriving (Show,Eq,Ord)
+
+logmsg prio msg = hPutStrLn stderr $ show prio ++ ": " ++ msg
 
 
 main = do argv          <- getArgs
           name          <- getProgName
-          let o@(opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
+          let o@(unsorted_opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
 --          hPrint stderr o
           if (not $ null errs) then do hPutStrLn stderr "Command line errors:"
                                        mapM_ (hPutStrLn stderr) errs
                                        hPutStrLn stderr $ usage name
                                        exitWith ExitSuccess
                                else return ()
+
           -- bring the action to the front by sorting
-          let (action:_)    = sort opts
-          case action of
-            Version     -> do putStrLn $ name ++ " Version " ++ version
+          let (action:opts) = sort $ unsorted_opts
 
-          if elem Help opts then do name     <- getProgName
-                                    hPutStrLn stderr $ usage name
-                                    exitWith ExitSuccess
-                            else return () -- carry on with main
-
-          let mb_infile = listToMaybe args
-
-          -- save away the flags and input file name
-          writeIORef g_Flags (opts, mb_infile)
+              mb_infile     = listToMaybe args
+              infile        = fromMaybe "-" mb_infile
 
           -- get the input handle, a file or stdin
-          hInfile       <- maybe  (return stdin)
-                                  (\infile ->
-                                       (openFile infile ReadMode)
-                                           `catch`
-                                       (\e -> do putStrLn $
-                                                   "failed to open " ++
-                                                   infile ++
-                                                   ": " ++
-                                                   ioeGetErrorString e
-                                                 exitWith $ ExitFailure 2))
-                                  mb_infile
+          hIn               <- openFH ReadMode infile
 
-          let mb_runfile    = extrRunFile opts
-          case mb_runfile of (Just mb_f)-> let -- default output will be to a.run
-                                               infile   = fromMaybe "a.cct" mb_infile
-                                               fname    = fromMaybe (modFileExt infile "run")
-                                                                    mb_f
-                                           in
-                                             doRunCct hInfile fname
+          -- get an output file name if an input was provided
+          -- Maybe monad
+          let mb_outfile    = do infile <- mb_infile
+                                 return $
+                                   modFileExt infile $
+                                   case action of
+                                     Compile    -> "runtime"
+                                     Run        -> "run"
+                                     MakeGraph  -> "udg" -- UDrawGraph
+                                     PruneGraph _ _ -> "pruned-cct"
+                                     _        -> fail "" -- no output file in this case
 
-                             Nothing    -> hGetContents hInfile >>= run 1 pProg
+          -- output handle:
+          -- in order try: an '-o' option, input file with changed suffix, stdout
+          let fOut      = fromJust $ listToMaybe $ [f | Output f <- unsorted_opts] ++
+                                                     (maybeToList mb_outfile) ++
+                                                     ["-"]
+          hOut          <- openFH WriteMode fOut
 
+          case action of
+            Compile         -> driveCompile infile hIn hOut opts
+                               `trace` ("Compiling into " ++ fOut)
+            Run             -> driveRunFile hIn hOut
+            MakeGraph       -> driveGraph   hIn hOut
+            PruneGraph s d  -> doPruneGraph s d hIn hOut
+
+            Version         -> putStrLn $ name ++ " Version " ++ g_version
+            Help            -> hPutStrLn stderr $ usage name
+
+            -- by default, compile
+            _               -> driveCompile infile hIn hOut opts
+
+          mapM_ hClose [hIn, hOut]
+
+          exitWith ExitSuccess
+
+          -- save away the flags and input file name
+--          writeIORef g_Flags (unsorted_opts, mb_infile)
+
+
+
+
+driveCompile fIn hIn hOut opts  =
+    do let fIn' = case fIn of
+                           "-"  -> "a.sfdl" -- just so any intermediate files have a
+                                            -- basename
+                           _    -> fIn
+       hGetContents hIn >>=
+         doCompile 1 pProg fIn' (opts `intersect` cCOMPILE_EXTRAS) hOut
+
+
+
+driveRunFile = doRunCct 
+
+driveGraph = doWriteGraph
 
 
 ------------
@@ -102,56 +140,93 @@ g_Flags :: IORef ([Flag],       -- flags
                   Maybe String) -- (optional) input file name
 g_Flags = unsafePerformIO $ newIORef ([], Nothing)
 
+
 data Flag 
     = 
       -- actions:
-      Version
-    | Runfile (Maybe String)
-    | Graph   (Maybe String)
-      -- options:
-    | Verbose
+      Compile
+    | MakeGraph
+    | PruneGraph { start    :: Gr.Node,
+                   d        :: Int } -- produce a cct file with just a part of the circuit, 'd'
+                                     -- nodes going backwards from 'start'
+    | Run
+
+    | Version
     | Help
-    | Input String
-    | Output (Maybe String)
-    | LibDir String
-      deriving (Eq,Ord,Show)
+
+      -- options:
+    | DumpGates                 -- dump the list of gates in Read/Show form
+    | DumpGraph                 -- dump the bare graph in Read/Show form
+
+    | Verbose
+    | Output String
+    deriving (Eq,Ord,Show)
+
+
+
+
+-- possible extra files to generate during the compilation phase.
+cCOMPILE_EXTRAS = [DumpGates, DumpGraph]
     
+
 optionControl :: [Opt.OptDescr Flag]
-optionControl =
-    [ Opt.Option ['v']      ["verbose"] (Opt.NoArg Verbose)             "Chatty output on stderr"
+optionControl = [
+                 -- actions
+      Opt.Option ['c']      ["compile"] (Opt.NoArg Compile)             "Compile SFDL (default action); \
+                                                                        \.runtime"
+    , Opt.Option ['G']      ["mkgraph"] (Opt.NoArg MakeGraph)           "generate a UDrawGraph file; .udg"
+    , Opt.Option ['r']      ["run"]     (Opt.NoArg Run)                 "Run circuit; .run"
+    , Opt.Option [   ]      ["prune"]   (Opt.ReqArg getPruneArgs
+                                                    "<start node>,<path len>")
+                                                                        "Prune the circuit; .cct"
+
     , Opt.Option ['V','?']  ["version"] (Opt.NoArg Version)             "Show version number"
-    , Opt.Option ['o']      ["output"]  (Opt.OptArg Output "<file>")    "Output circuit to <file>"
     , Opt.Option ['h']      ["help"]    (Opt.NoArg Help)                "Print help (this text)"
-    , Opt.Option ['r']      ["run"]     (Opt.OptArg Runfile "<file>")   "Run circuit into <file>"
-    , Opt.Option ['g']      ["graph"]   (Opt.NoArg Graph)               "Generate a gviz graph file"
+
+                -- flags
+    , Opt.Option [  ]       ["dump-gates",
+                             "dgt"]     (Opt.NoArg DumpGates)           "dump the list of gates \
+                                                                         \in Read/Show form; .gates"
+    , Opt.Option [  ]       ["dump-graph",
+                             "dgr"]     (Opt.NoArg DumpGraph)           "dump the graph in Read/Show form; \
+                                                                        \.cct"
+
+    , Opt.Option ['v']      ["verbose"] (Opt.NoArg Verbose)             "Chatty output on stderr"
+    , Opt.Option ['o']      ["output"]  (Opt.ReqArg Output "<file>")    "Output to <file>"
      ]
 
+
+getPruneArgs :: String -> Flag
+getPruneArgs str = let (start,str1) = head $ reads str
+                       (',':str2)   = str1
+                       (dist,[])    = head $ reads str2
+                   in
+                     PruneGraph start dist
+
 usage name = Opt.usageInfo ("Usage: " ++ name ++
-                            " <options> <input file>\n" ++
-                            "Produces <output> and cct.gviz\n" ++
-                            "Options:")
+                            " <options> in.sfdl\n\
+                            \Compiles SFDL files, simulates a circuit, and manipulates circuit files.\n\
+                            \Options, with associated default output filename extensions:")
                            optionControl
+
+openFH mode name =  Trace.trace ("Opening file " ++ name ++ " in " ++ show mode) $
+                    case name of
+                      "-"   -> return $ case mode of WriteMode   -> stdout
+                                                     ReadMode    -> stdin
+                      _     -> openFile name mode
+                               `catch`
+                               (\e -> do hPutStrLn stderr $ "failed to open " ++ name ++ ": "
+                                                      ++ ioeGetErrorString e
+                                         exitWith $ ExitFailure 2)
 
 
 -- extract various options from the global options list
 getOutFile = do (flags,_)   <- readIORef g_Flags
-                return ( do (Output f) <- find isOut flags -- Maybe monad
-                            return f )
-    where isOut (Output _)  = True
-          isOut _           = False
-
-getRunFile = do (flags,_)   <- readIORef g_Flags
-                return $ extrRunFile flags
+                return $ listToMaybe [f | Output f <- flags]
 
 getInFile = do (_,mb_infile) <- readIORef g_Flags
                return $ fromJustMsg "No actual input file specified"
                                     mb_infile
-
-
-extrRunFile flags =     do (Runfile f) <- find isRunFile flags -- Maybe monad
-                           return f
-    where isRunFile (Runfile _) = True
-          isRunFile _           = False
 
 
 type Verbosity = Int
@@ -159,17 +234,12 @@ type Verbosity = Int
 putStrV :: Verbosity -> String -> IO ()
 putStrV v s = if v > 1 then putStrLn s else return ()
 
-{-
-showTree :: (Show a, Print a) => Int -> a -> IO ()
-showTree v tree
- = do
-      putStrV v $ "\n[Abstract Syntax]\n\n" ++ show tree
-      putStrV v $ "\n[Linearized tree]\n\n" ++ printTree tree
--}
 
---run :: (Print a, Show a) => Verbosity -> ParseFun a -> String -> IO ()
-run v parser input =
-    let tokens  = myLexer input
+cCOMPILE_INTERMEDIATE_INFO = [ (DumpGraph, "cct"),
+                               (DumpGates, "gates") ]
+
+doCompile v parser filenameIn extras hOut strIn =
+    let tokens  = myLexer strIn
         ast     = parser tokens
     in case ast of
          Bad s    -> do putStrLn "\nParse Failed...\n"
@@ -177,67 +247,80 @@ run v parser input =
                         putStrV v $ show tokens
                         putStrLn s
          Ok  prog@(Prog _ _) ->
-           do putStrLn "\nParse Successful!"
+           do logmsg INFO "Parse Successful!"
               case typeCheck prog of
-                (Left err)        -> print $ "Type Error! " << err
+                (Left err)        -> hPutStrLn stderr $ "Type Error! " << err
                 (Right prog@(Im.Prog pname
                              Im.ProgTables {Im.types=typ_table,
                                             Im.funcs=fs}))      ->
-                   do hPrint stderr prog
-                      putStrLn "Typechecking done"
+                   do -- hPrint stderr prog
+                      logmsg PROGRESS "Typechecking done"
 
                       let prog_flat = Ho.flattenProg prog
-                      hPrint stderr prog_flat
-                      putStrLn "Flattened program"
+                      -- hPrint stderr prog_flat
+                      logmsg PROGRESS "Flattened program"
                       case Ur.unrollProg prog_flat of
-                        (Left err)       -> print $ "Unrolling Error! " << err
+                        (Left err)       -> hPutStrLn stderr $ "Unrolling Error! " << err
                         (Right stms)     ->
-                           do hPrint stderr (PP.vcat (map Im.docStm stms))
-                              putStrLn "Unrolled main"
---                              return () -- in case we want to exit before circuit generation
+                           do -- hPrint stderr (PP.vcat (map Im.docStm stms))
+                              logmsg PROGRESS "Unrolled main; Starting to generate the circuit"
 
-                              infile         <- getInFile
-                              mb_outfile_opt <- getOutFile
-                              let mb_outfile    = fromMaybe Nothing
-                                                            mb_outfile_opt
-                                  gatesFile     = fromMaybe (modFileExt infile "cct")
-                                                            mb_outfile
-                                  runtimeFile   = modFileExt gatesFile "runtime"
-                                  graphFile       = modFileExt infile "gviz"
-
-                                  -- and compile the circuit
+                              let -- compile the circuit
                                   args          = CG.extractInputs prog
                                   (cct,gates)   = CG.genCircuit typ_table stms args
 
-                              putStrLn $ "Generating the circuit ..."
-                              h     <- openFile runtimeFile WriteMode
-                              mapM_ (hPutStr h . CG.cctShow) gates
-                              hClose h
-                              putStrLn $ "Wrote the circuit runtime form to " ++ runtimeFile
+                              -- write the .runtime file
+                              mapM_ (hPutStr hOut . CG.cctShow) gates
+                              logmsg PROGRESS "Wrote the circuit runtime file"
 
-                              putStrLn $ "Now generating the circuit graph out to " ++ graphFile
-                              writeFile graphFile (CG.showCct cct)
-{-
-                              putStrLn $ "Writing the gate list to " ++ gatesFile
-                              writeGates gatesFile gates
--}
+                              -- and the extra outputs requested
+                              mapM_ (doExtras filenameIn (cct,gates)) extras
 
 
+doExtras filenameIn ccts flag
+    = do let outfile = modFileExt filenameIn
+                                  (fromJustMsg "extra compile action"
+                                               (lookup flag cCOMPILE_INTERMEDIATE_INFO))
+         logmsg PROGRESS $ "Doing " ++ show flag ++ " into " ++ outfile
+         writeFile outfile (doExtra flag ccts)
+         logmsg PROGRESS $ "Done with " ++ show flag ++ "."
 
 
-doRunCct cct_fh outfile = 
-    do putStrLn ("Now running the circuit into " ++ 
-                 outfile)
-       gates    <- hGetContents cct_fh >>= readIO
+doExtra DumpGates (cct,gates)   = show gates
+doExtra DumpGraph (cct,gates)   = showGraph cct
+
+
+readCct :: (Read a, Read b) => Handle -> IO (TreeGr.Gr a b)
+readCct hIn = hGetContents hIn >>= readIO
+
+
+doWriteGraph cct_fh hOut = do logmsg PROGRESS $ "Generating the circuit graph (UDrawGraph)"
+                              cct     <- hGetContents cct_fh >>= readIO
+                              -- NOTE: get an "Overlapping instances for Read" error if
+                              -- the type of cct is not specified, could be solved by ghc
+                              -- option -fallow-incoherent-instances which sounds bad.
+                              let _     = (cct :: CG.Circuit)
+                              hPutStrLn hOut $ CG.showCctGraph cct
+
+
+doPruneGraph :: Gr.Node -> Int -> Handle -> Handle -> IO()
+doPruneGraph start dist hIn hOut =
+    do logmsg PROGRESS "Pruning the circuit graph"
+       cct              <- hGetContents hIn >>= readIO
+       let _            = cct :: CG.Circuit
+       let cct_pruned   = UDraw.pruneGraph UDraw.back start dist cct
+       (hPutStrLn hOut $ showGraph cct_pruned)
+         `trace` ("doPruneGraph: cct_pruned is\n" ++ show cct_pruned)
+
+
+doRunCct gates_fh hOut = 
+    do logmsg PROGRESS "Now running the circuit"
+       gates    <- hGetContents gates_fh >>= readIO
        ins      <- Run.getUserInputs gates
-       h        <- openFile outfile WriteMode
        vals     <- Run.formatRun gates ins
-       mapM_ (hPutStrLn h) vals
-       hClose h
+       mapM_ (hPutStrLn hOut) vals
 
        
-
-
 modFileExt file newext = let name = takeWhile (/= '.') file
                          in  name ++ "." ++ newext
 
@@ -255,16 +338,12 @@ modFileExt file newext = let name = takeWhile (/= '.') file
 -}
 -}
 
-writeGates file gates = do h        <- openFile file WriteMode
-                           -- mapM (hPrint h) gates
-                           hPrint h gates
-                           hClose h
 
-
-printMap m = mapM_ print $ Map.fold (:) [] m
+-- printMap m = mapM_ print $ Map.fold (:) [] m
 
 getMain (Im.Prog _ (Im.ProgTables {Im.funcs=fs})) =
-    fromJust $ Map.lookup "main" fs
+    fromJustMsg "Failed to find main function" $ Map.lookup "main" fs
+
         
 testFlatten (Im.Prog pname (Im.ProgTables {Im.funcs=fs})) fname =
     do let (Just f) = Map.lookup fname fs

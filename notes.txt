@@ -116,3 +116,9 @@ How should a Select gate treat a Nothing condition? Seems correct to treat it
 same as False, rather than just produce a Nothing. A Nothing condition should
 only be produced on a non-taken branch, in which case that branch's values
 should be discarded *and* the peer branch's values (perhaps unchanged) taken.
+
+
+<date>Thu Jun  8 19:48:54 2006</date>
+
+Graph.ufold does the fold in an arbitrary-looking order, certainly not
+depth-first.

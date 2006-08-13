@@ -26,7 +26,7 @@ module CircGen (
                 genCircuit,
                 clip_circuit,
                 extractInputs,
-                showCct,
+                showCctGraph,
                 CctShow(..),
                 testNextInt
                ) where
@@ -50,9 +50,12 @@ import qualified Data.Graph.Inductive.Query.BFS as GrBFS
 import qualified Text.PrettyPrint               as PP
 
 import qualified Data.Map                       as Map
+import qualified Data.Tree                      as Tree
+
 import qualified Control.Monad.State            as St
 
 import SashoLib
+import UDraw
 -- import Sasho.XDR
 
 import qualified    Container                   as Cont
@@ -214,6 +217,16 @@ genCircuit type_table stms args =
         flat_circ       = (map (expandGateTyp type_table) $ flatten_cicrcuit renum_circ)
                                 `trace` ("The renumbered circuit " << show renum_circ)
     in (renum_circ, flat_circ)
+         `trace` ("The DFS forest: " << genDFSForest renum_circ)
+
+
+getUFoldOrder g = Gr.ufold f "" g
+    where f (_,n,g,_) s = show n ++ " " ++ s
+
+
+genDFSForest g = Tree.drawForest $ GrDFS.dffWith' strNode g
+    where strNode (_,n,_,_) = show n
+
 
 
 -- keep only gates which are reverse-reachable from terminal gates
@@ -1375,11 +1388,26 @@ instance CctShow Op where
 
 
 -- need to get rid of newlines in the nodes
-showCct :: (Gr.DynGraph g, Show b) => g Gate b -> String
-showCct = Graphviz.graphviz'
-          . Gr.nmap (
-                     -- tr ("\n", " # ") .
-                     show)
+showCctGraph :: (Gr.DynGraph gr) => gr Gate b -> String
+showCctGraph g =
+            let inNodes     = map Gr.node' $ GrBas.gsel isInCtx g
+{-
+                trees       = makeSimpleTree inNodes g
+            in
+              Tree.drawForest $ map (mapTree show) trees
+-}
+                terms       = UDraw.makeTerm (const "node")
+                                             (\gate -> [("OBJECT", myShow gate)])
+                                             inNodes
+                                             g
+                              `trace`
+                              ("Calling UDraw.makeTerm with inNodes=" ++ show inNodes)
+            in
+              (PP.render $ UDraw.doc terms)
+                `trace` ("UDraw.makeTerm done")
+    where isInCtx (ins,_,_,_) = null ins
+          myShow (Gate { gate_num = num,
+                         gate_op  = op  }) = show num ++ "\\n" ++ cctShow op
 
 
 {-

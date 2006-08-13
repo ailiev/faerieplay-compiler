@@ -41,9 +41,9 @@ else ifdef DBG
 # runtime turns on numerous assertions and sanity checks, and provides extra
 # options for producing debugging output at runtime (run the program with +RTS
 # -? to see a list).
-	GHCFLAGS += -debug
+#	GHCFLAGS += -debug
 
-else				#non-optimized, non-debug, non-profiled, quickest to compile
+else		    # non-optimized, non-debug, non-profiled, quickest to compile
 	ODIR := $(ODIR)/default
 endif
 
@@ -65,6 +65,11 @@ $(bnfc_files): $(CF_ROOT).cf
 	make -C SFDL
 
 bnfc: $(bnfc_files)
+
+
+%.o: %.hs
+	ghc -c $(GHCFLAGS) $<
+
 
 $(ODIR)/%.o: %.hs
 #	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
@@ -91,7 +96,7 @@ install: $(ODIR)/sfdlc
 
 tags: TAGS
 
-TAGS: $(wildcard *.hs)
+TAGS: $(wildcard *.hs) $(wildcard SFDL/*.hs)
 	hasktags6 --etags $^
 
 # to make postscript of a circuit (or any) gviz file:

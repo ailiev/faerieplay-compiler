@@ -43,6 +43,11 @@ module SashoLib (
         mapOnTail,
         interleave,
 
+        iterateTree,
+        pruneTree,
+
+        nubOrds,
+
         applyWithDefault,
 
         strictEval,
@@ -54,6 +59,8 @@ module SashoLib (
         spanList,
 
         mapOne,
+--        mapDupsBy,
+        mapAccumDupsBy,
 
 		 pair2,
 		 pair3,
@@ -77,10 +84,14 @@ module SashoLib (
         strictList,
         iterateList,
 
+        mapTreeM, mapTree,
+
 		 factorial,
                  choose,
                  sumOp,
                  mapInputs2,
+
+                 proj_tup2,
                 
                 tup3_get1, tup3_get2, tup3_get3,
                 tup3_proj1, tup3_proj2, tup3_proj3,
@@ -93,13 +104,17 @@ module SashoLib (
 		)
     where
 
-import List (isPrefixOf, union, intersperse)
+import List (isPrefixOf, union, intersperse, mapAccumL, partition)
+import qualified List
 
 import Monad (MonadPlus, mzero, mplus, msum, liftM)
 
 import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT, MonadError(..))
+import Control.Monad.Identity (runIdentity)
 
 import Control.Monad.Trans (MonadTrans, lift)
+
+import qualified    Data.Tree                   as Tree
 
 import Numeric                      (showHex)
 
@@ -156,6 +171,9 @@ class StreamShow a where
     strShows x = ((strShow x) ++)
     strShow  x = strShows x ""
 
+
+
+
 instance StreamShow String where
     strShows s = (s ++)
     strShow  s = s
@@ -163,9 +181,11 @@ instance StreamShow String where
 instance StreamShow Int     where strShows = showsPrec 0
 instance StreamShow Integer where strShows = showsPrec 0
 
+strShowsList :: (StreamShow a) => [a] -> ShowS
+strShowsList = (foldl (.) id) . intersperse (", " ++) . map strShows
 
 instance (StreamShow a) => StreamShow [a] where
-    strShows = foldl1 (.) . intersperse (", " ++) . map strShows
+    strShows = strShowsList
 
 instance (StreamShow a, StreamShow b) => StreamShow (a,b) where
     strShows (x,y) =    strShows "(" .
@@ -202,12 +222,16 @@ instance Show String where
 -}
 
 
--- compose a function on 2 args with a function on one arg
+-- | compose a function on 2 args with a function on one arg
 -- same fixity as (.)
 infixr 9 ...
 (...) :: (c -> d) -> (a -> b -> c) -> a -> b -> d
 f ... g = \x y -> f (g x y)
 
+
+-- | compose a function g on one arg with a function f on 2 args, applying g to two inputs
+-- before passing to f
+infixr 9 `comp2_1`
 f `comp2_1` g = \x y -> f (g x) (g y)
 
 
@@ -241,13 +265,75 @@ filterList bad xs = let (pre,badL) = breakList (bad `isPrefixOf`) xs
                     in pre ++ (filterList bad postBad)
 
 
--- iterate a function which produces a finite list, by re-applying it on each output, and
+-- | iterate a function which produces a finite list, by re-applying it on each output, and
 -- then concatenating
 iterateList :: (a -> [a]) -> a -> [a]
 iterateList f x = let fx = f x
                   in 
                     fx ++ concatMap (iterateList f) fx
 
+-- | iterate a function which produces a finite list, to produce a Tree
+iterateTree :: (a -> [a]) -> a -> Tree.Tree a
+iterateTree f x = Tree.Node x (map (iterateTree f) (f x))
+
+
+-- | prune a tree up to and including depth 'd' (ie. the root is always kept)
+pruneTree :: (Ord a, Num a) => a -> Tree.Tree b -> Tree.Tree b
+pruneTree d (Tree.Node r subs)
+    | d <= (fromInteger 0)  = Tree.Node r []
+    | otherwise             = Tree.Node r (map (pruneTree (d-1)) subs)
+
+
+-- remove duplicates in a list of Ord instance (ie. can be sorted); should be
+-- much more efficient than List.nub, which is O(n^2)
+nubOrds :: (Ord a) => [a] -> [a]
+nubOrds = map head . List.group . List.sort
+
+
+-- apply a function to all second and further instances of an item in a list, with a given
+-- equality predicate
+{-
+mapDupsBy :: (a -> a -> Bool) -> (a -> a) -> [a] -> [a]
+mapDupsBy eq f xs = let (ys, _) = foldl g ([],[]) xs
+                    in
+                      reverse ys
+    where g (ys, uniqs) x = let (y, uniqs') = if any (eq x) uniqs -- have already seen x
+                                              then (f x, uniqs)
+                                              else (x  , x:uniqs)
+                            in
+                              (y:ys, -- this is efficient, but will build the list in
+                                     -- reverse
+                               uniqs')
+-}
+
+
+-- | mapAccum a function on equivalent values in a list, presumably to make them
+-- different via numbering or such. 'f' will be applied to the first instance of every
+-- value too, with 'start' as the accumulator value.
+mapAccumDupsBy :: (a -> a -> Bool)
+               -> (acc_t -> a -> (acc_t,b))
+               -> acc_t
+               -> [a]
+               -> [b]
+mapAccumDupsBy eq f start xs = snd $ mapAccumL g [] xs
+-- the accumulator is an assoc list of type (a, acc_t)
+    where -- g :: [(a, acc_t)] -> a -> ( [(a, acc_t)], a )
+          g accums x = let (mb_accum, rest) = extractOne (eq x . fst) accums
+                           (acc_val', y)    = maybe (f start x)
+                                                    (\acc -> f (snd acc) x)
+                                                    mb_accum
+                           in
+                             ((x,acc_val') : rest, -- new accumulator
+                              y -- new list element
+                             )
+
+
+extractOne   p  xs = let (matches, rest) = partition p xs
+                     in
+                       case matches of
+                         []            -> (Nothing, xs)
+                         [m]           -> (Just m, rest)
+                         (m1:m_rest)   -> (Just m1, m_rest++rest)
 
 
 -- a version of unfoldr for use in a Monad
@@ -424,6 +510,13 @@ instance MonadError () (Maybe) where
     Just x  `catchError` _  = Just x
 
 
+-- not quite sure about this, but can be useful
+instance MonadError () [] where
+    throwError _            = []
+    [] `catchError` h  = h ()
+    xs  `catchError` _  = xs
+
+
 newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }
 
 instance (Monad m) => Monad (MaybeT m) where
@@ -497,6 +590,9 @@ pair3 f g h = \x -> (f x, g x, h x)
 -- | map a function over a pair, returning the resulting pair
 mapTuple2 :: (a -> b) -> (a,a) -> (b,b)
 mapTuple2 f (x,y) = (f x, f y)
+
+-- | turn a pair of functions to a function on pairs
+proj_tup2 (f,g) (x,y) = (f x, g y)
 
 -- | map a monadic function over a pair, returning the result pair in the Monad
 mapTupleM2 :: (Monad m) => (a -> m b) -> (a,a) -> m (b,b)
@@ -595,3 +691,21 @@ tup4_proj_2 f (x1,x2,x3,x4) = (x1  , f x2, x3  , x4  )
 tup4_proj_3 f (x1,x2,x3,x4) = (x1  , x2  , f x3, x4  )
 tup4_proj_4 f (x1,x2,x3,x4) = (x1  , x2  , x3  , f x4)
 
+
+
+----------------------
+-- Tree functions
+----------------------
+
+-- | map a monadic function on all the nodes of a 'Tree'.
+mapTreeM :: (Monad m) => (a -> m b) -> Tree.Tree a -> m (Tree.Tree b)
+mapTreeM f t@(Tree.Node l ts) = do l'  <- f l
+                                   ts' <- mapM (mapTreeM f) ts -- works for ts == []
+                                   return $ Tree.Node l' ts'
+
+mapTree f t = runIdentity $ mapTreeM (myLiftM f) t
+
+
+
+
+-- extractBranch extr xs = catMaybes $ mapM $ do extr
