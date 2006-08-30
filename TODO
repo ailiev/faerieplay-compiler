@@ -1,3 +1,5 @@
+-*- text -*-
+
 <date>Wed Mar 22 16:46:29 2006</date>
 
 enable for-loops to count up as well as down, depending on the relative values
@@ -21,3 +23,9 @@ Maybe annotate invalid values somehow - eg division by zero, array read/write
 out of bounds, so if any make it to the output, we may know where the problem
 comes from. ie. use an Either value :)
 
+
+
+<date>Mon Aug 28 17:16:45 2006</date>
+
+Add support for statement labels, which propagate to gates to facilitate lining
+up the circuit and the code.
