@@ -1406,8 +1406,9 @@ showCctGraph g =
               (PP.render $ UDraw.doc terms)
                 `trace` ("UDraw.makeTerm done")
     where isInCtx (ins,_,_,_) = null ins
-          myShow (Gate { gate_num = num,
-                         gate_op  = op  }) = show num ++ "\\n" ++ cctShow op
+          myShow g = show (gate_num g)
+                     ++ " @ " ++ show (gate_depth g)
+                     ++ "\\n" ++ cctShow (gate_op g)
 
 
 {-

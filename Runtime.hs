@@ -287,6 +287,9 @@ gate2func Gate { gate_op = op,
 
         Slicer (Im.FieldLoc { Im.valloc = (off,len) })
                             -> \[args]      -> do VList m_vs    <- args
+                                                  -- NOTE: if this pattern match fails (ie
+                                                  -- there are too few elements in m_vs,
+                                                  -- or len /= 1), result is Nothing
                                                   [ans]         <- sequence $
                                                                    take len . drop off $
                                                                    m_vs
