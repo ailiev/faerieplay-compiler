@@ -29,3 +29,11 @@ comes from. ie. use an Either value :)
 
 Add support for statement labels, which propagate to gates to facilitate lining
 up the circuit and the code.
+
+
+<date>Fri Sep  8 17:25:02 2006</date>
+
+Add comments to the .runtime file, to make it easier to figure out by manual
+inspection. Eg. comment what a scalar types bitsize is, of it's actually a Bool,
+etc.
+

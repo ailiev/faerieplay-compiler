@@ -1271,11 +1271,9 @@ instance StreamShow Gate where
     strShows = cctShowsGate " :: " " ** "
 
 
-
 --
 -- a look-alike of the Show class to serialize the circuit for the C++ runtime, so we can
--- use the
--- builtin Show and Read to serialize circuits within Haskell
+-- use the builtin Show and Read to serialize circuits within Haskell
 --
 class CctShow a where
     cctShows :: a -> ShowS
@@ -1353,14 +1351,20 @@ instance CctShow [GateFlags] where
     cctShow flags  = concat $ intersperse " " $ map cctShow $ flags
 
 
-
+-- NOTE: strShows is from the StreamShow class, for which we have many instance
+-- definitions in Intermediate.hs
 cctShowsOp o =
     case o of
             (Bin op)        -> str "BinOp "    . strShows op
             (Un  op)        -> str "UnOp "     . strShows op
             Input           -> str "Input"
             Select          -> str "Select"
-            (Lit l)         -> str "Lit "      . strShows l
+            -- convert a LBool to the matching LInt before displaying.
+            (Lit l)         -> str "Lit " . case l of
+                                              Im.LInt i
+                                                  -> showsPrec 0 i
+                                              Im.LBool b
+                                                  -> showsPrec 0 $ fromEnum b
             (InitDynArray elemsize
                           len)  -> str "InitDynArray " . rec' elemsize . sp .
                                                          rec' len

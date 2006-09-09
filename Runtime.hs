@@ -22,11 +22,11 @@ import           Control.Monad.Error    (MonadError(..))
 
 import qualified Debug.Trace                    as Trace
 
-import Data.Bits        ((.&.), (.|.), xor, shiftL, shiftR)
+import Data.Bits        ((.&.), (.|.), xor, shiftL, shiftR, complement, bitSize)
 
 import Text.Printf      (printf)
 
-import Text.PrettyPrint                         as PP
+import qualified Text.PrettyPrint               as PP
 
 import SashoLib
 
@@ -44,6 +44,14 @@ type ValArrayType = Maybe GateVal
 
 formatRun gates ins = do outs <- run gates ins
                          return $ map printOuts $ zip gates outs
+    where -- NOTE: this should be kept synchronized with the LOG to 'gate_logger' in
+          -- run-circuit.cc.
+          printOuts ( g, (ins, mb_val) ) =
+              printf "%-6d%-8s%s"
+                     (gate_num g)
+                     (if null (gate_flags g) then "" else show (gate_flags g))
+                     (show mb_val)
+{-
     where printOuts ( gate, (ins, mb_val) ) =
               let flags     = gate_flags gate
                   flagsStr  = if null flags then "" else show flags
@@ -64,6 +72,7 @@ formatRun gates ins = do outs <- run gates ins
                                      PP.text valStr)
               in
                 PP.render doc
+-}
 {-
               printf "%-6d%-16s%-8s%-30s%s"
                                                     num
@@ -74,8 +83,6 @@ formatRun gates ins = do outs <- run gates ins
                                                      then show_mb_val mb_val
                                                      else show_mb_val mb_val)
 -}
-          show_mb_val Nothing   = "Nothing"
-          show_mb_val (Just v)  = showsValDetail 0 v ""
 
 
 -- run :: [Gate]       -- ^ The circuit
@@ -133,8 +140,12 @@ getUserInputs gates = let in_gates = filter (\g -> gate_op g == Input) gates
 -- ins: [[Integer]]
 setRoots gates vals ins = do assocs <- MArr.getAssocs gates
                              -- should eat up all the inputs
-                             []     <- foldM (addRoot vals) ins assocs
-                             return ()
+                             (do []     <- foldM (addRoot vals) ins assocs
+                                 return ())
+                             `catchError`
+                               (\e -> putStrLn "ERROR: Not the right number of input values provided")
+
+
 
 -- set the value of one root gate (if it is a root gate)
 -- TODO: only supporting plain integers (and arrays of them) for now. No structs.
@@ -297,9 +308,22 @@ gate2func Gate { gate_op = op,
 
         -- this puts in an arbitrary value of 0, don't have information on what the array
         -- type actually is, the proper writes should set that up.
-        InitDynArray _ len  -> \[]          -> return $
-                                               VArr $ listArray (0,len-1)
-                                                                (repeat (Just $ VScalar $ ScInt 0))
+        -- 
+        -- actually Nothing sounds more sensible, as the values should be initialized
+        -- before being used.
+        --
+        -- And furthermore, if the elements are structs, need more than one Nothing,
+        -- wrapped in a VList
+        InitDynArray elem_size len
+                            -> \[]          -> let num_ints = elem_size `div` 5
+                                                   val      = if num_ints == 1
+                                                              then Nothing
+                                                              else Just $
+                                                                   VList $
+                                                                   replicate num_ints Nothing
+                                               in  return $
+                                                   VArr $ listArray (0,len-1)
+                                                                    (repeat val)
 
         WriteDynArray slice -> \(v_arr:
                                  v_idx:
@@ -338,7 +362,7 @@ gate2func Gate { gate_op = op,
                                                       -- extract out of a VList
                                                       -- FIXME: rather awkward
                                                       vals = case val of Just (VList vs)    -> vs
-                                                                         Nothing            -> [Nothing]
+                                                                         Nothing            -> []
                                                                          Just v             -> [Just v]
                                                   return $ VList (ans_arr:vals)
 
@@ -432,23 +456,84 @@ classifyBinOp o = case o of
                     Max   -> Arith
 
 
-showsVal p g = case g of
-                      Blank     -> str "Blank"
-                      VScalar s -> rec s
-                      VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
-                      VList l   -> str "vl " . showList l
-        where rec x = showsPrec p x
-              str   = (++)
 
+-- NOTE: this should be kept synchronized with the LOG to 'gate_logger' in
+-- run-circuit.cc.
+showsVal :: Int -> Maybe GateVal -> ShowS
+-- show a Nothing value as a zero byte followed by the bytes of a zero integer; would be
+-- better to use "N" or such, but the evaluator would have a hard time picking Nothing
+-- values out of a list.
+showsVal p Nothing      = str "0" . str "," . (showsPrec p $ ScInt $ 0)
+showsVal p (Just g)     = case g of
+                            Blank     -> str "Blank"
+
+                            -- a Just scalar needs an explicit '1' in front of it. For
+                            -- arrays, it's understood as they should always be Just; For
+                            -- Lists a Nothing value does not make sense, as they come out
+                            -- of array gates so always have at least the array value
+                            VScalar s -> str "1" . str "," . rec s
+
+                            -- the array contains (Maybe GateVal)'s.
+                            -- Surround every array element with braces '{' and '}'
+                            VArr arr  -> str "[" .
+                                         (punctuate (str ",") $
+                                          map (\val -> str "{" . rec val . str "}") $ elems arr) .
+                                         str "]"
+
+                            -- if a list contains several integers, they will be collapsed
+                            -- into one comma-separated list of bytes, as the list
+                            -- elements are not wrapped in brackets or such. This is to
+                            -- match the evalutor---it would be difficult for the
+                            -- evaluator to separate out list elements, so it just dumps a
+                            -- list of bytes.
+                            VList l   -> (punctuate (str ",") $ map rec l)
+
+        where rec x      = showsPrec p x
+
+
+
+
+{-
 showsValDetail p val = case val of
                          VArr arr  -> showsPrec p arr
                          _         -> showsVal p val
+-}
 
 
-instance (Show GateVal) where
-    showsPrec = showsValDetail
+-- Show a Bits instance as a list of bytes
+-- NOTE: setting bitSize to 32, as the standard bitSize function is not defined for
+-- arbitrary-sized types like Integer.
+showsInt_bytes p i = let bytes = map (i `extrByte`) [0..(bitSize i) `div` 8 - 1]
+                     in  punctuate (str ",") $
+                         map (showsPrec p) bytes
+    where i `extrByte` b    = i `getBits` (b*8, b*8 + 7)
+          bitSize _         = 32
+
+
+instance (Show (Maybe GateVal)) where
+    showsPrec = showsVal
 
 instance (Show Scalar) where
-    showsPrec p s = case s of (ScInt i)     -> showsPrec p i
-                              (ScBool b)    -> showsPrec p b
+    showsPrec p s = case s of (ScInt i)     -> showsInt_bytes p i
+                              -- show boolean as the corresponding Int
+                              (ScBool b)    -> showsPrec p $ ScInt $ toInteger $ fromEnum b
                               (ScString s)  -> showsPrec p s
+
+-- this is useful in buidling ShowS instances - it appends a string.
+str        = (++)
+
+-- concatenate a list of ShowS with a separator.
+punctuate :: ShowS -> [ShowS] -> ShowS
+punctuate sep l = showsList $ intersperse sep $ l
+
+
+showsList :: [ShowS] -> ShowS
+showsList shows = foldl (.) id shows
+
+
+
+
+-- some bit manipulation routines.
+i `getBits` (a,b) = ( i .&. (bitMask (a,b)) ) `shiftR` a
+bitMask (i,j)     = ( complement ((complement 0) `shiftL` (j-i+1)) )  `shiftL` i
+
