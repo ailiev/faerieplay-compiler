@@ -15,6 +15,8 @@ ODIR = build
 # which build?
 #
 
+# BUMMER: the multiple-else syntax does not appear to work with make version
+# 3.80 which is in all Fedora's now (Sept 2006)
 ifdef OPT
 	ODIR := $(ODIR)/opt
 	GHCFLAGS += -O2

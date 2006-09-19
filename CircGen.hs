@@ -71,7 +71,7 @@ import Intermediate as Im hiding (VarTable)
 cDOPRINT = False
 
 -- should we store ELit gate locations, and only generate one gate per literal?
-cSTORE_LITS = True
+cSTORE_LITS = False
 
 
 
@@ -175,7 +175,7 @@ gateProjDoc  f  g@(Gate {gate_doc=ds})    = g { gate_doc = f ds }
 
 
 -- needed to lookup a variable's current gate number
--- Structs and arrays occupy multiple gates, so need to actually store
+-- Structs and direct arrays occupy multiple gates, so need to actually store
 -- a list of gate numbers
 type VarTable = Map.Map Var [Int]
 
@@ -210,7 +210,8 @@ genCircuit type_table stms args =
                                       startState
         clipped_circ    = clip_circuit circ
                                 `trace` ("The full circuit: " << show circ)
-        renum_circ      = renumber clipped_circ
+        clipped_circ'   = collapse_lit_gates clipped_circ
+        renum_circ      = renumber clipped_circ'
                                 `trace` ("The clipped circuit " << show clipped_circ)
         -- expand all Typ fields in the gates, as it helps with printing out the types
         -- (using docTypMachine)
@@ -244,7 +245,8 @@ clip_circuit c = let c_rev          = GrBas.grev c
 -- renumber the nodes so they are consecutive, in the same order as the original numbering
 renumber :: Circuit -> Circuit
 renumber g   =  Gr.gmap doRenum g
-          -- the returned map will map from current numbering to consecutive numbering
+          -- the returned map (an array) will map from current numbering to consecutive
+          -- numbering
     where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isRootCtx g
                                               nodes = sort $ GrBFS.bfsn ins g
                                           in  array (minimum nodes, maximum nodes)
@@ -270,6 +272,41 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
               let (ins, others) = List.partition ((== Input) . gate_op)
                                                  gates
               in  ins ++ others
+
+
+-- | Collapse replicated Lit gates to one gate per literal value, and patch up the
+-- circuit.
+collapse_lit_gates :: Circuit -> Circuit
+collapse_lit_gates g = let (lit_map, replace_map)   = build_maps g
+                           g_trimmed                = Gr.delNodes (Mapping.keys replace_map) g
+                           g_patched                = Gr.gmap (mod_ins replace_map) g_trimmed
+                       in  g_patched
+    where -- Build two maps:
+          -- lit_map: at what gate is each Lit value?
+          -- replace_map: how do we need to replace input gate numbers to account for the
+          -- removal of most Lit gates?
+          build_maps g = Gr.ufold add_gate_to_maps (Map.empty, Map.empty) g
+          add_gate_to_maps (_,_,g,_) (lit_map, replace_map) =
+              case gate_op g    of  (Lit l) -> let mb_last_entry = Mapping.lookup l lit_map
+                                               in  maybe -- add this lit to the lit_map
+                                                       ( (Mapping.insert l (gate_num g) lit_map,
+                                                          replace_map) )
+                                                         -- add this gate number to the replace_map
+                                                       ( \entry ->
+                                                               (lit_map,
+                                                                Mapping.insert (gate_num g)
+                                                                               entry
+                                                                               replace_map) )
+                                                       mb_last_entry
+                                    _       -> (lit_map, replace_map)
+          -- update all the in-edges and gate inputs with the collapsed Lit gates.
+          mod_ins repl (is,n,g,os)  = let g_ins     = map (do_replace repl) $ gate_inputs g
+                                          in_adjs   = map (projSnd $ do_replace repl) is
+                                      in  (in_adjs, n, g {gate_inputs = g_ins}, os)
+          -- return a mapped value if it is in the map, otherwise just return the param.
+          do_replace map x          = fromMaybe x (Mapping.lookup x map)
+                                          
+
 
 expandGateTyp :: TypeTable -> Gate -> Gate
 expandGateTyp typetable g@(Gate { gate_typ = t })    =
@@ -510,13 +547,16 @@ genStm circ stm =
                                                                   { byteloc = prep_slice $ map Im.byteloc locs,
                                                                     valloc  = prep_slice $ map Im.valloc  locs }
                                               (ExpT arr_t _)    = arr_e
+                                              -- Adding the index expression as an
+                                              -- annotation, so we can tell later if it
+                                              -- was static or not.
                                               ctx        = mkCtx $
                                                            Gate i
                                                                 arr_t
                                                                 (WriteDynArray slice)
                                                                 ([arr_n, idx_n] ++ gates)
                                                                 depth
-                                                                [] []
+                                                                [] [idx_e]
                                           spliceVar (arr_off,1) [i] rv
                                                         `trace`
                                                         ("WriteDynArray: rv = " << rv
@@ -954,6 +994,8 @@ genExp' c exp =
                                             _      -> error ("BinOp " << exp <<
                                                              " arg2 got multiple gates: " <<
                                                              gates2)
+                              -- NOTE: the VoidT type annotation used here is replaced
+                              -- when the ExpT enclosing this BinOp is handled.
                               let ctx       = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] depth [] []
                               return (c2, Left [ctx])
 
@@ -1047,15 +1089,21 @@ genExp' c exp =
                               (c2, [idx_n])        <- genExp c1 idx_e
                               readarr_n            <- nextInt
                               depth                <- getDepth
-                                  -- get the array type and the element type, from the
-                                  -- array expression annotations
+                              -- get the array type and the element type, from the array
+                              -- expression annotations.
+
+                              -- NOTE: we do not attach the array type to the ReadDynArray
+                              -- gate; trying to see what happens if we do.
+                              --
+                              -- Add the index expression as an annotation, hopefully in
+                              -- an EStatic if it is static.
                               let (ExpT arr_t@(ArrayT elem_t _) _)   = arr_e
                                   readarr_ctx       = mkCtx (Gate readarr_n
-                                                                  VoidT
+                                                                  arr_t
                                                                   ReadDynArray
                                                                   [arr_n, idx_n]
                                                                   depth
-                                                                  [] [])
+                                                                  [] [idx_e])
                               (e_locs,e_typs)      <- getTypLocs elem_t
                               -- build the array pointer slicer gate. it will get the new
                               -- array pointer value in the first cARRAY_BLEN bytes of the
@@ -1170,13 +1218,12 @@ data MyState = MyState { vartable   :: [VarTable], -- stack of table Var -> [Nod
                          typetable  :: TypeTable,  -- the type table is read-only, so
                                                    -- could be in a Reader, but easier to
                                                    -- stick it in here
-                         lit_table  :: [(Im.Lit,Gr.Node)]      -- a Mapping of literals (Integer
+                         lit_table  :: Map.Map Im.Lit Gr.Node    -- a Mapping of literals (Integer
                                                                -- or Bool)
                                                                -- to Node number, so we can
                                                                -- stick to one gate per
                                                                -- literal.
-                                                               -- instantiated as a list
-                                                               -- for now
+                                                               -- instantiated as a Data.Map
                        }
 {-
 instance St.MonadState Int (St.State MyState) where
@@ -1295,7 +1342,7 @@ class CctShow a where
 -- comment (the name of the output wire usually)
 -- <blank line>
 cctShowsGate sep delim
-              g@(Gate i typ op srcs depth flags doc)
+              g@(Gate i typ op srcs depth flags docs)
                    = (delim ++)                                          .
                      -- 1: gate number
                      rec' i                                 .   (sep ++) .
@@ -1313,11 +1360,19 @@ cctShowsGate sep delim
                      -- 6: gate depth
                      showsPrec 0 depth                      .   (sep ++) .
                      -- 7: comment
-                     (if null doc
+                     (if null docs
                       then ("nocomm" ++)
-                      -- FIXME: outputting the latest addition to the comment stack here
-                      --(the one at the top), not sure if this is best
-                      else ((strShow $ strip $ peek doc) ++))             .
+                      -- using the last annotation for all gates except Input, where the
+                      -- first one should be the input variable.
+                      else (let doc = case op   of  Input           -> last docs
+                                                    ReadDynArray    -> last docs
+                                                    WriteDynArray _ -> last docs
+                                                    _               -> head docs
+                            in  ((strShow $ strip doc) ++) .
+                                (case doc of    EStatic e   -> (("static " << strShow e) ++)
+                                                _           -> id)
+                           )
+                     )                                                  .
 --                      else ((strShow $ map strip doc) ++))               .
                      (delim ++)
 

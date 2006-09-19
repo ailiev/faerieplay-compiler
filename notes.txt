@@ -122,3 +122,14 @@ should be discarded *and* the peer branch's values (perhaps unchanged) taken.
 
 Graph.ufold does the fold in an arbitrary-looking order, certainly not
 depth-first.
+
+
+<date>Mon Sep 18 10:51:37 2006</date>
+
+Compilation run on eisenhower (4 * Dual Core AMD Opteron(tm) Processor 265 at
+1.8 GHz, 4GB RAM):
+
+with LOGN=7:
+- 102 mins.
+- used only one of the CPUs, at 100%.
+- 1.1GB RAM most of the time, up to 1.2GB in last 2 mins.

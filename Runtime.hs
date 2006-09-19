@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -cpp #-}
+-- cpp because of the MArr.getBounds change from GHC 6.4.2 to 6.5
+
 module Runtime where
 
 import Maybe
@@ -22,7 +25,7 @@ import           Control.Monad.Error    (MonadError(..))
 
 import qualified Debug.Trace                    as Trace
 
-import Data.Bits        ((.&.), (.|.), xor, shiftL, shiftR, complement, bitSize)
+import Data.Bits        ((.&.), (.|.), shiftL, shiftR, xor)
 
 import Text.Printf      (printf)
 
@@ -190,7 +193,9 @@ evalGates :: (MArr.MArray a (Gate, NodeFunc) m,
                     a Int (Gate, NodeFunc)
                  -> a2 Int ValArrayType
                  -> m()
-evalGates gates vals = mapM_ (evalGate gates vals) (MArr.indices gates)
+-- need this liftArgM here because getMArrIndices gives us the index list in the Monad.
+evalGates gates vals = liftArgM (mapM_ (evalGate gates vals))
+                                (getMArrIndices gates)
 
 evalGate :: (MArr.MArray a      (Gate, NodeFunc) m,
              MArr.MArray a2     ValArrayType     m) =>
@@ -209,7 +214,6 @@ evalGate gates vals i =
          then return ()
          else MArr.writeArray vals (gate_num gate) (gate_f ins)
                   `trace` ("Evaluating gate number: " << (gate_num gate))
-
 
 
 
@@ -532,8 +536,19 @@ showsList shows = foldl (.) id shows
 
 
 
+-- ! Get a list of the indices of an MArray. Result in the monad, as the new API which is
+-- needed here, getBounds, is in the monad, ie. there is no way to get the indices outside
+-- the monad.
+getMArrIndices :: (MArr.MArray a e m, Ix i) =>
+                  a i e -> m [i]
+getMArrIndices arr =
+    do
+#if __GLASGOW_HASKELL__ >= 605
+     -- GHC version 6.5 and later
+     bounds     <- MArr.getBounds arr
+#else
+     let bounds = MArr.bounds arr
+#endif
+     return $ Ix.range bounds
 
--- some bit manipulation routines.
-i `getBits` (a,b) = ( i .&. (bitMask (a,b)) ) `shiftR` a
-bitMask (i,j)     = ( complement ((complement 0) `shiftL` (j-i+1)) )  `shiftL` i
 

@@ -7,7 +7,7 @@ import Monad    (foldM, msum, liftM, zipWithM)
 import List     (find, findIndex)
 import Maybe    (fromJust)
 
-import Debug.Trace      (trace)
+-- import Debug.Trace      (trace)
 
 import qualified Data.Map as Map
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
@@ -15,7 +15,7 @@ import Control.Monad.Writer (Writer, runWriter, tell)
 import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
 import Control.Monad.Trans (lift)
 
-import Common (MyError(..), ErrMonad)
+import Common (MyError(..), ErrMonad, trace)
 
 import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
                  myLiftM, concatMapM, (>>==), mapTuple2,
@@ -343,8 +343,8 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                         throwErr 42 $ "Cannot take value of return variable " << v
 -}
                     | otherwise ->
-                        return $ annot typ $ if elem Im.LoopCounter (Im.vflags v)
-                                             then Im.EStatic (Im.EVar v)
+                        return $ annot typ $ if elem Im.LoopCounter $ Im.vflags v
+                                             then Im.EStatic $ Im.EVar v
                                              else Im.EVar v
                 _                  ->
                     throwErr 42 $ "Identifier " << nm << " is illegal in expression " << e
@@ -367,18 +367,30 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
                                     return $ annot elemT new_e
     -- returns the type of the array elements
     where check arr@(Im.ExpT arr_t _) idx =
-              do checkIdx idx
+              do idx'       <- checkIdx idx
                  arr_t_full <- Im.expandType [Im.DoAll] arr_t
                  case (Im.stripRefQual arr_t) of
-                   (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx)    )
-                   (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx) )
+                   (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx')    )
+                   (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx') )
                    _                  -> throwErr 42 ( "Array " << arr << " in " << e
                                                        << " is not an array or int!")
-          -- index type has to be int
+          -- index type has to be int; annotate the index expression with EStatic if it is
+          -- static.
           checkIdx idx = let (Im.ExpT idx_t _) = idx
-                         in  do idx_t_full <- Im.expandType [Im.DoTypeDefs] idx_t
+                         in  do idx_t_full  <- Im.expandType [Im.DoTypeDefs] idx_t
+                                -- this isn't actually that useful because we don't know
+                                -- at this point where loop counters are, and they are the
+                                -- most interesting source of static array indices.
+                                idx'        <- (do idx_int <- Im.evalStatic idx
+                                                   return $ Im.EStatic $ Im.lint $ idx_int)
+                                               `catchError`
+                                               -- not static, use idx as is.
+                                               (\err -> return idx
+                                                        `trace` ("Array index " << idx
+                                                                 << " in " << e
+                                                                 << " is not static"))
                                 case idx_t_full of
-                                    (Im.IntT _)  -> return ()
+                                    (Im.IntT _)  -> return idx'
                                     _            -> throwErr 42 ("Array index in " <<
                                                                  e << " is not an Int")
 
@@ -462,6 +474,7 @@ checkExp e
                                       Binary     -> checkBinary op new_e1 new_e2
                                       Logical    -> checkLogical op new_e1 new_e2
                                       Comparison -> checkComparison op new_e1 new_e2
+              -- propagate EStatic if both params are static.
               let static_e = case (all isStaticExp [new_e1, new_e2]) of
                                True  -> Im.ExpT t (Im.EStatic new_e)
                                False -> Im.ExpT t             new_e
@@ -561,8 +574,7 @@ mkVarInits local_table = do let varlist  = Map.toList local_table
           -- create Init statements for an lval of the given type
     where mkInit :: (String, Im.Typ, Im.Exp) -> StateWithErr [Im.Stm]
           mkInit (name,t,lval)
-              = trace ("mkInit " << lval << "::" << t) $
-                            case t of
+              = case t of
                               -- NOTE: scalar default values defined here!
                               (Im.IntT i)          -> return [ass lval 0 t]
                               (Im.BoolT)           -> return [ass lval (Im.lbool False) t]
@@ -588,6 +600,8 @@ mkVarInits local_table = do let varlist  = Map.toList local_table
                                       mkInit (name, typ, lval)
 
                               _                     -> return []
+                      `trace` ("mkInit " << lval << "::" << t)
+                            
 
           ass lval val t = Im.SAss (Im.ExpT t lval) (Im.ExpT t val)
 

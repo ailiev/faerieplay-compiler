@@ -33,7 +33,13 @@ up the circuit and the code.
 
 <date>Fri Sep  8 17:25:02 2006</date>
 
-Add comments to the .runtime file, to make it easier to figure out by manual
-inspection. Eg. comment what a scalar types bitsize is, of it's actually a Bool,
-etc.
+Add more comments to the .runtime file, to make it easier to figure out by
+manual inspection. Eg. comment what a scalar types bitsize is, if it's actually
+a Bool, etc.
 
+<date>Wed Sep 13 13:13:15 2006</date>
+
+CHECK: how do we make sure that the variables in a conditional's condition are
+used with values from before the conditional, and not values generated inside
+the conditional? Since I believe the condition's gate(s) are generated after the
+branches.

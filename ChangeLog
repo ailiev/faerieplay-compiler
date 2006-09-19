@@ -1,3 +1,30 @@
+2006-09-19  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs (collapse_lit_gates): Added, to remove duplicate Lit
+	gates and re-patch the circuit.
+	* Runtime.hs (getMArrIndices): Added, to abstract getting the
+	indices of an MArray, as the API is different in ghc 6.4 and 6.5
+	* Mapping.hs: Added an instance of Mapping for Data.Map.
+	* SashoLib.hs (repeatM): new
+	(liftArgM): new
+	(getBits, bitMask): moved here.
+
+2006-09-18  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs (genStm): WriteDynArray gate gets the index
+	expression as an annotation.
+	(genExp'): Same for ReadDynArray.
+	* SFDL.cf: aligned better.
+	* TypeChecker.hs: put in some more EStatic's, especially where
+	array indices are generated.
+
+2006-09-17  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs (cctShowsGate): Modifed the gate comment to mention
+	if an input is static (to mark direct array access); and to use
+	the gate's first (not last) Exp annotation for Input gates, as the
+	first should be the name of the variable which gets the input.
+
 2006-05-12  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* Runtime.hs: Had swapped right shift and left shift, fixed.

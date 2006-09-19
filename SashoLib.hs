@@ -37,7 +37,6 @@ module SashoLib (
          fromJustMsg,
          maybeApply,
          MaybeT, runMaybeT,
-         maybeM,
                     
         modifyListHead,
         mapOnTail,
@@ -75,14 +74,20 @@ module SashoLib (
         tuple2list2,
 
         myLiftM,
+        liftArgM,
+
         scanM,
         unfoldrM,
         replicateM,
+        repeatM,
         sumM,
         concatMapM,
 
         strictList,
         iterateList,
+
+        bitMask,
+        getBits,
 
         mapTreeM, mapTree,
 
@@ -114,11 +119,14 @@ import Control.Monad.Identity (runIdentity)
 
 import Control.Monad.Trans (MonadTrans, lift)
 
-import qualified    Data.Tree                   as Tree
-
 import Numeric                      (showHex)
 
-import qualified Data.Map as Map
+import Data.Bits            ((.&.), (.|.))
+import qualified Data.Bits                      as Bits
+
+import qualified Data.Tree                      as Tree
+import qualified Data.Map                       as Map
+
 
 
 
@@ -272,17 +280,6 @@ iterateList f x = let fx = f x
                   in 
                     fx ++ concatMap (iterateList f) fx
 
--- | iterate a function which produces a finite list, to produce a Tree
-iterateTree :: (a -> [a]) -> a -> Tree.Tree a
-iterateTree f x = Tree.Node x (map (iterateTree f) (f x))
-
-
--- | prune a tree up to and including depth 'd' (ie. the root is always kept)
-pruneTree :: (Ord a, Num a) => a -> Tree.Tree b -> Tree.Tree b
-pruneTree d (Tree.Node r subs)
-    | d <= (fromInteger 0)  = Tree.Node r []
-    | otherwise             = Tree.Node r (map (pruneTree (d-1)) subs)
-
 
 -- remove duplicates in a list of Ord instance (ie. can be sorted); should be
 -- much more efficient than List.nub, which is O(n^2)
@@ -347,6 +344,10 @@ unfoldrM f x  = do maybe_res <- f x
 replicateM :: (Monad m) => Int -> m a -> m [a]
 replicateM = sequence ... replicate
 
+-- | repeat a monadic action to infinity.
+repeatM :: (Monad m) => m a -> m [a]
+repeatM = sequence . repeat
+
 {-
 fooM :: (Monad m) => (a -> m b) -> [m a] -> m [b]
 fooM f xs = 
@@ -399,9 +400,12 @@ maybeApply Nothing  x = x
 -- NOTE: needs multi-parameter type classes, which is not Haskell 98, but should
 -- be in the next spec apparently
 class Stack s where
+    -- ! Return the top element
     peek :: s a -> a
+    -- ! pop the stack, does not return popped element
     pop  :: s a -> s a
     push :: a -> s a -> s a
+    -- ! modify the top element with a function, returning the new stack
     modtop :: (a -> a) -> s a -> s a
 
 
@@ -437,6 +441,12 @@ findInStack f stack = msum (map f stack)
 -- takes a value not in the monad, so it's useful on the RHS of >>= (among others)
 myLiftM :: (Monad m) => (a -> b) -> (a -> m b)
 myLiftM f x = return (f x)
+
+-- ! lift a function which injects into a Monad into one which has input and result in the
+-- Monad. Have used it on mapM.
+liftArgM :: (Monad m) => (a -> m b) -> (m a -> m b)
+liftArgM f m_x = do x <- m_x
+                    f x
 
 
 -- like scanl, but for monadic functions
@@ -632,6 +642,23 @@ splice (offset,len) news l = (take offset l) ++
                              (drop (offset + len) l)
 
 
+
+
+--
+-- some bit manipulation routines.
+--
+
+-- ! Get the value of a range of bits (inclusive) in an instance of Bits.
+getBits :: Bits.Bits i => i -> (Int,Int) -> i
+i `getBits` (a,b) = ( i .&. (bitMask (a,b)) ) `Bits.shiftR` a
+
+-- ! Get a bitmask for a range of bits (inclusive)
+bitMask :: Bits.Bits i => (Int,Int) -> i
+bitMask (i,j)     = ( Bits.complement ((Bits.complement 0) `Bits.shiftL` (j-i+1)) )  `Bits.shiftL` i
+
+
+
+
 -- make a list from a tuple
 tuple2list2 (x,y) = [x,y]
 
@@ -641,11 +668,6 @@ tuple2list2 (x,y) = [x,y]
 mapInputs2 :: a -> b -> [a -> b -> c] -> [c]
 mapInputs2 x y fs = map (\f -> f x y) fs
 
-
--- ! Monad version of Prelude.maybe
-maybeM :: (Monad m) => m b -> (a -> m b) -> Maybe a -> m b
-maybeM def f x = case x of Just x' -> f x'
-                           Nothing -> def
 
 
 data OneOf3 a b c = Num1 a | Num2 b | Num3 c
@@ -703,9 +725,19 @@ mapTreeM f t@(Tree.Node l ts) = do l'  <- f l
                                    ts' <- mapM (mapTreeM f) ts -- works for ts == []
                                    return $ Tree.Node l' ts'
 
+-- | map a normal function over a tree
+mapTree :: (a -> b) -> Tree.Tree a -> Tree.Tree b
 mapTree f t = runIdentity $ mapTreeM (myLiftM f) t
 
 
+-- | iterate a function which produces a finite list, to produce a Tree
+iterateTree :: (a -> [a]) -> a -> Tree.Tree a
+iterateTree f x = Tree.Node x (map (iterateTree f) (f x))
 
 
--- extractBranch extr xs = catMaybes $ mapM $ do extr
+-- | prune a tree up to and including depth 'd' (ie. the root is always kept)
+pruneTree :: (Ord a, Num a) => a -> Tree.Tree b -> Tree.Tree b
+pruneTree d (Tree.Node r subs)
+    | d <= (fromInteger 0)  = Tree.Node r []
+    | otherwise             = Tree.Node r (map (pruneTree (d-1)) subs)
+

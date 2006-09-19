@@ -65,8 +65,9 @@ logError line msg = tell [Err line msg]
 unrollProg :: Prog -> ErrMonad [Stm]
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
-        startScope = pushScope []
-        out = St.runStateT (mapM unroll stms) (pt, startScope)
+        startScope                  = pushScope []
+        out                         = St.runStateT (mapM unroll stms)
+                                                   (pt, startScope)
     in case out of
                 Left err        -> Left err
                 Right (stmss,_) -> Right (concat stmss)
@@ -166,6 +167,8 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                      --
                      -- and subst correct counter values into all the statements
                      --
+                     -- References to the loop counter will have been scoped, so scope
+                     -- countVar so it's the same.
                      countVar' = addScope scope countVar
                      -- can have the loop count forwards and backwards by 1
                      countVals | begin <= end   = [begin..end]
@@ -285,10 +288,10 @@ stmStripRefQual = mapStm id f_e
 
 -- enter a new scope depth (eg. upon entering a function call)
 -- uses the Stack class functions
-pushScope :: Scope -> Scope
-pushScope = push 0
-popScope  :: Scope -> Scope
-popScope        = pop
+pushScope   :: Scope -> Scope
+pushScope   = push 0
+popScope    :: Scope -> Scope
+popScope    = pop
 
 
 -- enter the next scope at the same depth (eg. from one function call to the

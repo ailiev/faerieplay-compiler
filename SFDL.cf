@@ -95,20 +95,24 @@ separator TypedName "," ;
 
 
 -- statements
-SBlock.   Stm      ::= "{" [Dec] [Stm] "}" ;
 
-SAss.     Stm      ::= LVal "=" Exp ";" ;
+-- a block statement is a "{", followed by a list of Declarations, followed by a
+list of Statements, and closed by a "}".
+SBlock.     Stm     ::= "{" [Dec] [Stm] "}" ;
+
+-- assignment
+SAss.       Stm     ::= LVal "=" Exp ";" ;
 
 -- and for debugging:
--- the String in there is meant to be a fixed
+-- the String in there is meant to be a fixed string
 SPrint.     Stm     ::= "print" "(" String "," [Exp] ")" ;
 separator Exp "," ;
 
 -- none of these statements need a trailing semicolon. so, only
 -- Assignment needs it (as specified above)
-SFor.     Stm           ::= "for" "(" Ident "=" Exp "to" Exp ")" Stm ;
-SIf.      Stm      ::= "if" "(" Exp ")" Stm ;
-SIfElse.        Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
+SFor.       Stm     ::= "for" "(" Ident "=" Exp "to" Exp ")" Stm ;
+SIf.        Stm     ::= "if" "(" Exp ")" Stm ;
+SIfElse.    Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
 
 -- to allow extra semicolons; no effect on the AST
 -- causes 3 shift-reduce conflicts
