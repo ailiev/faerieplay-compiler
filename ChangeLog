@@ -1,3 +1,11 @@
+2006-09-21  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs (genCircuit): Shuffled the steps around a bit - Lit
+	gate compaction should be before trimming.
+	(collapse_lit_gates): This was removing gates too early, leaving
+	their children without those in-edges; got rid of all
+	gate-deletion from here.
+
 2006-09-19  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* CircGen.hs (collapse_lit_gates): Added, to remove duplicate Lit

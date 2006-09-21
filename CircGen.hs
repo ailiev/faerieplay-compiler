@@ -206,18 +206,20 @@ genCircuit type_table stms args =
                                     typetable   = type_table,
                                     lit_table   = Mapping.empty
                                   }
+        -- the main circuit generation step.
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
-        clipped_circ    = clip_circuit circ
+        unique_lits_cct = collapse_lit_gates circ
                                 `trace` ("The full circuit: " << show circ)
-        clipped_circ'   = collapse_lit_gates clipped_circ
-        renum_circ      = renumber clipped_circ'
+        clipped_circ    = clip_circuit unique_lits_cct
+        renum_circ      = renumber clipped_circ
                                 `trace` ("The clipped circuit " << show clipped_circ)
+        gate_list       = flatten_cicrcuit renum_circ
+                                `trace` ("The renumbered circuit " << show renum_circ)
         -- expand all Typ fields in the gates, as it helps with printing out the types
         -- (using docTypMachine)
-        flat_circ       = (map (expandGateTyp type_table) $ flatten_cicrcuit renum_circ)
-                                `trace` ("The renumbered circuit " << show renum_circ)
-    in (renum_circ, flat_circ)
+        gate_list'      = map (expandGateTyp type_table) gate_list
+    in (renum_circ, gate_list')
          `trace` ("The DFS forest: " << genDFSForest renum_circ)
 
 
@@ -249,7 +251,7 @@ renumber g   =  Gr.gmap doRenum g
           -- numbering
     where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isRootCtx g
                                               nodes = sort $ GrBFS.bfsn ins g
-                                          in  array (minimum nodes, maximum nodes)
+                                          in  array (head nodes, last nodes)
                                                     (zip nodes [0..])
                                                     `trace` ("renumber nodes: " << nodes)
           doRenum (ins,node,gate,outs)  = ( map (projSnd renum) ins,
@@ -276,33 +278,38 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
 
 -- | Collapse replicated Lit gates to one gate per literal value, and patch up the
 -- circuit.
+-- No need to remove the discarded Lit gates, they will be removed when the circuit is
+-- trimmed.
 collapse_lit_gates :: Circuit -> Circuit
 collapse_lit_gates g = let (lit_map, replace_map)   = build_maps g
-                           g_trimmed                = Gr.delNodes (Mapping.keys replace_map) g
-                           g_patched                = Gr.gmap (mod_ins replace_map) g_trimmed
-                       in  g_patched
+                       in  Gr.gmap (patch_ctx replace_map) g
     where -- Build two maps:
-          -- lit_map: at what gate is each Lit value?
-          -- replace_map: how do we need to replace input gate numbers to account for the
-          -- removal of most Lit gates?
+          -- lit_map: at what gate is each Lit value? We use the first gate where the lit
+          -- value occurs
+          -- replace_map: map from current Lit gate numbers, to the new compacted lit gates.
           build_maps g = Gr.ufold add_gate_to_maps (Map.empty, Map.empty) g
           add_gate_to_maps (_,_,g,_) (lit_map, replace_map) =
-              case gate_op g    of  (Lit l) -> let mb_last_entry = Mapping.lookup l lit_map
-                                               in  maybe -- add this lit to the lit_map
-                                                       ( (Mapping.insert l (gate_num g) lit_map,
-                                                          replace_map) )
-                                                         -- add this gate number to the replace_map
-                                                       ( \entry ->
-                                                               (lit_map,
-                                                                Mapping.insert (gate_num g)
-                                                                               entry
-                                                                               replace_map) )
-                                                       mb_last_entry
-                                    _       -> (lit_map, replace_map)
-          -- update all the in-edges and gate inputs with the collapsed Lit gates.
-          mod_ins repl (is,n,g,os)  = let g_ins     = map (do_replace repl) $ gate_inputs g
-                                          in_adjs   = map (projSnd $ do_replace repl) is
-                                      in  (in_adjs, n, g {gate_inputs = g_ins}, os)
+              case gate_op g of 
+                (Lit l) -> let mb_last_entry = Mapping.lookup l lit_map
+                           in  case mb_last_entry of
+                                 Nothing    -> -- add this lit to the lit_map
+                                              ( Mapping.insert l (gate_num g) lit_map,
+                                                replace_map )
+                                 Just entry -> -- add redirect from this gate number to
+                                               -- the lit table entry
+                                              ( lit_map,
+                                                Mapping.insert (gate_num g)
+                                                               entry
+                                                               replace_map )
+                _       -> (lit_map, replace_map)
+          -- update all the in-edges and gate inputs to point to the selected unique Lit
+          -- gates.
+          patch_ctx repl (ins,n,g,outs)
+                                    = let g_ins  = map (do_replace repl) $ gate_inputs g
+                                          ins'   = map (projSnd $ do_replace repl) ins
+                                          -- outs should not be affected anywhere
+--                                          outs'  = map (projSnd $ do_replace repl) outs
+                                      in  (ins', n, g {gate_inputs = g_ins}, outs)
           -- return a mapped value if it is in the map, otherwise just return the param.
           do_replace map x          = fromMaybe x (Mapping.lookup x map)
                                           
