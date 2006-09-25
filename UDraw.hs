@@ -68,29 +68,12 @@ makeTerm f_class                -- ^ Function to get the class of a Node
          f_attribs              -- ^ Function to get the attributes of a Node
          starts                 -- ^ The starting nodes
          g                      -- ^ The graph
+    -- The type variables in the signature of gfold are in this case:
+    -- c = [Term TermId]
+    -- d = Term TermId
     = GrBas.gfold fwd (mkTerm g f_class f_attribs) (doTerm, []) starts g
-{-
-    where 
-          genRefs ts    = St.evalState (genRefsSt ts) (Set.empty :: Set.Set TermId)
-          genRefsSt     = mapM (mapTreeM doNode)
-          doNode r@(R _)            = error "makeTerm.doNode should not see an R"
-          doNode l@(L { tid = id }) = do ids <- St.get
-                                         if Set.member id ids
-                                              then -- already have the original, return a
-                                                   -- reference 
-                                                  do return $ R id
-                                              else -- first time seeing this, add to set
-                                                   -- and return original
-                                                  do St.put $ Set.insert id ids
-                                                     return l
--}
 
--- | a test function, to do a very simple gfold and build a spanning 'Tree'
-makeSimpleTree :: (Gr.Graph gr, Show a) => [Gr.Node] -> gr a b -> [Tree.Tree a]
-makeSimpleTree starts g = GrBas.gfold fwd
-                                      (  \ctx trees     -> Tree.Node (Gr.lab' ctx) trees)
-                                      ( (\mb_tree trees -> maybeToList mb_tree ++ trees)   ,  [] )
-                                      starts g
+
 
 
 -- | graph exploration direction: forward
@@ -112,12 +95,12 @@ mkTerm :: (Gr.Graph gr) =>
        -> Term TermId
 mkTerm orig_gr f_class f_attribs
        (_,n,label,outs) ts = -- #outs >= #ts!
-    let -- Edges to nodes which had trees generated in the recursive call
+    let -- nodes which had trees generated in the recursive call
         recNodes            = (map (\id -> let NodeId n = id in n) $
                                map (tid . Tree.rootLabel) ts)
                                   {- `trace` ("mkTerm node = " ++ show n
                                            ++ "; outs=" ++ show (map snd outs)) -}
-                  
+        -- Edge Terms to recNodes
         e_terms = [Tree.Node { Tree.rootLabel = L { tid      = EdgeId (n,dest,0),
                                                     kind     = Edge,
                                                     lclass   = "",
@@ -126,12 +109,12 @@ mkTerm orig_gr f_class f_attribs
                    | dest       <- recNodes
                    | dest_term  <- ts]
 
-        -- Edges to Nodes which were explored already (grey/black??), had no trees
-        -- generated here, so have them point to a Node reference.
-        --
-        -- first the original context for this node, with all its outgoing edges
+        -- get the original context for this node, and all its outgoing edge destinations
         origDests = let (_,_,_,origEs) = Gr.context orig_gr n
                     in map snd origEs
+
+        -- Edge Terms to Nodes which were explored already (grey/black??), had no trees
+        -- generated here, so have them point to a Node reference.
         e_ref_terms = [Tree.Node { Tree.rootLabel = L { tid     = EdgeId (n,dest,0),
                                                         kind    = Edge,
                                                         lclass  = "",
@@ -142,9 +125,10 @@ mkTerm orig_gr f_class f_attribs
                                              << ": origOuts=" << origDests
                                              << "; recNodes=" << recNodes)
                       ]
+        -- And these are all the edge nodes for this Context.
         all_e_terms = numberDups $ e_terms ++ e_ref_terms
 
-        -- and this Node
+        -- and this vertex Node
         n_term  =  Tree.Node { Tree.rootLabel = L { tid      = NodeId n,
                                                     kind     = Node,
                                                     lclass   = f_class label,

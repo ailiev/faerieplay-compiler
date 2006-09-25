@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
+
 module SashoLib (
 		 (.&&),
                  (.||),
@@ -386,7 +388,7 @@ applyWithDefault f def x = case x of
                                Nothing  -> def
 
 
--- ! force a strict evaluation of a value, returning it
+-- | force a strict evaluation of a value, returning it
 strictEval x = x `seq` x
 
 
@@ -400,12 +402,12 @@ maybeApply Nothing  x = x
 -- NOTE: needs multi-parameter type classes, which is not Haskell 98, but should
 -- be in the next spec apparently
 class Stack s where
-    -- ! Return the top element
+    -- | Return the top element
     peek :: s a -> a
-    -- ! pop the stack, does not return popped element
+    -- | pop the stack, does not return popped element
     pop  :: s a -> s a
     push :: a -> s a -> s a
-    -- ! modify the top element with a function, returning the new stack
+    -- | modify the top element with a function, returning the new stack
     modtop :: (a -> a) -> s a -> s a
 
 
@@ -442,7 +444,7 @@ findInStack f stack = msum (map f stack)
 myLiftM :: (Monad m) => (a -> b) -> (a -> m b)
 myLiftM f x = return (f x)
 
--- ! lift a function which injects into a Monad into one which has input and result in the
+-- | lift a function which injects into a Monad into one which has input and result in the
 -- Monad. Have used it on mapM.
 liftArgM :: (Monad m) => (a -> m b) -> (m a -> m b)
 liftArgM f m_x = do x <- m_x
@@ -648,11 +650,11 @@ splice (offset,len) news l = (take offset l) ++
 -- some bit manipulation routines.
 --
 
--- ! Get the value of a range of bits (inclusive) in an instance of Bits.
+-- | Get the value of a range of bits (inclusive) in an instance of Bits.
 getBits :: Bits.Bits i => i -> (Int,Int) -> i
 i `getBits` (a,b) = ( i .&. (bitMask (a,b)) ) `Bits.shiftR` a
 
--- ! Get a bitmask for a range of bits (inclusive)
+-- | Get a bitmask for a range of bits (inclusive)
 bitMask :: Bits.Bits i => (Int,Int) -> i
 bitMask (i,j)     = ( Bits.complement ((Bits.complement 0) `Bits.shiftL` (j-i+1)) )  `Bits.shiftL` i
 

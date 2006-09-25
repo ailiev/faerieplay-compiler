@@ -61,6 +61,8 @@ import UDraw
 import qualified    Container                   as Cont
 import              Mapping
 
+import qualified    GraphLib                    as GrLib
+
 import Common (trace)
 
 import Intermediate as Im hiding (VarTable)
@@ -210,21 +212,40 @@ genCircuit type_table stms args =
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
         unique_lits_cct = collapse_lit_gates circ
-                                `trace` ("The full circuit: " << show circ)
+                          `trace` ("Initial circuit generation done; circ len="
+                                  << Gr.noNodes circ)
+--                                `trace` ("The full circuit: " << show circ)
         clipped_circ    = clip_circuit unique_lits_cct
+                          `trace` ("Number of Lit gates before trim: "
+                                   << numLitGates unique_lits_cct
+                                   << " and without outgoing edges: "
+                                   << (length $
+                                       GrBas.gsel
+                                                ((isLit . Gr.lab') .&& ((== 0) . Gr.outdeg'))
+                                                (unique_lits_cct)
+                                      )
+                                  )
         renum_circ      = renumber clipped_circ
-                                `trace` ("The clipped circuit " << show clipped_circ)
-        gate_list       = flatten_cicrcuit renum_circ
-                                `trace` ("The renumbered circuit " << show renum_circ)
+                          `trace` ("Number of Lit gates after trim: "
+                                   << numLitGates clipped_circ)
+--                                `trace` ("The clipped circuit " << show clipped_circ)
+        gate_list       = flatten_circuit renum_circ
+--                                `trace` ("The renumbered circuit " << show renum_circ)
         -- expand all Typ fields in the gates, as it helps with printing out the types
         -- (using docTypMachine)
         gate_list'      = map (expandGateTyp type_table) gate_list
     in (renum_circ, gate_list')
-         `trace` ("The DFS forest: " << genDFSForest renum_circ)
+           `trace` ("The DFS forest: " << genDFSForest renum_circ)
+
+        where numLitGates   = length . GrBas.gsel (isLit . Gr.lab')
+              isLit g       = case gate_op g of (Lit _)   -> True
+                                                _         -> False
 
 
+{-
 getUFoldOrder g = Gr.ufold f "" g
     where f (_,n,g,_) s = show n ++ " " ++ s
+-}
 
 
 genDFSForest g = Tree.drawForest $ GrDFS.dffWith' strNode g
@@ -253,7 +274,7 @@ renumber g   =  Gr.gmap doRenum g
                                               nodes = sort $ GrBFS.bfsn ins g
                                           in  array (head nodes, last nodes)
                                                     (zip nodes [0..])
-                                                    `trace` ("renumber nodes: " << nodes)
+--                                                    `trace` ("renumber nodes: " << nodes)
           doRenum (ins,node,gate,outs)  = ( map (projSnd renum) ins,
                                             renum node,
                                             gateProjNum renum $
@@ -264,8 +285,8 @@ renumber g   =  Gr.gmap doRenum g
 
 
 
-flatten_cicrcuit :: Circuit -> [Gate]
-flatten_cicrcuit c = let gates  = GrDFS.topsort' c
+flatten_circuit :: Circuit -> [Gate]
+flatten_circuit c  = let gates  = GrDFS.topsort' c
                          gates' = ins_to_front gates
                      in  gates'
           -- get the input gates to the front of the list. this partition should not
@@ -282,36 +303,44 @@ flatten_cicrcuit c = let gates  = GrDFS.topsort' c
 -- trimmed.
 collapse_lit_gates :: Circuit -> Circuit
 collapse_lit_gates g = let (lit_map, replace_map)   = build_maps g
-                       in  Gr.gmap (patch_ctx replace_map) g
+                           starts                   = GrLib.start_ctxs g
+                       -- NOTE: doing the map in the right order is important. Otherwise
+                       -- an edge may be created in the result graph to/from a vertex
+                       -- which is not yet in there.
+                       in  GrLib.ordered_map (patch_ctx replace_map) starts GrLib.fwd g
     where -- Build two maps:
           -- lit_map: at what gate is each Lit value? We use the first gate where the lit
           -- value occurs
           -- replace_map: map from current Lit gate numbers, to the new compacted lit gates.
-          build_maps g = Gr.ufold add_gate_to_maps (Map.empty, Map.empty) g
-          add_gate_to_maps (_,_,g,_) (lit_map, replace_map) =
-              case gate_op g of 
-                (Lit l) -> let mb_last_entry = Mapping.lookup l lit_map
-                           in  case mb_last_entry of
-                                 Nothing    -> -- add this lit to the lit_map
-                                              ( Mapping.insert l (gate_num g) lit_map,
-                                                replace_map )
-                                 Just entry -> -- add redirect from this gate number to
-                                               -- the lit table entry
-                                              ( lit_map,
-                                                Mapping.insert (gate_num g)
-                                                               entry
-                                                               replace_map )
-                _       -> (lit_map, replace_map)
+          build_maps g = foldl add_gate_to_maps (Map.empty, Map.empty) $
+                         map Gr.lab' $
+                         GrBas.gsel (isLit . gate_op . Gr.lab') g
+          add_gate_to_maps (lit_map, replace_map) g =
+              let (Lit l)       = gate_op g
+                  mb_last_entry = Mapping.lookup l lit_map
+              in  case mb_last_entry of
+                    Nothing    -> -- new lit - add it to the lit_map
+                                 ( Mapping.insert l (gate_num g) lit_map,
+                                   replace_map )
+                    Just entry -> -- already have a gate $g$ for this lit,
+                                  -- add redirect from this gate number to
+                                  -- $g$
+                                 ( lit_map,
+                                   Mapping.insert (gate_num g)
+                                                  entry
+                                                  replace_map )
           -- update all the in-edges and gate inputs to point to the selected unique Lit
           -- gates.
           patch_ctx repl (ins,n,g,outs)
-                                    = let g_ins  = map (do_replace repl) $ gate_inputs g
-                                          ins'   = map (projSnd $ do_replace repl) ins
+                                    = let ins'   = map (projSnd $ do_replace repl) ins
+                                          g_ins  = map (do_replace repl) $ gate_inputs g
                                           -- outs should not be affected anywhere
 --                                          outs'  = map (projSnd $ do_replace repl) outs
                                       in  (ins', n, g {gate_inputs = g_ins}, outs)
           -- return a mapped value if it is in the map, otherwise just return the param.
           do_replace map x          = fromMaybe x (Mapping.lookup x map)
+          isLit (Lit _) = True
+          isLit _       = False
                                           
 
 
@@ -320,7 +349,7 @@ expandGateTyp typetable g@(Gate { gate_typ = t })    =
     let t' = Im.expandType' typetable [Im.DoAll] t
     in
       g { gate_typ = t'
-                     `trace` ("expandGateTyp " << t << " -> " << t')
+--                     `trace` ("expandGateTyp " << t << " -> " << t')
         }
 
     
@@ -855,7 +884,8 @@ genCondExit testGate
                   filter nonLocal $
                   map (\(var,gates) -> var) $
                   concatMap Map.toList [ifScope, elseScope]
-        sources = (map varSources vars) `trace` ("non-local scope vars: " << vars)
+        sources = (map varSources vars)
+--                  `trace` ("non-local scope vars: " << vars)
 
     in  foldM addSelect circ $ zip vars sources
 
@@ -885,8 +915,9 @@ genCondExit testGate
                                out   @(gates_true, gates_false) = mapTuple2 (gates var)
                                                                             scopes
 
-                           in  out `trace` ("varSources for " << var << ": "
-                                            << out)
+                           in  out
+--                                   `trace` ("varSources for " << var << ": "
+--                                            << out)
 
           -- find the gates for a var, looking in the given scope stack
           gates var scopes = fromJust $ maybeLookup var scopes
@@ -940,7 +971,9 @@ getSelType gr (node1, node2)
     = do let gates = map (fromJust . Gr.lab gr) [node1, node2]
          -- expanding types into a canonical form
          types <- mapM (Im.expandType [DoTypeDefs]) $ map gate_typ gates
-         case types `trace` ("getSelType of gates " << gates) of
+         case types
+--                  `trace` ("getSelType of gates " << gates)
+                  of
                     [Im.BoolT          , Im.BoolT          ]    -> return Im.BoolT
                     [Im.IntT i1_e      , Im.IntT i2_e      ]    ->
                         do let [i1, i2] = map Im.evalStaticOrDie [i1_e, i2_e]
@@ -987,7 +1020,9 @@ genExp' :: Circuit -> Exp -> OutMonad (Circuit, (Either
                                                   [Gr.Node]))
 genExp' c exp =
  do depth <- getDepth
-    case exp `trace` ("genExp' " << exp) of
+    case exp
+--          `trace` ("genExp' " << exp)
+             of
       (BinOp op e1 e2)  -> do i <- nextInt
                               (c1, gates1) <- genExp c   e1
                               let gate1 = case gates1 of
@@ -1017,9 +1052,11 @@ genExp' c exp =
                                         maybeLookup var)
 
                               return (c, Right gates)
+{-
                                          `trace`
                                          ("genExp' EVar " << var << ", vartable=" << show var_table <<
                                           " -> " << gates)
+-}
 
 
       (ELit l)        -> {-# SCC "Exp-ELit" #-}
@@ -1375,7 +1412,7 @@ cctShowsGate sep delim
                                                     ReadDynArray    -> last docs
                                                     WriteDynArray _ -> last docs
                                                     _               -> head docs
-                            in  ((strShow $ strip doc) ++) .
+                            in  ((strShow $ stripVarExp doc) ++) .
                                 (case doc of    EStatic e   -> (("static " << strShow e) ++)
                                                 _           -> id)
                            )
@@ -1386,10 +1423,12 @@ cctShowsGate sep delim
         where rec x         = cctShows x -- recurse
               rec'          = showsPrec 0 -- and go into the Show class
 
-              -- get rid of variable annotations in an expression
-              strip         = mapExp f
-              f (EVar v)    = (EVar (strip_var v))
-              f e           = e
+
+
+-- get rid of variable annotations in an expression
+stripVarExp             = mapExp f
+    where f (EVar v)    = (EVar (strip_var v))
+          f e           = e
 
 
 -- need a different rendition of Typ's for the runtime
@@ -1453,17 +1492,12 @@ instance CctShow Op where
 
 
 
--- need to get rid of newlines in the nodes
 showCctGraph :: (Gr.DynGraph gr) => gr Gate b -> String
 showCctGraph g =
             let inNodes     = map Gr.node' $ GrBas.gsel isInCtx g
-{-
-                trees       = makeSimpleTree inNodes g
-            in
-              Tree.drawForest $ map (mapTree show) trees
--}
                 terms       = UDraw.makeTerm (const "node")
-                                             (\gate -> [("OBJECT", myShow gate)])
+                                             (\gate -> ( ("OBJECT", myShow gate):
+                                                         getAttribs gate ) )
                                              inNodes
                                              g
                               `trace`
@@ -1472,9 +1506,23 @@ showCctGraph g =
               (PP.render $ UDraw.doc terms)
                 `trace` ("UDraw.makeTerm done")
     where isInCtx (ins,_,_,_) = null ins
-          myShow g = show (gate_num g)
-                     ++ " @ " ++ show (gate_depth g)
-                     ++ "\\n" ++ cctShow (gate_op g)
+          myShow g      = show (gate_num g)
+                          -- ++ " @ " ++ show (gate_depth g)
+                          ++ "\\n" ++ cctShow (gate_op g)
+                             -- show the variable name of input gates, eg:
+                             -- "Input -> var_name"
+                          ++ (case gate_op g of Input   -> " -> " ++ strShow (stripVarExp $ last $
+                                                                              gate_doc g)
+                                                _       -> "")
+
+          getAttribs g  =             if elem Output $ gate_flags g
+                                      then [("COLOR", "light blue"),
+                                            ("_GO",   "rhombus")]
+                                      else
+                                          case gate_op g of
+                                            Input   -> [("COLOR", "green"),
+                                                        ("_GO",   "rhombus")]
+                                            _       -> [] -- normal gates
 
 
 {-

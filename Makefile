@@ -36,6 +36,7 @@ else ifdef DBG
 # centers for more detailed stack reports.
 # GHCFLAGS += -prof -auto-all
 	GHCFLAGS += -prof -auto-all
+#	GHCFLAGS += -O
 
 # from the manual:
 # 

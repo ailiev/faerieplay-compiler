@@ -238,6 +238,8 @@ varName (VTemp i)       = "temp_" ++ show i
 -- variables just need a name, and the scope stack will take care of
 -- making sure we get the correct instance of that name
 
+-- CONVENTION: VScoped goes on the outside of VFlagged (as illustrated in
+-- vflags), and they don't recurse further (that'd be a mess!)
 data Var =
     VSimple Ident
   | VTemp Int
@@ -249,11 +251,9 @@ data Var =
              , Show, Read
              )
 
--- CONVENTION: VScoped goes on the outside of VFlagged (as illustrated in
--- vflags), and they don't recurse further (that'd be a mess!)
-
-data Lit =                      -- literals
-    LInt Integer                -- TODO: change to Integer
+-- | literals
+data Lit =
+    LInt Integer
   | LBool Bool
    deriving (Eq,Ord
             , Show, Read
