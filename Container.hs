@@ -2,19 +2,21 @@ module Container where
 
 
 import List (union)
+import qualified Data.IntSet                    as IS
+
 
 -- a set class, without mapping
-class (Eq a) => Container c a where
-    insert      :: a -> c a -> c a
-    member      :: a -> c a -> Bool
-    union       :: c a -> c a -> c a
-    toList      :: c a -> [a]
-    fromList    :: [a] -> c a
-    empty       :: c a
-    singleton   :: a -> c a
+class (Eq a) => Container c a | c -> a where
+    insert      :: a -> c -> c
+    member      :: a -> c -> Bool
+    union       :: c -> c -> c
+    toList      :: c -> [a]
+    fromList    :: [a] -> c
+    empty       :: c
+    singleton   :: a -> c
 
 
-instance (Eq a) => Container [] a where
+instance (Eq a) => Container ([a]) a where
     insert      = (:)
     member      = elem
     union       = List.union
@@ -24,3 +26,11 @@ instance (Eq a) => Container [] a where
     singleton x = [x]
 
 
+instance Container IS.IntSet Int where
+    insert      = IS.insert
+    member      = IS.member
+    union       = IS.union
+    toList      = IS.toList
+    fromList    = IS.fromList
+    empty       = IS.empty
+    singleton   = IS.singleton

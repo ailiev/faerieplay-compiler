@@ -28,15 +28,18 @@ module CircGen (
                 extractInputs,
                 showCctGraph,
                 CctShow(..),
-                testNextInt
+
+                testNextInt,
                ) where
 
 
 import Array (array, (!))
 import Monad (foldM, mplus, liftM)
-import Maybe (fromJust, isJust, fromMaybe)
+import Maybe (fromJust, isJust, fromMaybe, catMaybes)
 import List
 import Control.Monad.Trans (lift)
+
+import Control.Exception                        (assert)
 
 
 import Data.Graph.Inductive.Graph               ((&))
@@ -51,10 +54,12 @@ import qualified Text.PrettyPrint               as PP
 
 import qualified Data.Map                       as Map
 import qualified Data.Tree                      as Tree
+import qualified Data.IntSet                    as IS
+import qualified Data.IntMap                    as IM
 
 import qualified Control.Monad.State            as St
 
-import SashoLib
+import SashoLib                                 as Lib
 import UDraw
 -- import Sasho.XDR
 
@@ -211,19 +216,35 @@ genCircuit type_table stms args =
         -- the main circuit generation step.
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
+        bad_ctxs        = checkCircuit circ
+{-
+        _               =   if not $ null bad_ctxs
+                            then error ("Bad contexts after circuit generation:\n"
+                                        ++ (concat $ intersperse "\n" $ map showCtx bad_ctxs)
+                                       )
+                            else error "No bad contexts!"
+        circ'           = Gr.delNodes (map Gr.node' bad_ctxs) circ
+                          `trace` ("Bad contexts after circuit generation:\n"
+                                   ++ (concat $ intersperse "\n" $ map showCtx bad_ctxs)
+                                  )
+-}
         unique_lits_cct = collapse_lit_gates circ
                           `trace` ("Initial circuit generation done; circ len="
-                                  << Gr.noNodes circ)
+                                   << Gr.noNodes circ
+                                   << showBadCtxs bad_ctxs
+                                  )
 --                                `trace` ("The full circuit: " << show circ)
+        bad_ctxs2       = checkCircuit unique_lits_cct
         clipped_circ    = clip_circuit unique_lits_cct
                           `trace` ("Number of Lit gates before trim: "
                                    << numLitGates unique_lits_cct
-                                   << " and without outgoing edges: "
+                                   << "; and without outgoing edges: "
                                    << (length $
                                        GrBas.gsel
                                                 ((isLit . Gr.lab') .&& ((== 0) . Gr.outdeg'))
                                                 (unique_lits_cct)
                                       )
+                                   << showBadCtxs bad_ctxs2
                                   )
         renum_circ      = renumber clipped_circ
                           `trace` ("Number of Lit gates after trim: "
@@ -235,17 +256,40 @@ genCircuit type_table stms args =
         -- (using docTypMachine)
         gate_list'      = map (expandGateTyp type_table) gate_list
     in (renum_circ, gate_list')
-           `trace` ("The DFS forest: " << genDFSForest renum_circ)
+           `trace` ("The DFS forest: " -- << genDFSForest renum_circ
+                    << "And the flat circuit:\n" << map strShow gate_list')
 
         where numLitGates   = length . GrBas.gsel (isLit . Gr.lab')
               isLit g       = case gate_op g of (Lit _)   -> True
                                                 _         -> False
 
 
-{-
-getUFoldOrder g = Gr.ufold f "" g
-    where f (_,n,g,_) s = show n ++ " " ++ s
--}
+-- | Check the circuit for consistency, return the list of bad contexts (hopefully empty)
+checkCircuit :: Circuit -> [CircuitCtx]
+checkCircuit c =    let bads = catMaybes . map checkInvariants . GrLib.contexts $ c
+                    in  if null bads
+                        then bads
+                        else bads {-`trace` (let gr_pretty = showCctGraph c
+                                           in  "The bad graph:\n"
+                                               << gr_pretty << "\n") -}
+
+-- | Return Nothing if the 'Context' is fine, Just ctx if it has a problem.
+checkInvariants ctx@(ins,n,gate,outs)   = if (sort (map snd ins) /= sort (gate_inputs gate) ||
+                                              gate_num gate /= n)
+                                          then Just ctx
+                                          else Nothing
+
+showBadCtxs ctxs = if null ctxs
+                   then ""
+                   else "Bad circuit contexts:\n"
+                            << (concat $ intersperse "\n" $ map showCtxDbg ctxs)
+
+showCtxDbg :: CircuitCtx -> String
+showCtxDbg ctx@(ins,n,gate,outs) =
+    ("Node " << n
+     << "; ins=" << map snd ins
+     << "; gate=" << gate
+     << "; outs=" << map snd outs)
 
 
 genDFSForest g = Tree.drawForest $ GrDFS.dffWith' strNode g
@@ -255,10 +299,10 @@ genDFSForest g = Tree.drawForest $ GrDFS.dffWith' strNode g
 
 -- keep only gates which are reverse-reachable from terminal gates
 clip_circuit :: Circuit -> Circuit
-clip_circuit c = let c_rev          = GrBas.grev c
+clip_circuit c = let c_rev          = {-# SCC "grev" #-} GrBas.grev c
                      out_nodes      = map Gr.node' $
-                                      GrBas.gsel isTerminal c_rev
-                     reach_nodes    = GrBFS.bfsn out_nodes c_rev
+                                      {-# SCC "gsel" #-} GrBas.gsel isTerminal c_rev
+                     reach_nodes    = {-# SCC "bfsn" #-} GrBFS.bfsn out_nodes c_rev
                      reach_gr       = keepNodes reach_nodes c
                  in  reach_gr
     where isTerminal = elem Terminal . gate_flags . Gr.lab'
@@ -270,19 +314,36 @@ renumber :: Circuit -> Circuit
 renumber g   =  Gr.gmap doRenum g
           -- the returned map (an array) will map from current numbering to consecutive
           -- numbering
-    where renumMap                      = let ins   = map Gr.node' $ GrBas.gsel isRootCtx g
-                                              nodes = sort $ GrBFS.bfsn ins g
+    where renumMap                      = let nodes = sort $ Gr.nodes g
                                           in  array (head nodes, last nodes)
                                                     (zip nodes [0..])
+                                                    `trace` ("Renum array range=" << head nodes
+                                                             << "-" << last nodes
+                                                             << "; num nodes=" << Gr.noNodes g)
 --                                                    `trace` ("renumber nodes: " << nodes)
           doRenum (ins,node,gate,outs)  = ( map (projSnd renum) ins,
                                             renum node,
                                             gateProjNum renum $
                                                gateProjSrcs (map renum) $ gate,
-                                            map (projSnd renum) outs )
+                                            map (projSnd renum) outs
+                                          )
+                                          `trace`
+                                          ("doRenum ins=" << map snd ins
+                                           << "; outs=" << map snd outs
+                                           << "; gate num=" << gate_num gate
+                                           << "; gate srcs=" << gate_inputs gate
+                                          )
           renum node                    = renumMap ! node
-          isRootCtx (ins,_,_,_)         = null ins
-
+                                          `trace` ("renumbering node " << node)
+{-
+          renumIns g                    = g { gate_inputs = (let renum node = renumMap ! node
+                                                                              `trace`
+                                                                              ("Renum ins on gate " << g
+                                                                               << "; in node=" << node)
+                                                             in  map renum $ gate_inputs g
+                                                            )
+                                            }
+-}
 
 
 flatten_circuit :: Circuit -> [Gate]
@@ -303,17 +364,22 @@ flatten_circuit c  = let gates  = GrDFS.topsort' c
 -- trimmed.
 collapse_lit_gates :: Circuit -> Circuit
 collapse_lit_gates g = let (lit_map, replace_map)   = build_maps g
-                           starts                   = GrLib.start_ctxs g
+                           toporder                 = GrDFS.topsort g
                        -- NOTE: doing the map in the right order is important. Otherwise
                        -- an edge may be created in the result graph to/from a vertex
                        -- which is not yet in there.
-                       in  GrLib.ordered_map (patch_ctx replace_map) starts GrLib.fwd g
+                       in  GrLib.vmap_ordered (patch_ctx replace_map) toporder g
     where -- Build two maps:
           -- lit_map: at what gate is each Lit value? We use the first gate where the lit
           -- value occurs
           -- replace_map: map from current Lit gate numbers, to the new compacted lit gates.
+          -- note that using an IntMap for replace_map did not help performance but
+          -- worsened by 5% or so.
           build_maps g = foldl add_gate_to_maps (Map.empty, Map.empty) $
                          map Gr.lab' $
+                         -- make sure lowest numbered Contexts are first, so they are the
+                         -- kept as the gates for each Lit value
+                         sortBy (compareWith Gr.node') $
                          GrBas.gsel (isLit . gate_op . Gr.lab') g
           add_gate_to_maps (lit_map, replace_map) g =
               let (Lit l)       = gate_op g
@@ -332,12 +398,21 @@ collapse_lit_gates g = let (lit_map, replace_map)   = build_maps g
           -- update all the in-edges and gate inputs to point to the selected unique Lit
           -- gates.
           patch_ctx repl (ins,n,g,outs)
-                                    = let ins'   = map (projSnd $ do_replace repl) ins
-                                          g_ins  = map (do_replace repl) $ gate_inputs g
+                                    = let ins'  = map (projSnd $ do_replace repl) ins
+                                          g_ins = map (do_replace repl) $ gate_inputs g
                                           -- outs should not be affected anywhere
 --                                          outs'  = map (projSnd $ do_replace repl) outs
-                                      in  (ins', n, g {gate_inputs = g_ins}, outs)
-          -- return a mapped value if it is in the map, otherwise just return the param.
+                                          -- NOTE: we do not use outs here, and rely on
+                                          -- all edges to be added as in-edges of some
+                                          -- gate, which should be fine
+                                          ctx'  = (ins', n, g {gate_inputs = g_ins}, [])
+                                      in  ctx'
+                                          `trace`
+                                          ("For Lit compaction on node " << n
+                                           << " replacing " << map snd ins
+                                           << " with " << map snd ins'
+                                           << "; ctx'=" ++ showCtxDbg ctx')
+          -- replace a key with a value if key is in the map, otherwise just return the key.
           do_replace map x          = fromMaybe x (Mapping.lookup x map)
           isLit (Lit _) = True
           isLit _       = False
@@ -355,7 +430,11 @@ expandGateTyp typetable g@(Gate { gate_typ = t })    =
     
 -- | remove the nodes (and associate edges) not in 'keeps' from 'g'.
 keepNodes :: Gr.Graph gr => [Gr.Node] -> gr a b -> gr a b
-keepNodes keeps g = Gr.delNodes (Gr.nodes g \\ keeps) g
+-- profiling showed that the N^2 (\\) list difference operation was taking a lot of time!
+-- So use an IntSet to do the difference operation.
+keepNodes keeps g = let dels = IS.toList $
+                               IS.difference (IS.fromList $ Gr.nodes g) (IS.fromList keeps)
+                    in  Gr.delNodes dels g
 
 
 
@@ -523,7 +602,11 @@ getStrTParams     e             = error $
 
 genStm :: Circuit -> Stm -> OutMonad Circuit
 genStm circ stm =
-    case stm of
+    let bad_ctxs = checkCircuit circ
+    in 
+     case stm {-`trace` ("Generating stm " << stm << ": "
+                       << showBadCtxs (checkCircuit circ)) -}
+     of
 
       -- do away with lval type annotations for now
       (SAss (ExpT _ lval) val) -> genStm circ (SAss lval val)
@@ -848,19 +931,34 @@ checkOutputVars c var mb_gate_loc
                                    (filter (/= -12345678) vgates')
                     return c'
     | otherwise =
-        return c `trace` ("checkOutputVars non-matching var: " << var)
+        return c {- `trace` ("checkOutputVars non-matching var: " << var) -}
 
 
 -- update the label for a given node in a graph, if this node is present
 -- NOTE: strict evaluation
-updateLabel :: (Gr.DynGraph gr) => (a -> a) -> gr a b -> Gr.Node -> gr a b
+-- had a big space leak here, when using a table of Lit's to reduce the number of Lit
+-- gates during circuit generation. The connection between ELit handling, and this
+-- function is unclear, but the profiler clearly pointed to a space leak here. Hence all
+-- the strictness annotations, which did not help.
+updateLabel :: (Gr.DynGraph gr, Eq b) => (a -> a) -> gr a b -> Gr.Node -> gr a b
 updateLabel f gr node = let (mctx,gr')      = {-# SCC "#extract" #-}
                                               strictEval $
                                                        Gr.match ({-# SCC "#node" #-} node)
                                                                 ({-# SCC "#gr"   #-} gr)
                             ctx             = fromJustMsg ("updateLabel " << node)
                                                           mctx
-                        in {-# SCC "re-insert" #-} (tup4_proj_3 (strictEval f) $! ctx) & (strictEval gr')
+                            ctx'            = (tup4_proj_3 (strictEval f) $! ctx)
+                            g_out           = ctx' & (strictEval gr')
+                        in {-# SCC "re-insert" #-}
+                          -- make sure that the modified context we re-inserted is the
+                          -- same as the original, except the label
+                          assert (let (mctx'',_)        = Gr.match node g_out
+                                      ctx''             = fromJustMsg ("updateLabel assert") mctx''
+                                      (is,n,_,os)       = ctx
+                                      (is',n',_,os')    = ctx''
+                                  in  (is,n,os) == (is',n',os')
+                                 )
+                                 g_out
 {-                          
                         in  case id $! mctx of
                               Nothing   -> {-# SCC "ret-id" #-}     gr
@@ -1023,26 +1121,25 @@ genExp' c exp =
     case exp
 --          `trace` ("genExp' " << exp)
              of
-      (BinOp op e1 e2)  -> do i <- nextInt
-                              (c1, gates1) <- genExp c   e1
-                              let gate1 = case gates1 of
-                                            [g1]   -> g1
-                                            _      -> error ("BinOp " << exp <<
-                                                             " arg1 got multiple gates: " <<
-                                                             gates1)
-                              (c2, gates2) <- genExp c1  e2
-                              let gate2 = case gates2 of
-                                            [g]    -> g
-                                            _      -> error ("BinOp " << exp <<
-                                                             " arg2 got multiple gates: " <<
-                                                             gates2)
+      (BinOp op e1 e2)  -> do let genOperand circ opExp =
+                                      do (c1, gates1) <- genExp circ opExp
+                                         let gate1 = case gates1 of
+                                                       [g1]   -> g1
+                                                       _      -> error ("BinOp " << exp <<
+                                                                        " arg got multiple gates: " <<
+                                                                        gates1)
+                                         return (c1, gate1)
+                              (c1, gate1)   <- genOperand c e1
+                              (c2, gate2)   <- genOperand c1 e2
+
                               -- NOTE: the VoidT type annotation used here is replaced
                               -- when the ExpT enclosing this BinOp is handled.
+                              i             <- nextInt
                               let ctx       = mkCtx $ Gate i VoidT (Bin op) [gate1, gate2] depth [] []
                               return (c2, Left [ctx])
 
-      (UnOp op e1)      -> do i <- nextInt
-                              (c1, [gate1]) <- genExp c   e1
+      (UnOp op e1)      -> do (c1, [gate1]) <- genExp c   e1
+                              i             <- nextInt
                               let ctx       = mkCtx $ Gate i VoidT (Un op) [gate1] depth [] []
                               return (c1, Left [ctx])
 
@@ -1078,15 +1175,6 @@ genExp' c exp =
                            do i         <- nextInt
                               let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
                               return (c, Left [ctx])                           
-
-
-
-{-
-      (ELit l)          -> do i         <- nextInt
-                              let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
-                              return (c, Left [ctx])
--}
-
 
 
       -- here we try to update the Typ annotation on the Gate
@@ -1212,14 +1300,12 @@ genExp' c exp =
 
 
 
--- make a graph Context for this operator, node number and source
--- gates
+-- make a graph Context for this gate
 mkCtx :: Gate -> CircuitCtx
-mkCtx g@(Gate node _ _ srcs _ _ _) = let ctx = (map uAdj srcs,
-                                                node,
-                                                g,
-                                                []) -- no outgoing edges
-                                    in ctx
+mkCtx gate =    (map uAdj $ gate_inputs gate,
+                 gate_num gate,
+                 gate,
+                 []) -- no outgoing edges
 
 
 
@@ -1305,7 +1391,7 @@ addLit l addr = modifyLits $ Mapping.insert l addr
 
 
 
--- update the location of 'var' by some function of (Maybe [Node])
+-- update the locations of 'var' by some function of (Maybe [Node])
 -- the new value always goes into the top-most scope
 -- we always use this, even if the var is certain not to be present (eg. during static
 -- initialization), for greater uniformity.
@@ -1503,7 +1589,7 @@ showCctGraph g =
                               `trace`
                               ("Calling UDraw.makeTerm with inNodes=" ++ show inNodes)
             in
-              (PP.render $ UDraw.doc terms)
+              (PP.render $ Lib.doc terms)
                 `trace` ("UDraw.makeTerm done")
     where isInCtx (ins,_,_,_) = null ins
           myShow g      = show (gate_num g)
@@ -1537,9 +1623,9 @@ instance XDR Gate where
 -- some tests
 -------------------------------------
 
-testNextInt = let startState    = MyState { vartable    = [Map.empty],
+testNextInt = let startState    = MyState { vartable    = [Mapping.empty],
                                             counter     = 0,
-                                            typetable   = Map.empty,
+                                            typetable   = Mapping.empty,
                                             lit_table   = Mapping.empty
                                           }
                   (out,st)      = St.runState test_f startState

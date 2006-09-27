@@ -97,7 +97,7 @@ separator TypedName "," ;
 -- statements
 
 -- a block statement is a "{", followed by a list of Declarations, followed by a
-list of Statements, and closed by a "}".
+-- list of Statements, and closed by a "}".
 SBlock.     Stm     ::= "{" [Dec] [Stm] "}" ;
 
 -- assignment

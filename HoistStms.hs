@@ -29,7 +29,7 @@ module HoistStms where
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import SashoLib (Stack, push, pop, peek, mapTuple2, (>>==))
+import SashoLib (Stack, push, pop, peek, mapTuple2, (>>==), replicateM)
 import qualified Container as Cont
 
 import Intermediate
@@ -84,8 +84,13 @@ flatten s =
       (SAss lval val)   -> do (stms,val_new) <- extrStms val
                               return $ stms ++ [(SAss lval val_new)]
 
+      -- here we generate vars for all the vals, assign each var the right val, and use
+      -- the generated vars in the resulting SPrint node.
       (SPrint p vals)   -> do (stmss,vals_new)  <- mapM extrStms vals >>== unzip
-                              return $ concat stmss ++ [(SPrint p vals_new)]
+                              is                <- replicateM (length vals) nextInt
+                              let t_is          = zipWith tempVarForExp vals_new is
+                                  ass's         = zipWith SAss t_is vals_new
+                              return $ concat stmss ++ ass's ++ [(SPrint p t_is)]
 
       (SBlock vars stms)-> do pushScope
                               stmss <- mapM flatten stms

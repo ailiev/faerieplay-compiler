@@ -228,6 +228,11 @@ proj_FL_byte_off f loc@(FieldLoc { byteloc = (off,len) })    = loc { byteloc = (
 var = EVar . VSimple
 tempVar = EVar . VTemp
 
+-- get a type-annotated temp var, with the type of the given expression if it is in fact
+-- annotated.
+tempVarForExp exp = case exp of (ExpT t e)  -> ExpT t . tempVar
+                                _           -> tempVar
+
 varName (VSimple nm)    = nm
 varName (VFlagged _ v)  = varName v
 varName (VScoped _ v)   = varName v

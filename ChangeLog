@@ -1,3 +1,31 @@
+2006-09-26  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* SashoLib.hs: new or imported: compareWith, class DocAble,
+	expand.
+
+	* Mapping.hs: new instance for IntMap.
+
+	* Container.hs: new Instance for IntSet. Changed the Container
+	class to use functional dependencies; without that the IntSet
+	instance was not going anywhere.
+
+	* HoistStms.hs (flatten): Hoist expressions out of an SPrint
+	statement, so only simple vars are in there, as the CircGen wants.
+
+	* GraphLib.hs: Mostly new; needs commenting as some of the things
+	are fragile. Moved some functions (pruneGraph, graph2adjList,
+	showGraph etc.) from UDraw.hs to here.
+	(vmap_ordered): A bit of a hack to map a function on Contexts
+
+	* CircGen.hs (collapse_lit_gates): fixed, which took a lot of
+	poking around. I still think it's somewhat fragile.
+	(genCircuit): Added a few checks for circuit invariant.
+	(checkCircuit): do the invariant check.
+	(keepNodes): use an IntSet to do the difference operation - big
+	improvement, this took 60% of the runtime before (using
+	List.(\\)), on Dijkstra with LOGN=4; would be worse for larger N.
+	(showCctGraph): Expanded the UDrawGraph presentation a bit.
+	
 2006-09-21  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* CircGen.hs (genCircuit): Shuffled the steps around a bit - Lit

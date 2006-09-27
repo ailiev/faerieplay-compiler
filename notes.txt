@@ -133,3 +133,39 @@ with LOGN=7:
 - 102 mins.
 - used only one of the CPUs, at 100%.
 - 1.1GB RAM most of the time, up to 1.2GB in last 2 mins.
+
+
+<date>Tue Sep 26 18:44:13 2006</date>
+
+After a lot of work, the Lit-reduction code seems to work.
+
+some profiling resulted in a few optimizations, most importantly in
+CircGen.keepNodes, and then some observations:
+
+$ sfdlc +RTS -p -K128M -RTS --dump-graph --dump-gates -c dijkstra.sfdl -o \
+dijkstra.runtime
+
+- genCircuitM is not even the most expensive - 21.1% time; inside it:
+  - genExpWithDoc: 11%
+  - updateLabel: 6.6%
+- clip_circuit is expensive - 23.4%. Inside it:
+  - grev is worst - 11.5%
+  - then gsel - 5.7%
+  - then bfsn - 4.3%
+- doExtra total: 10.9%
+- unroll: 6.9%
+
+- rest of the main ones:
+COST CENTRE                    MODULE               %time %alloc
+
+collapse_lit_gates             CircGen               15.1   18.6
+grev                           CircGen               11.5    8.8
+renumber                       CircGen                6.6    7.0
+flatten_circuit                CircGen                6.2    9.1
+gsel                           CircGen                5.7    5.6
+doExtra                        Main                   5.2   10.2
+showGraph                      GraphLib               4.8    8.4
+updateLabel                    CircGen                4.8    2.6
+bfsn                           CircGen                4.3    3.0
+#extract                       CircGen                3.9    3.3
+doExtras                       Main                   3.4    0.0

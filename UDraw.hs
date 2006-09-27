@@ -3,20 +3,18 @@ module UDraw (
              , makeTerm
              , TermId
              , Kind
-             , DocAble(..)
-             , showGraph
-             , pruneGraph
-             , fwd, back
-             ) where
+             )
+    where
 
 
 import              SashoLib
 import              Common                          (trace)
+import qualified    GraphLib                        as GrLib
+
 
 import              Maybe                           (maybeToList, fromJust, isJust)
 import              List                            ((\\), nub)
 import qualified    List
-import              Array                           (array, listArray, accum, assocs)
 import              Char                            (isSpace)
 
 import              Control.Monad.Error             (MonadError(..))
@@ -29,13 +27,13 @@ import qualified    Data.Graph.Inductive.Tree       as TreeGr
 
 import qualified    Data.Tree                       as Tree
 import qualified    Data.Set                        as Set
-import qualified    Data.IntSet                     as IS
 
 import qualified    Control.Monad.State             as St
 
 import              Text.PrettyPrint                as PP
 
 import qualified    Debug.Trace                     as Trace
+
 
 
 
@@ -71,16 +69,10 @@ makeTerm f_class                -- ^ Function to get the class of a Node
     -- The type variables in the signature of gfold are in this case:
     -- c = [Term TermId]
     -- d = Term TermId
-    = GrBas.gfold fwd (mkTerm g f_class f_attribs) (doTerm, []) starts g
+    = GrBas.gfold GrLib.fwd (mkTerm g f_class f_attribs) (doTerm, []) starts g
 
 
 
-
--- | graph exploration direction: forward
-fwd (_,_,_,outs) = map snd outs
-
--- | graph exploration direction: backwards
-back (ins,_,_,_) = map snd ins
 
 
 -- deal with one Graph Context, and the sub-terms generated for (some of) its out-edge
@@ -161,72 +153,6 @@ dups2refs ls = mapDupsBy ((==) `comp2_1` tid . Tree.rootLabel) mkRef ls
 
 
 
--- a Graph as an adjacency list of contiguous, labelled nodes.
--- useful because has a derived instance of Show and Read, whereas the Graph.Inductive
--- graphs don't
-type EdgeList elab = [(Gr.Node,elab)]
-data AdjList vlab elab = AdjList { v  :: (Gr.Node,vlab),
-                                   es :: EdgeList elab
-                                 }
-    deriving (Show,Read)
-
-
--- use an Array of vertex number to (vlab, EdgeList) to store the graph, before exporting
--- the Array to a list.
-graph2adjList gr = let -- Start the array with blanks at all slots
-                       graphArr'' = listArray (Gr.nodeRange gr) (repeat Nothing)
-                       -- add  an entry for every node, and its label
-                       graphArr' = accum (\_ v_new -> Just v_new) graphArr''
-                                            [ (src, (vlab,[])) | (src,vlab) <- Gr.labNodes gr
-                                            ]
-                       -- and now add in all the edge info - destinations and labels.
-                       -- leave the node labels untouched (via. 'const')
-                       graphArr  = accum (\mb_b (_,c2) -> do (b1,b2)   <- mb_b
-                                                             return (b1, b2 ++ c2))
-                                         graphArr'
-                                         [ ( src, (undefined, [(dest,elab)]) )
-                                               | (src,dest,elab) <- Gr.labEdges gr]
-                   in [ AdjList { v     = (i_v, vlab),
-                                  es    = edgeList }
-                        | (i_v, (Just (vlab, edgeList)))  <- filter (isJust . snd) $ assocs graphArr
-                      ]
-                  
-
-adjList2graph adjs = let nodes = [(v,vlab) | (v,vlab) <- map v adjs]
-                         adjLists = [(s, es)   | (s,_)  <- map v adjs
-                                               | es     <- map es adjs
-                                    ]
-                         edges = [ (i_s,i_d,elab) | (i_s, (i_d,elab)) <- expand adjLists ]
-                     in Gr.mkGraph nodes edges
-
-
--- return a sub-graph of 'gr', with all nodes in the direction given by 'dir', within
--- 'dist' of 'center'.
-pruneGraph ::   (Gr.Graph gr) =>
-                (Gr.Context v e -> [Gr.Node])
-             -> Gr.Node
-             -> Int
-             -> gr v e
-             -> gr v e
-pruneGraph dir center dist gr =
-    let paths       = iterateTree (dir . Gr.context gr) center
-        shortPaths  = pruneTree dist paths
-        wantNodes   = Tree.flatten $ shortPaths
-        -- use a Set data structure for efficiency here, as List.\\ is O(n * m)
-        delNodes    = IS.elems $ IS.fromList (Gr.nodes gr) `IS.difference`
-                                 IS.fromList wantNodes
-    in
-      Gr.delNodes delNodes gr
-
-
-
-showGraph g = show $ graph2adjList g
-
--- reading graphs via AdjList format
-instance (Read vlab, Read elab, Gr.Graph gr) => Read (gr vlab elab)
-    where readsPrec x s = let parses = readsPrec x s
-                          in
-                            map (proj_tup2 (adjList2graph, id)) parses
 
 {-
 -- Read instance for graphs
@@ -278,36 +204,6 @@ readsSymbol sym s = if sym `List.isPrefixOf` s
                     else []
 
 skipws = dropWhile isSpace
-
--}
-
-
-
-
--- | Take an assoc list of (key, values), and expand it to a (longer) list of
--- (key,value), where each 'values' has been expanded to one value per element.
-expand :: [(a, [b])] -> [(a,b)]
--- use foldr to avoid quadratic blowup with (++)
-expand xs = foldr f [] xs
-    where f (a,bs) dones = [(a,b) | b <- bs] ++ dones
-
-
-
-
-
-{-
-type AdjList = [Gr.Node]        -- list of target vertices
-type AdjArr lab = Array Gr.Node (lab, AdjList)
-
-foldAdjArr ::
-    ( (lab,AdjList) -> c -> d) ) -- ^ Given a vertex (label and adj list), a 'c' from a
-                                 -- recursive call to  'foldAdjArr', produce some 'd'
-    -> (d -> c -> c)             -- ^ Fold along the d's produced by the d-function,
-                                 -- starting with the 'c'
-    -> [Gr.Node]                -- The starting vertices
-    -> c                        -- accumulator
-    -> AdjArr lab
-    -> c
 
 -}
 
@@ -377,12 +273,6 @@ quote = PP.doubleQuotes . PP.text
 
 termList = PP.brackets . PP.vcat . PP.punctuate PP.comma
 
-
-
--- LIB:
--- convert a value to a Doc for pretty-printing.
-class DocAble a where
-    doc     :: a -> PP.Doc
 
 
 

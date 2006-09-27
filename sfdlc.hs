@@ -35,6 +35,7 @@ import qualified HoistStms      as Ho
 import qualified Unroll         as Ur
 import qualified CircGen        as CG
 import qualified Runtime        as Run
+import qualified GraphLib       as GrLib
 import           UDraw
 import           Common
 
@@ -44,7 +45,7 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-06-16 18:12:59 sasho"
+-- g_timestamp = "2006-09-25 20:02:43 sasho"
 
 -- this updated by subversion
 g_svn_id = "subversion $Revision$"
@@ -287,7 +288,7 @@ doExtras filenameIn ccts flag
 
 
 doExtra DumpGates (cct,gates)   = show gates
-doExtra DumpGraph (cct,gates)   = showGraph cct
+doExtra DumpGraph (cct,gates)   = GrLib.showGraph cct
 
 
 readCct :: (Read a, Read b) => Handle -> IO (TreeGr.Gr a b)
@@ -308,8 +309,8 @@ doPruneGraph start dist hIn hOut =
     do logmsg PROGRESS "Pruning the circuit graph"
        cct              <- hGetContents hIn >>= readIO
        let _            = cct :: CG.Circuit
-       let cct_pruned   = UDraw.pruneGraph UDraw.back start dist cct
-       (hPutStrLn hOut $ showGraph cct_pruned)
+       let cct_pruned   = GrLib.pruneGraph GrLib.back start dist cct
+       (hPutStrLn hOut $ GrLib.showGraph cct_pruned)
          `trace` ("doPruneGraph: cct_pruned is\n" ++ show cct_pruned)
 
 

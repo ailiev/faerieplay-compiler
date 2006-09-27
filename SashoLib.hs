@@ -49,6 +49,8 @@ module SashoLib (
 
         nubOrds,
 
+        compareWith,
+
         applyWithDefault,
 
         strictEval,
@@ -106,7 +108,11 @@ module SashoLib (
                 tup4_get1, tup4_get2, tup4_get3, tup4_get4, 
                 tup4_proj_1,  tup4_proj_2,  tup4_proj_3,  tup4_proj_4,
 
-                tup5_get1
+                tup5_get1,
+
+        DocAble(..),
+        expand
+
 
 		)
     where
@@ -118,6 +124,8 @@ import Monad (MonadPlus, mzero, mplus, msum, liftM)
 
 import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT, MonadError(..))
 import Control.Monad.Identity (runIdentity)
+
+import qualified    Text.PrettyPrint            as PP
 
 import Control.Monad.Trans (MonadTrans, lift)
 
@@ -287,6 +295,15 @@ iterateList f x = let fx = f x
 -- much more efficient than List.nub, which is O(n^2)
 nubOrds :: (Ord a) => [a] -> [a]
 nubOrds = map head . List.group . List.sort
+
+{-
+-- set difference for Ord instances, using a Map
+diffOrds :: (Ord a) => [a] -> [a] -> [a]
+diffOrds x y    = let [x', y'] = map sort [x, y]
+ -}                    
+
+
+compareWith f x y = compare (f x) (f y)
 
 
 -- apply a function to all second and further instances of an item in a list, with a given
@@ -743,3 +760,16 @@ pruneTree d (Tree.Node r subs)
     | d <= (fromInteger 0)  = Tree.Node r []
     | otherwise             = Tree.Node r (map (pruneTree (d-1)) subs)
 
+
+-- | class of types which are convertable to a Doc for pretty-printing.
+class DocAble a where
+    doc     :: a -> PP.Doc
+
+
+
+-- | Take an assoc list of (key, values), and expand it to a (longer) list of
+-- (key,value), where each 'values' has been expanded to one value per element.
+expand :: [(a, [b])] -> [(a,b)]
+-- use foldr to avoid quadratic blowup with (++)
+expand xs = foldr f [] xs
+    where f (a,bs) dones = [(a,b) | b <- bs] ++ dones

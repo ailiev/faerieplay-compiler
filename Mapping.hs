@@ -2,6 +2,7 @@ module Mapping where
 
 
 import qualified Data.Map               as Map
+import qualified Data.IntMap            as IM
 
 
 -- the type of the container determines the type of the key and value, hence functional
@@ -29,6 +30,19 @@ instance (Ord k) => Mapping (Map.Map k a) k a where
     lookup      = Map.lookup
     empty       = Map.empty
     toList      = Map.toList
+
+
+-- | A Mapping of Int to values, using IntMap
+instance Mapping (IM.IntMap a) Int a where
+    insert      = IM.insert
+    -- standard library BUG: IntMap.lookup is not in any Monad but in Maybe
+    -- this is in whatever Monad the user wants.
+    lookup k m  = do let mb_val = IM.lookup k m
+                     case mb_val of Nothing     -> fail "Key not found in IntMap Mapping"
+                                    Just val    -> return val
+    empty       = IM.empty
+    toList      = IM.toList
+
 
 
 -- | Return the keys of a Mapping

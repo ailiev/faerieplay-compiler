@@ -1,8 +1,8 @@
 GHCFLAGS =  -fglasgow-exts
 GHCFLAGS += -fallow-overlapping-instances
 
-GHCFLAGS += -I$(HOME)/code/haskell
-GHCFLAGS += -I$(HOME)/work/code/lib/haskell
+# GHCFLAGS += -I$(HOME)/code/haskell
+# GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 
 GHCFLAGS += -v0
 
@@ -35,7 +35,7 @@ else ifdef DBG
 # see also section 5.1.1 "Inserting cost centres by hand" for how to add cost
 # centers for more detailed stack reports.
 # GHCFLAGS += -prof -auto-all
-	GHCFLAGS += -prof -auto-all
+	GHCFLAGS += -prof -auto -auto-all
 #	GHCFLAGS += -O
 
 # from the manual:
