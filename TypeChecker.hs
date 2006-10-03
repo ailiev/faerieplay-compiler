@@ -17,10 +17,12 @@ import Control.Monad.Trans (lift)
 
 import Common (MyError(..), ErrMonad, trace)
 
-import SashoLib (Stack(..), (<<), ilog2, maybeLookup,
+import SashoLib ((<<), ilog2,
                  myLiftM, concatMapM, (>>==), mapTuple2,
                  StreamShow(..)
                 )
+
+import Stack                            (Stack(..), maybeLookup)
 
 import qualified Container as Cont
 

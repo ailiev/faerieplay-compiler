@@ -11,7 +11,6 @@ module SashoLib (
 
                  (>>==),
 
-        Stack (..),
 
         comp2_1,
 
@@ -33,8 +32,6 @@ module SashoLib (
 
 --         mkList,
 
-         findInStack,
-         maybeLookup,
          maybeMapAdjust,
          fromJustMsg,
          maybeApply,
@@ -417,38 +414,12 @@ maybeApply Nothing  x = x
 
 
 
--- NOTE: needs multi-parameter type classes, which is not Haskell 98, but should
--- be in the next spec apparently
-class Stack s where
-    -- | Return the top element
-    peek :: s a -> a
-    -- | pop the stack, does not return popped element
-    pop  :: s a -> s a
-    push :: a -> s a -> s a
-    -- | modify the top element with a function, returning the new stack
-    modtop :: (a -> a) -> s a -> s a
-
-
-instance Stack [] where
-    peek = head
-    pop  = tail
-    push x s = (x:s)
-    modtop = modifyListHead
-
-
 -- integer division with rounding *up*
 infixl 7 `divUp`
 divUp :: (Integral a) => a -> a -> a
 divUp x y = let (d,m) = divMod x y
             in  d + (signum m)
 
-
-
--- apply an operation successively down a list, until it does not fail, then
--- return that result
--- (which is what msum does, provided that "fail" is mzero)
-findInStack :: (MonadPlus m) => (a -> m b) -> [a] -> m b
-findInStack f stack = msum (map f stack)
 
 
 
@@ -477,10 +448,6 @@ scanM f a (x:xs) =  do y    <- f a x
                        return (a:rest)
 
 zipWith3M f xs ys zs = sequence $ zipWith3 f xs ys zs
-
--- force a Map.lookup in the Maybe monad
-maybeLookup :: Ord k => k -> [Map.Map k a] -> Maybe a
-maybeLookup key maps = findInStack (Map.lookup key) maps
 
 
 

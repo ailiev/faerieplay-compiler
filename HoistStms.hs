@@ -29,8 +29,10 @@ module HoistStms where
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import SashoLib (Stack, push, pop, peek, mapTuple2, (>>==), replicateM)
+import SashoLib (mapTuple2, (>>==), replicateM)
 import qualified Container as Cont
+import Stack                                    (Stack(..))
+
 
 import Intermediate
 

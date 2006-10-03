@@ -70,9 +70,11 @@ import UDraw
 import qualified    Container                   as Cont
 import              Mapping
 
+import Stack                                    (Stack(..), maybeLookup)
+
 import qualified    GraphLib                    as GrLib
 
-import Common (trace,LogPrio(..),logmsg,logProgress,logDebug)
+import Common (trace,LogPrio(..),logmsg,logProgress,logDebug,RunFlags(..))
 
 import Intermediate as Im hiding (VarTable)
 
@@ -210,12 +212,12 @@ genCircuit :: TypeTable ->      -- the type table
               Circuit           -- the resulting circuit
 -}
 
-
+-- | Generate the circuit for these unrolled statements, with the given input parameters.
 genCircuit type_table stms args =
     let startState      = MyState { vartable    = [Map.empty],
                                     counter     = 0,
                                     typetable   = type_table,
-                                    lit_table   = Mapping.empty
+                                    flags       = []
                                   }
         -- the main circuit generation step.
         (circ, st)      = St.runState (genCircuitM stms args)
@@ -763,10 +765,11 @@ genStm circ stm =
       -- we will wire all the variables in x to go through this gate
       -- a bit of a hassle as there may be one or more gates feeding into here (in case of
       -- a struct). So, add slice gates
-      (SPrint prompt xs)      -> if not cDOPRINT
+      (SPrint prompt xs)  -> do flags   <- getFlags
+                                if not $ elem DoPrint flags
                                  then return circ
                                  else
-                                   do i              <- nextInt
+                                   do i                 <- nextInt
                                       depth             <- getDepth
 
                                       -- generate parameters for each expression separately.
@@ -1212,21 +1215,6 @@ genExp' c exp =
 
 
       (ELit l)        -> {-# SCC "Exp-ELit" #-}
-                         if cSTORE_LITS
-                         then
-                           do mb_lit_addr   <- getLit l
-                              case mb_lit_addr of
-                                Just addr   -> return (c, Right [addr])
-                                Nothing     -> do i     <- nextInt
-                                                  addLit l i
-                                                  let ctx   = mkCtx (Gate i
-                                                                          (IntT 32)
-                                                                          (Lit l)
-                                                                          []
-                                                                          depth
-                                                                          [] [])
-                                                  return (c, Left [ctx])
-                         else   -- not cSTORE_LITS
                            do i         <- nextInt
                               let ctx   = mkCtx (Gate i (IntT 32) (Lit l) [] depth [] [])
                               return (c, Left [ctx])                           
@@ -1397,18 +1385,13 @@ extractInputs (Prog pname (ProgTables {funcs=fs})) =
 --------------------
 
 -- the state in these computations:
-data MyState = MyState { vartable   :: [VarTable], -- stack of table Var -> [Node]
-                         counter    :: Int,        -- a counter to number the gates
+data MyState = MyState { vartable   :: [VarTable], -- ^ stack of table Var -> [Node]
+                         counter    :: Int,        -- ^ a counter to number the gates
                                                    -- sequentially
-                         typetable  :: TypeTable,  -- the type table is read-only, so
+                         typetable  :: TypeTable,  -- ^ the type table is read-only, so
                                                    -- could be in a Reader, but easier to
                                                    -- stick it in here
-                         lit_table  :: Map.Map Im.Lit Gr.Node    -- a Mapping of literals (Integer
-                                                               -- or Bool)
-                                                               -- to Node number, so we can
-                                                               -- stick to one gate per
-                                                               -- literal.
-                                                               -- instantiated as a Data.Map
+                         flags      :: [RunFlags]  -- ^ The run-time configuration flags.
                        }
 {-
 instance St.MonadState Int (St.State MyState) where
@@ -1421,27 +1404,20 @@ instance St.MonadState Int (St.State MyState) where
 getsVars        f   = St.gets $ f . vartable
 getsTypeTable   f   = St.gets $ f . typetable
 
+getFlags = St.gets flags
+
 getInt              = St.gets counter
 getVars = getsVars id
 
-
--- get the gate for a literal, in a Monad
--- fails if the literal does not yet have a gate
-getLit l = St.gets $ Mapping.lookup l . lit_table
 
 
 -- modify the various parts of the state with some function
 modifyVars f = St.modify $ \st@(MyState{ vartable = x }) -> st { vartable = f x }
 modifyInt  f = St.modify $ \st@(MyState{ counter  = x }) -> st { counter = f x }
-modifyLits f = St.modify $ \st@(MyState{ lit_table  = x }) -> st { lit_table = f x }
 
 -- OutMonad does carry a TypeTable around
 instance TypeTableMonad OutMonad where
     getTypeTable = getsTypeTable id
-
-
--- add a gate number for this literal
-addLit l addr = modifyLits $ Mapping.insert l addr
 
 
 
@@ -1686,7 +1662,7 @@ showCctGraph g =
 testNextInt = let startState    = MyState { vartable    = [Mapping.empty],
                                             counter     = 0,
                                             typetable   = Mapping.empty,
-                                            lit_table   = Mapping.empty
+                                            flags       = []
                                           }
                   (out,st)      = St.runState test_f startState
               in  (out,st)

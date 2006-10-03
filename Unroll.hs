@@ -14,8 +14,9 @@ import Maybe                            (fromJust)
 import List                             (unfoldr, partition)
 import qualified Data.Map               as Map
 
-import SashoLib                         (maybeLookup, (<<), ilog2, unfoldrM,
-                                         Stack(..), mapTuple2)
+import SashoLib                         ((<<), ilog2, unfoldrM,
+                                         mapTuple2)
+import Stack                                    (Stack(..), maybeLookup)
 import qualified Container              as Cont
 
 import Common
@@ -44,7 +45,7 @@ getsScope = snd
 
 
 -- maximum function recursion depth
-cMAXSCOPE = 32
+cMAXSCOPE = 128
 
 
 type StateWithErr = St.StateT MyStateT ErrMonad

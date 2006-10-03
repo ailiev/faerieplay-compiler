@@ -29,6 +29,11 @@ instance StreamShow MyError where
 -- note that we now have a type "ErrMonad a", synonym for "Either TypeError a"
 type ErrMonad = Either MyError
 
+-- | Runtime flags, built from the command line or other configuration settings, and
+-- passed to the various parts in different ways, eg. as part of MyState in CircGen.hs.
+data RunFlags = DoPrint
+    deriving (Read,Show,Eq,Ord)
+
 
 
 #ifdef TRACE

@@ -1,5 +1,13 @@
 2006-10-03  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
+	* Stack.hs (): Added, moving stuff out of SashoLib.hs
+
+	* Common.hs: Added RunFlags, to carry runtime flags from the
+	command line etc, to all parts of the program.
+
+	* CircGen.hs (): removed the Lit table in MyState.
+	(): Added initial support for RunFlags, carried in MyState.
+
 	* many: Added OPTIONS_GHC pragmas on top.
 	
 	* SashoLib.hs (zipWith3M): added.
