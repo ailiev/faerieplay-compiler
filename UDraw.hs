@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
+-- -fglasgow-exts: for parallel list comprehension
+
 module UDraw (
               Term
              , makeTerm

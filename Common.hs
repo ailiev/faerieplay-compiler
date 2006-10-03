@@ -38,5 +38,24 @@ trace = flip Trace.trace
 trace = const -- flip Trace.trace
 #endif
 
+data LogPrio = DEBUG | INFO | PROGRESS | WARNING | ERROR
+   deriving (Show,Eq,Ord)
+
+
+cMINPRIO = 
+#ifdef TRACE
+       DEBUG
+#else
+       PROGRESS
+#endif
+
+
+logmsg prio x msg = if prio >= cMINPRIO
+                    then Trace.trace (show prio ++ ": " ++ msg) x
+                    else x
+
+logProgress = logmsg PROGRESS
+logDebug    = logmsg DEBUG
+
 infix 0 `trace`
 

@@ -86,6 +86,7 @@ module SashoLib (
         repeatM,
         sumM,
         concatMapM,
+        zipWith3M,
 
         strictList,
         iterateList,
@@ -475,7 +476,7 @@ scanM f a (x:xs) =  do y    <- f a x
                        rest <- scanM f y xs
                        return (a:rest)
 
-
+zipWith3M f xs ys zs = sequence $ zipWith3 f xs ys zs
 
 -- force a Map.lookup in the Maybe monad
 maybeLookup :: Ord k => k -> [Map.Map k a] -> Maybe a

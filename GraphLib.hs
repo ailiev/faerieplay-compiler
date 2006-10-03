@@ -1,3 +1,7 @@
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
+-- -fglasgow-exts: for parallel list comprehension
+
+
 module GraphLib
 (
  contexts,
@@ -28,7 +32,7 @@ import qualified Data.Graph.Inductive.Query.DFS as GrDFS
 import qualified Data.Graph.Inductive.Query.BFS as GrBFS
 
 import SashoLib                                 (comp2_1,expand,proj_tup2,iterateTree,pruneTree,(<<),
-                                                StreamShow(..))
+                                                StreamShow(..), strictEval)
 import Common                                   (trace)
 
 
@@ -47,7 +51,7 @@ vmap_ordered ctx_f nodes g  = {-
                                   ("vmap_bfs: ctxs'=\n" << map ((++ "\n") . showCtxDbg) ctxs'
                                   ) -}
                               let ctxs          = map (Gr.context g) nodes
-                                  ctxs'         = map ctx_f ctxs
+                                  ctxs'         = strictEval $ map (strictEval ctx_f) ctxs
                                   -- bring indegree 0 contexts to the front, to try to
                                   -- make sure the graph building succeeds.
                                   (id0,rest)    = List.partition ((== 0) . Gr.indeg') ctxs'

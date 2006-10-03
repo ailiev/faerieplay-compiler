@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fallow-overlapping-instances  -fglasgow-exts #-}
+
 -- code to generate a circuit from an unrolled list of statements,
 -- consisiting only of SAss, and SIfElse.
 
@@ -33,11 +35,12 @@ module CircGen (
                ) where
 
 
-import Array (array, (!))
-import Monad (foldM, mplus, liftM)
-import Maybe (fromJust, isJust, fromMaybe, catMaybes)
+import Array    (array, (!))
+import Monad    (foldM, mplus, liftM)
+import Maybe    (fromJust, isJust, fromMaybe, catMaybes)
 import List
-import Control.Monad.Trans (lift)
+
+import Control.Monad.Trans                      (lift)
 
 import Control.Exception                        (assert)
 
@@ -53,9 +56,10 @@ import qualified Data.Graph.Inductive.Query.BFS as GrBFS
 import qualified Text.PrettyPrint               as PP
 
 import qualified Data.Map                       as Map
+import qualified Data.Set                       as Set
 import qualified Data.Tree                      as Tree
-import qualified Data.IntSet                    as IS
-import qualified Data.IntMap                    as IM
+-- import qualified Data.IntSet                    as IS
+-- import qualified Data.IntMap                    as IM
 
 import qualified Control.Monad.State            as St
 
@@ -68,7 +72,7 @@ import              Mapping
 
 import qualified    GraphLib                    as GrLib
 
-import Common (trace)
+import Common (trace,LogPrio(..),logmsg,logProgress,logDebug)
 
 import Intermediate as Im hiding (VarTable)
 
@@ -179,7 +183,7 @@ gate2lnode g@(Gate {gate_num=i}) = (i,g)
 gateProjNum  f  g@(Gate {gate_num=i})        = g { gate_num    = f i }
 gateProjSrcs f  g@(Gate {gate_inputs=is})    = g { gate_inputs = f is }
 gateProjDoc  f  g@(Gate {gate_doc=ds})    = g { gate_doc = f ds }
-
+gateProjFlags f g@(Gate {gate_flags=fs})    = g { gate_flags = f fs }
 
 -- needed to lookup a variable's current gate number
 -- Structs and direct arrays occupy multiple gates, so need to actually store
@@ -229,13 +233,27 @@ genCircuit type_table stms args =
                                   )
 -}
         unique_lits_cct = collapse_lit_gates circ
-                          `trace` ("Initial circuit generation done; circ len="
-                                   << Gr.noNodes circ
-                                   << showBadCtxs bad_ctxs
-                                  )
+                          `logProgress`
+                          ("Initial circuit generation done; circ len="
+                           << Gr.noNodes circ
+                           -- << showBadCtxs bad_ctxs
+                          )
+{-
+                          `logDebug`
+                          (let gr_pretty = showCctGraph circ
+                           in "The generated graph:\n" ++ gr_pretty
+                          )
+-}
+        
 --                                `trace` ("The full circuit: " << show circ)
+
         bad_ctxs2       = checkCircuit unique_lits_cct
         clipped_circ    = clip_circuit unique_lits_cct
+                          `logProgress`
+                          ("collapse_lit_gates done; circuit size="
+                           << Gr.noNodes unique_lits_cct
+                          )
+{-
                           `trace` ("Number of Lit gates before trim: "
                                    << numLitGates unique_lits_cct
                                    << "; and without outgoing edges: "
@@ -246,9 +264,10 @@ genCircuit type_table stms args =
                                       )
                                    << showBadCtxs bad_ctxs2
                                   )
+-}
         renum_circ      = renumber clipped_circ
-                          `trace` ("Number of Lit gates after trim: "
-                                   << numLitGates clipped_circ)
+                          `logProgress` ("clipped_circ done; Number of Lit gates after trim: "
+                                         << numLitGates clipped_circ)
 --                                `trace` ("The clipped circuit " << show clipped_circ)
         gate_list       = flatten_circuit renum_circ
 --                                `trace` ("The renumbered circuit " << show renum_circ)
@@ -431,20 +450,22 @@ expandGateTyp typetable g@(Gate { gate_typ = t })    =
 -- | remove the nodes (and associate edges) not in 'keeps' from 'g'.
 keepNodes :: Gr.Graph gr => [Gr.Node] -> gr a b -> gr a b
 -- profiling showed that the N^2 (\\) list difference operation was taking a lot of time!
--- So use an IntSet to do the difference operation.
-keepNodes keeps g = let dels = IS.toList $
-                               IS.difference (IS.fromList $ Gr.nodes g) (IS.fromList keeps)
+-- So use a Set to do the difference operation.
+keepNodes keeps g = let dels = Set.toList $
+                               Set.difference (Set.fromList $ Gr.nodes g) (Set.fromList keeps)
                     in  Gr.delNodes dels g
 
 
 
--- and the stateful computation
+-- | the stateful computation to generate the whole circuit.
 genCircuitM :: [Stm] -> [TypedName] -> OutMonad Circuit
 genCircuitM stms args =
     do input_gates <- genInputs args
        foldM genStm input_gates stms
 
 
+-- | Generate the initial graph for the inputs; it will consist of several Input gates,
+-- and no edges.
 genInputs :: [TypedName] -> OutMonad Circuit
 genInputs names     = do gatess     <- mapM (createInputGates True) names
                          return     (Gr.mkGraph (map gate2lnode (concat gatess)) [])
@@ -521,9 +542,10 @@ genComplexInit lval size =
 -- also have the gates pass through a hook which may update them, eg. add
 -- flags
 genExpWithDoc :: Circuit ->
-                 Maybe (Gate -> Gate) ->
-                 Exp ->
-                 Exp ->
+                 Maybe (Gate -> Gate) -> -- ^ A hook to apply to a gate generated for the
+                                         -- expression
+                 Exp ->         -- ^ The expression to translate
+                 Exp ->         -- ^ The doc expression
                  OutMonad (Circuit, [Gr.Node])
 genExpWithDoc c ghook e e_doc =
     do (c', res) <- genExp' c e
@@ -812,10 +834,17 @@ genStm circ stm =
       s -> error $ "Unknow genStm on " << s
 
     where addOutputFlag var =
-              case strip_var var of
-                (VSimple "main") -> Just (\gate -> gate {gate_flags = [Output, Terminal]})
-                _                -> Nothing
+              case getVarFlags var of
+                []      -> Nothing
+                flags   -> Just (gateProjFlags (\fs -> fs `union` flags))
+                           
 
+
+-- what flags to attach to a gate for this 'var'.
+-- if it is called "main" and is a function return variable, it needs an Output flag.
+getVarFlags var = case (elem RetVar $ vflags var, varName var) of
+                    (True, "main")    -> [Output, Terminal]
+                    _                 -> []
 
 
 -- do most of the work for a single expression in an SPrint
@@ -904,6 +933,7 @@ extractEArr'   e        = fail ""
 -- see if this var is an output var, and if so remove the Output flag
 -- on its current gates
 -- Called when the location of a var is about to be updated
+-- 
 -- optionally an offset and length to limit the flag removal to some
 -- of the gates, in case only part of a complex output var is being
 -- modified.
@@ -926,12 +956,18 @@ checkOutputVars c var mb_gate_loc
                         -- FIXME: we get non-existant node numbers passed (with number
                         -- -12345678), for non-initialized struct fields. The filter is a
                         -- HACK around this
-                        c' = foldl (updateLabel (\g -> g{gate_flags = []}))
-                                   c
-                                   (filter (/= -12345678) vgates')
+                        c' = rmOutputFlag c (filter (/= -12345678) vgates')
                     return c'
     | otherwise =
-        return c {- `trace` ("checkOutputVars non-matching var: " << var) -}
+        return c `logDebug` ("checkOutputVars non-matching var: " << var)
+
+
+-- | remove the Output flag on the gate at this Node, if it is present
+-- FIXME: removes both Output and Terminal flags for now
+rmOutputFlag :: Circuit -> [Gr.Node] -> Circuit
+rmOutputFlag c ns = foldl (updateLabel $ gateProjFlags (\fs -> fs \\ [Output,Terminal]))
+                          c
+                          ns
 
 
 -- update the label for a given node in a graph, if this node is present
@@ -972,12 +1008,23 @@ updateLabel f gr node = let (mctx,gr')      = {-# SCC "#extract" #-}
 -- generate the gates needed when exiting a conditional block---to
 -- conditionally update free variables updated in this scope
 --
--- NOTE: the vars in the locals VarSets (ifLocs and elseLocs)
+-- NOTE: the vars in the locals VarSets (ifLocalss and elseLocalss)
 -- are without scopes
-genCondExit testGate
-            circ
-            (parentScope, ifScope, elseScope)
-            (ifLocs, elseLocs) =
+genCondExit :: (Cont.Container c Var) =>
+               Gr.Node          -- ^ Number of the gate with the condition test value
+            -> Circuit          -- ^ Starting circuit
+            -> ([VarTable],       -- ^ The parent variable scope
+                VarTable,       -- ^ Var scope from the branch to take if true
+                VarTable)       -- ^ Var scope from the branch to take if false
+            -> (c,              -- ^ all the variables declared in the true branch
+                c)              -- ^ all the variables declared in the false branch
+            -> OutMonad Circuit -- ^ The circuit with all the Select gates added in.
+genCondExit testGate            
+            circ                
+            (parentScope,       -- ^ The parent 
+             ifScope,
+             elseScope)
+            (ifLocals, elseLocals) =
     let vars    = List.nub $
                   filter nonLocal $
                   map (\(var,gates) -> var) $
@@ -994,7 +1041,7 @@ genCondExit testGate
           -- intrinsically very local in their usage, and so do not need to persist across
           -- scopes
           nonLocal var = (not $ any (Cont.member (stripScope var))
-                                    [ifLocs, elseLocs])
+                                    [ifLocals, elseLocals])
                          && (isJust $ maybeLookup var parentScope)
                          && (notTemp var)
 
@@ -1031,16 +1078,24 @@ genCondExit testGate
                    ts           <- mapM (getSelType c) changed_gates
                    -- get the right number of new int's
                    is           <- replicateM (length ts) nextInt
-                   let ctxs      = zipWith3 mkCtx' is ts changed_gates
+                   let ctxs      = zipWith3 (mkCtx' var) is ts changed_gates
                        new_gates = foo (uncurry zip in_gates) is
+                   -- remove Output flag on var's current gates (which will feed into
+                   -- Select gates) if flag is present.
+                   let c2       = rmOutputFlag c $
+                                  -- concat all the elements of the list of pairs
+                                  foldr (\(a,b) l -> (a:b:l)) [] changed_gates
                    setVarAddrs new_gates var
                    -- work all the new Contexts into circuit c
-                   return (foldl (flip (&)) c ctxs)
+                   return $ addCtxs c2 ctxs
 
-          mkCtx' i t (true_gate,false_gate) =
+          -- make the Select Context, including gate flags if needed.
+          mkCtx' var i t (true_gate,false_gate) =
               let src_gates = [testGate, true_gate, false_gate]
                   depth     = (length parentScope) - 1
-              in  mkCtx (Gate i t Select src_gates depth [] [])
+                  flags     = getVarFlags var
+                  doc       = EVar var -- annotate gate with the variable name
+              in  mkCtx (Gate i t Select src_gates depth flags [doc])
 
 
 -- take a list of pairs, and where a pair is equal, pass on that value, but
@@ -1597,27 +1652,32 @@ showCctGraph g =
                           ++ "\\n" ++ cctShow (gate_op g)
                              -- show the variable name of input gates, eg:
                              -- "Input -> var_name"
-                          ++ (case gate_op g of Input   -> " -> " ++ strShow (stripVarExp $ last $
-                                                                              gate_doc g)
-                                                _       -> "")
+                          ++ concat [(case gate_op g of
+                                        Input   -> " -> " ++ strShow (stripVarExp $ last $
+                                                                      gate_doc g)
+                                        _       -> ""),
+                                     (if elem Output $ gate_flags g
+                                      then "\\nOutput"
+                                      else "")
+                                     ]
 
-          getAttribs g  =             if elem Output $ gate_flags g
-                                      then [("COLOR", "light blue"),
-                                            ("_GO",   "rhombus")]
-                                      else
-                                          case gate_op g of
-                                            Input   -> [("COLOR", "green"),
-                                                        ("_GO",   "rhombus")]
-                                            _       -> [] -- normal gates
+          getAttribs g  =   concat [(if elem Output $ gate_flags g
+                                     then [("COLOR", "light blue")
+                                          --, ("_GO",   "rhombus")
+                                          ]
+                                     else []
+                                    ),
+                                    (case gate_op g of
+                                       Input   -> [("COLOR", "green")
+                                                  --, ("_GO",   "rhombus")
+                                                  ]
+                                       Select  -> [("_GO",   "rhombus")
+                                                  ]
+                                       _       -> [] -- normal gates
+                                    )
+                                   ]
 
 
-{-
-instance XDR Gate where
-    encodes g = foldr1 (.) $
-                map encodes [gate_num g, gate_typ g, gate_op g, gate_inputs g,
-                             gate_depth g, gate_flags g, show (gate_doc g)]
-    decodes g = undefined
--}
 
 -------------------------------------
 -- some tests
@@ -1632,83 +1692,3 @@ testNextInt = let startState    = MyState { vartable    = [Mapping.empty],
               in  (out,st)
     where test_f = do is <- replicateM 5 nextInt
                       return (is)
-{-
-{- Generated by DrIFT (Automatic class derivations for Haskell) -}
-{-# LINE 1 "CircGen.hs" #-}
-{-* Generated by DrIFT : Look, but Don't Touch. *-}
-instance XDR GateFlags
-where
-    encode x = encode (xToInt x)
-    where
-        -- compute constructor's integer code
-        xToInt (Output) = 0
-    decode xdr = intToX (decode xdr)
-    where
-        intToX i = fromJust $ lookup i  [(0,Output)]
-
-instance XDR Op
-where
-    encode x =
-        -- get the XDR union discriminator encoding
-        let (cons_enc,args_enc) = my_encode x
-        in
-        cons_enc ++ args_enc
-        where
-            -- Compute encoding of the constructor and its arguments
-            my_encode (Bin v0) = let cons_enc = encode 0
-                                     args_enc = encode v0
-                                 in
-                                 (cons_enc, args_enc)
-            my_encode (Un v0) = let cons_enc = encode 1
-                                    args_enc = encode v0
-                                in
-                                (cons_enc, args_enc)
-            my_encode (ReadDynArray) = let cons_enc = encode 2
-                                           args_enc =
-                                       in
-                                       (cons_enc, args_enc)
-            my_encode (WriteDynArray v0) = let cons_enc = encode 3
-                                               args_enc = encode v0
-                                           in
-                                           (cons_enc, args_enc)
-            my_encode (Input) = let cons_enc = encode 4
-                                    args_enc =
-                                in
-                                (cons_enc, args_enc)
-            my_encode (Select) = let cons_enc = encode 5
-                                     args_enc =
-                                 in
-                                 (cons_enc, args_enc)
-            my_encode (Slicer v0) = let cons_enc = encode 6
-                                        args_enc = encode v0
-                                    in
-                                    (cons_enc, args_enc)
-            my_encode (Lit v0) = let cons_enc = encode 7
-                                     args_enc = encode v0
-                                 in
-                                 (cons_enc, args_enc)
-    decode = undefined
-
-instance XDR Gate
-where
-    encode x =
-        -- get the XDR union discriminator encoding
-        let (cons_enc,args_enc) = my_encode x
-        in
-        cons_enc ++ args_enc
-        where
-            -- Compute encoding of the constructor and its arguments
-            my_encode (Gate v0 v1 v2 v3 v4 v5 v6) = let cons_enc = encode 0
-                                                        args_enc = encode v0 ++
-                                                                   encode v1 ++
-                                                                   encode v2 ++
-                                                                   encode v3 ++
-                                                                   encode v4 ++
-                                                                   encode v5 ++
-                                                                   encode v6
-                                                    in
-                                                    (cons_enc, args_enc)
-    decode = undefined
-
---  Imported from other files :-
--}

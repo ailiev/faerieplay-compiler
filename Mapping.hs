@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fglasgow-exts #-}
+-- -fglasgow-exts: for multi-param type classes
+
 module Mapping where
 
 

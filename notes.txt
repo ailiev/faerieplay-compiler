@@ -134,6 +134,7 @@ with LOGN=7:
 - used only one of the CPUs, at 100%.
 - 1.1GB RAM most of the time, up to 1.2GB in last 2 mins.
 
+*** this sounds incorrect, it was probably N=6
 
 <date>Tue Sep 26 18:44:13 2006</date>
 
@@ -169,3 +170,42 @@ updateLabel                    CircGen                4.8    2.6
 bfsn                           CircGen                4.3    3.0
 #extract                       CircGen                3.9    3.3
 doExtras                       Main                   3.4    0.0
+
+
+
+<date>Wed Sep 27 12:59:26 2006</date>
+
+A compilation run on eisenhower with LOGN=7 and MEAN_D=8:
+- 350 mins
+- 1810MB RAM
+
+<date>Wed Sep 27 17:53:36 2006</date>
+
+When running with LOGN=8 on 32 bit machine:
+out of memory (requested 1048576 bytes)
+when top reported resource usage of:
+
+
+<date>Thu Sep 28 15:01:39 2006</date>
+
+
+Heap profiling, on LOGN=4 MEAN_D=5:
+
+Some milestones:
+- genCircuitM peaks at about 9 s
+- collapse_lit_gates starts at 10s, till 29s or so, though actually finishes
+earlier; 3.5M+ max, 60.2M total.
+- clip_circuit: 18-28s, clears out well; max about 3M, total 21M
+- renumber: 30s-end (; max 3M+, total 15.3M
+
+*** biographical
+** drag/void
+- collapse_lit_gates has some, max 500K in the 12-37s range, and a burst at 40s
+
+
+<date>Sat Sep 30 19:12:51 2006</date>
+
+A compilation run on eisenhower with LOGN=8, MEAN_D=10:
+- 171 mins
+- 2550 RAM
+- write_circuit failed due to disk quota, so do not have dijkstra.cct

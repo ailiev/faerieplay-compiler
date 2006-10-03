@@ -11,7 +11,9 @@ import IO ( Handle,
             IOMode(..),
             ioeGetErrorString)
 
-import qualified Distribution.GetOpt    as Opt
+import qualified System.Console.GetOpt  as Opt
+
+
 import Data.IORef                       (IORef,newIORef,readIORef,writeIORef)
 import System.IO.Unsafe                 (unsafePerformIO)
 
@@ -20,6 +22,7 @@ import qualified Data.Graph.Inductive.Tree  as TreeGr
 
 import qualified Debug.Trace                as Trace
 
+import qualified Text.PrettyPrint           as PP
 
 import SFDL.Abs                  -- the abstract syntax types from BNFC
 import SFDL.Lex                  -- Alex lexer
@@ -37,7 +40,7 @@ import qualified CircGen        as CG
 import qualified Runtime        as Run
 import qualified GraphLib       as GrLib
 import           UDraw
-import           Common
+import           Common                     (trace,LogPrio(..))
 
 import TypeChecker
 
@@ -45,15 +48,12 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-09-25 20:02:43 sasho"
+-- g_timestamp = "2006-10-02 15:11:52 sasho"
 
 -- this updated by subversion
 g_svn_id = "subversion $Revision$"
 g_version = g_svn_id
 
-
-data LogPrio = PROGRESS | INFO | DEBUG
-   deriving (Show,Eq,Ord)
 
 logmsg prio msg = hPutStrLn stderr $ show prio ++ ": " ++ msg
 
@@ -263,7 +263,7 @@ doCompile v parser filenameIn extras hOut strIn =
                       case Ur.unrollProg prog_flat of
                         (Left err)       -> hPutStrLn stderr $ "Unrolling Error! " << err
                         (Right stms)     ->
-                           do -- hPrint stderr (PP.vcat (map Im.docStm stms))
+                           do hPrint stderr (PP.vcat (map Im.docStm stms))
                               logmsg PROGRESS "Unrolled main; Starting to generate the circuit"
 
                               let -- compile the circuit

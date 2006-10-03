@@ -1,3 +1,7 @@
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
+-- -fglasgow-exts: for "Non-type variables, or repeated type variables",
+-- in evalStatic
+
 module Intermediate where
 
 

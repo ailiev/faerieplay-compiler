@@ -1,3 +1,20 @@
+2006-10-03  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* many: Added OPTIONS_GHC pragmas on top.
+	
+	* SashoLib.hs (zipWith3M): added.
+
+	* Common.hs (logmsg): added.
+
+	* CircGen.hs (keepNodes): Make it use a Set instead of IntSet; it
+	seems a tad faster in this case.
+	(): removed all the XDR stuff at the end.
+
+	* sfdlc.hs: moved LogPrio to Common.hs
+
+	* CircGen.hs (genCondExit): Fixed bugs where Output flag was not
+	being transferred to a Select gate from its input gate.
+
 2006-09-26  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* SashoLib.hs: new or imported: compareWith, class DocAble,

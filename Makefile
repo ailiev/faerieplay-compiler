@@ -8,6 +8,11 @@ GHCFLAGS += -v0
 
 GHCFLAGS += -odir $(ODIR) -hidir $(ODIR) 
 
+GHCFLAGS += -static
+
+# GHC = /home/sasho/minime/ghc/ghc-6.4.2/bin/i386-unknown-linux/ghc
+GHC = $(HOME)/work/minime/ghc-6.6-RC2-sasho/bin/ghc
+
 ODIR = build
 
 
@@ -71,19 +76,19 @@ bnfc: $(bnfc_files)
 
 
 %.o: %.hs
-	ghc -c $(GHCFLAGS) $<
+	$(GHC) -c $(GHCFLAGS) $<
 
 
 $(ODIR)/%.o: %.hs
 #	HFLAGS="$(GHCFLAGS)" hmake -ghc $(PACKS) $<
-	ghc -c $(GHCFLAGS) $<
+	$(GHC) -c $(GHCFLAGS) $<
 
 %.hi: %.hs
-	ghc -E -ddump-minimal-imports $(GHCFLAGS) $< > $@
+	$(GHC) -E -ddump-minimal-imports $(GHCFLAGS) $< > $@
 
 $(ODIR)/sfdlc:
 #	HFLAGS="$(GHCFLAGS)" hmake -d$(ODIR) -ghc $(PACKS) sfdlc
-	ghc --make $(GHCFLAGS) -o $@ sfdlc.hs
+	$(GHC) --make $(GHCFLAGS) -o $@ sfdlc.hs
 
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.
 .PHONY: $(ODIR)/sfdlc bnfc

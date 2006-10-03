@@ -44,7 +44,15 @@ used with values from before the conditional, and not values generated inside
 the conditional? Since I believe the condition's gate(s) are generated after the
 branches.
 
-
 <date>Tue Sep 26 19:29:46 2006</date>
 
 Remove the lit_table from CircGen's state.
+
+
+<date>Wed Sep 27 10:27:30 2006</date>
+
+specify how input and output owners are specified in the program, and handled in
+execution. will be an important part of the software manual. Also, need a more
+solid way to specify input/output names, and owners. Could be done via the
+comment field, but that seems not very "serious". Can be made serious by
+specifying it exactly.
