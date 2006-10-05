@@ -1,3 +1,33 @@
+2006-10-05  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* ErrorWithContext.hs: Added; an extended Error type, with a stack
+	of contexts of the error; and the <?> operator to add to an error
+	context when "unwinding" the call stack.
+
+	* TypeChecker.hs (setContext): Added; to enable annotation of an
+	error message with its stack of contexts, using <?>
+	operator. Added calls to setContext to many of the check*
+	functions.
+	(checkLVal): expanded the lval check.
+	(checkExp EArr): changed the first call to Im.expandType so it
+	does not recurse into array element types.
+	(typeCheck): Modifed the Monad for all the functions to be ErrorT
+	applied to State; this changed the main call to 'checkProg' in
+	'typeCheck'.
+
+	* CircGen.hs: Completed support for runtime flags - now control
+	treatment of SPrint nodes.
+
+	* sfdlc.hs: Added g_svn_date; moved DumpGates and DumpGraph into
+	RunFlags.
+
+	* Intermediate.hs: stuff related to ErrorWithContext.
+
+	* Unroll.hs: Like in TypeChecker.hs, changed the Monad to ErrorT.
+
+	* Common.hs: stuff related to ErrorWithContext.
+
+	.
 2006-10-03  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* Stack.hs (): Added, moving stuff out of SashoLib.hs

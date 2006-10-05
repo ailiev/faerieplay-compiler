@@ -7,7 +7,7 @@ import qualified Data.Map           as Map
 
 -- | A class of types with Stack-like functionality. Not sure if anything other than a
 -- list will be used here.
--- Require that the types used are instances of 'Functor'
+-- Require that the types used are instances of 'Functor
 class (Functor s) => Stack s where
     -- | Return the top element
     peek :: s a -> a

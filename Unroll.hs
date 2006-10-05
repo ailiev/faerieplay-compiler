@@ -3,7 +3,7 @@ module Unroll where
 
 -- import Debug.Trace
 
-import Control.Monad.Error              (Error, noMsg, strMsg, throwError)
+import Control.Monad.Error              (Error, noMsg, strMsg, throwError, ErrorT(..))
 import Control.Monad.Identity           (Identity, runIdentity)
 import Control.Monad.Writer             (Writer, runWriter, tell)
 
@@ -48,12 +48,13 @@ getsScope = snd
 cMAXSCOPE = 128
 
 
-type StateWithErr = St.StateT MyStateT ErrMonad
+-- type StateWithErr = St.StateT MyStateT ErrMonad
+type StateWithErr = ErrorT MyErrorCtx (St.State MyStateT)
 
 
 -- to throw an error inside the StateWithErr monad
 throwErr :: Int -> String -> StateWithErr a
-throwErr p msg = lift $ throwError $ Err p msg
+throwErr p msg = throwErrorCtx $ Err p msg
 
 
 logError line msg = tell [Err line msg]
@@ -63,15 +64,15 @@ logError line msg = tell [Err line msg]
 
 
 -- the full version, usign both State and Error
-unrollProg :: Prog -> ErrMonad [Stm]
+unrollProg :: Prog -> ErrCtxMonad [Stm]
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
     let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
         startScope                  = pushScope []
-        out                         = St.runStateT (mapM unroll stms)
-                                                   (pt, startScope)
-    in case out of
+        startState                  = (pt, startScope)
+        (val_or_err,state')         = St.runState (runErrorT $ mapM unroll stms) startState
+    in case val_or_err of
                 Left err        -> Left err
-                Right (stmss,_) -> Right (concat stmss)
+                Right stmss     -> Right (concat stmss)
 
 
 
@@ -154,9 +155,10 @@ unroll s@(SBlock _ _) = genericUnroll unrollBlock s
 
 
 unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
-    where unrollFor scope (SFor countVar begin_exp end_exp stms) =
-              do begin  <- lift $ evalStatic begin_exp
-                 end    <- lift $ evalStatic end_exp
+    where unrollFor :: Scope -> Stm -> StateWithErr [Stm]
+          unrollFor scope (SFor countVar begin_exp end_exp stms) =
+              do begin  <- evalStatic begin_exp
+                 end    <- evalStatic end_exp
                  -- the only new local variable in a for-loop body is
                  -- the counter variable, so create a VarSet
                  -- containing just that
@@ -192,10 +194,10 @@ unroll s            = return [s]
 
 
 
-
+genericUnroll :: (Scope -> Stm -> StateWithErr [Stm]) -> Stm -> StateWithErr [Stm]
 genericUnroll f stm = do St.modify incrScope'
                          scope <- St.gets getsScope
-                         lift $ checkScopeDepth scope
+                         checkScopeDepth scope
                          -- do the "real work"
                          stms <- f scope stm
                          -- and recurse
@@ -205,11 +207,11 @@ genericUnroll f stm = do St.modify incrScope'
                          return $ concat stmss
                          
 
-
-checkScopeDepth :: Scope -> ErrMonad ()
+-- checkScopeDepth :: Scope -> ErrCtxMonad ()
 checkScopeDepth scope
-    | length scope > cMAXSCOPE = Left $ Err 42 $ "while unrolling: Function/Block recursion deeper than "
-                                                 << cMAXSCOPE
+    | length scope > cMAXSCOPE = throwErrorCtx $
+                                 Err 42 $ ("while unrolling: Function/Block recursion deeper than "
+                                           << cMAXSCOPE)
     | otherwise                = return ()
 
 

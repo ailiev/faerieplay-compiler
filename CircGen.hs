@@ -74,7 +74,7 @@ import Stack                                    (Stack(..), maybeLookup)
 
 import qualified    GraphLib                    as GrLib
 
-import Common (trace,LogPrio(..),logmsg,logProgress,logDebug,RunFlags(..))
+import Common (trace,LogPrio(..),logmsg,logProgress,logDebug,logDump,RunFlag(..))
 
 import Intermediate as Im hiding (VarTable)
 
@@ -86,6 +86,9 @@ cDOPRINT = False
 -- should we store ELit gate locations, and only generate one gate per literal?
 cSTORE_LITS = False
 
+
+-- | Which run-time flags are we interested in?
+cRELEVANT_RUN_FLAGS = [DoPrint]
 
 
 -- gate flags
@@ -213,12 +216,14 @@ genCircuit :: TypeTable ->      -- the type table
 -}
 
 -- | Generate the circuit for these unrolled statements, with the given input parameters.
-genCircuit type_table stms args =
+genCircuit rtFlags type_table stms args =
     let startState      = MyState { vartable    = [Map.empty],
                                     counter     = 0,
                                     typetable   = type_table,
-                                    flags       = []
+                                    flags       = rtFlags `intersect` cRELEVANT_RUN_FLAGS
                                   }
+                          `logDebug`
+                          ("genCircuit rtFlags = " ++ show rtFlags)
         -- the main circuit generation step.
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
@@ -240,12 +245,10 @@ genCircuit type_table stms args =
                            << Gr.noNodes circ
                            -- << showBadCtxs bad_ctxs
                           )
-{-
-                          `logDebug`
+                          `logDump`
                           (let gr_pretty = showCctGraph circ
                            in "The generated graph:\n" ++ gr_pretty
                           )
--}
         
 --                                `trace` ("The full circuit: " << show circ)
 
@@ -1391,7 +1394,7 @@ data MyState = MyState { vartable   :: [VarTable], -- ^ stack of table Var -> [N
                          typetable  :: TypeTable,  -- ^ the type table is read-only, so
                                                    -- could be in a Reader, but easier to
                                                    -- stick it in here
-                         flags      :: [RunFlags]  -- ^ The run-time configuration flags.
+                         flags      :: [RunFlag]   -- ^ The run-time configuration flags.
                        }
 {-
 instance St.MonadState Int (St.State MyState) where

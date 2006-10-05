@@ -21,7 +21,7 @@ import qualified Data.Map as Map
 import SashoLib
 import qualified Container as Cont
 
-import Common (ErrMonad, MyError(..), trace)
+import Common (ErrMonad, MyError(..), MyErrorCtx, throwErrorCtx, trace)
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -382,6 +382,9 @@ expandType' type_table flags t =
 
                 _                       -> t
 
+          -- call a (recursive or terminal) function if 'flag' is set in the original
+          -- 'flags' given to expandType, or if the DoAll flag is set. if not calling it,
+          -- return the type given to expandType.
     where worker flag proc = if elem DoAll flags || elem flag flags
                              then proc
                              else t
@@ -493,7 +496,7 @@ strip_var = strip_vflags . stripScope
 
 -- here, the error class is fixed, but the associated monad is generic, so could be a
 -- State monad, or nothing
-evalStatic :: (MonadError MyError m) => Exp -> m Integer
+evalStatic :: (MonadError MyErrorCtx m) => Exp -> m Integer
 evalStatic e = case e of
                       (BinOp op e1 e2)  -> do [i1,i2] <- mapM evalStatic [e1,e2]
                                               let realop = transIntOp op
@@ -506,7 +509,7 @@ evalStatic e = case e of
                       (ELit l)          -> evalLit l
                       (ExpT _ e)        -> evalStatic e
                       (EStatic e)       -> evalStatic e
-                      _                 -> throwError $ Err 42 $ e << " is not static!"
+                      _                 -> throwErrorCtx $ Err 42 $ e << " is not static!"
 
 
 -- try to evaluate an operation statically, fall back to an op on Exp if static fails
@@ -517,8 +520,8 @@ tryEvalStaticBin staticOp expOp x_e y_e = do [x, y] <- mapM evalStatic [x_e, y_e
                                                       else BinOp expOp x_e y_e
 
 -- a helper which just dies in case of error
-evalStaticOrDie e = either (\e -> error ("evalStaticOrDie on " << e <<
-                                         "failed: " << e))
+evalStaticOrDie e = either (\e -> error ("evalStaticOrDie on " ++ show e ++
+                                         "failed: " ++ show e))
                            (id)
                            (evalStatic e)
 

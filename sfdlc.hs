@@ -2,7 +2,7 @@ module Main where
 
 import List     (intersect, sort)
 import Maybe    (isJust, fromJust, fromMaybe, listToMaybe, maybeToList)
-import System   (getArgs, exitWith, ExitCode(..), getProgName)
+import System   (getArgs, exitWith, ExitCode(..), getProgName, exitFailure)
 
 import IO ( Handle,
             stdin, stdout, stderr,
@@ -40,7 +40,8 @@ import qualified CircGen        as CG
 import qualified Runtime        as Run
 import qualified GraphLib       as GrLib
 import           UDraw
-import           Common                     (trace,LogPrio(..))
+import           Common                     (trace,LogPrio(..),RunFlag(..))
+import ErrorWithContext                     (ErrorWithContext(..))
 
 import TypeChecker
 
@@ -48,11 +49,14 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-10-02 15:11:52 sasho"
+-- g_timestamp = "2006-10-05 14:30:24 sasho"
 
--- this updated by subversion
+-- these two updated by subversion, with property "svn:keywords" set to at least
+-- "Date Revision"
 g_svn_id = "subversion $Revision$"
-g_version = g_svn_id
+g_svn_date = "$Date$"
+
+g_version = tr ("$", "") $ g_svn_id ++ " last modified on " ++ g_svn_date
 
 
 logmsg prio msg = hPutStrLn stderr $ show prio ++ ": " ++ msg
@@ -125,7 +129,7 @@ driveCompile fIn hIn hOut opts  =
                                             -- basename
                            _    -> fIn
        hGetContents hIn >>=
-         doCompile 1 pProg fIn' (opts `intersect` cCOMPILE_EXTRAS) hOut
+         doCompile 1 (getRTFlags opts) pProg fIn' hOut
 
 
 
@@ -156,10 +160,8 @@ data Flag
     | Help
 
       -- options:
-    | DumpGates                 -- dump the list of gates in Read/Show form
-    | DumpGraph                 -- dump the bare graph in Read/Show form
+    | RunFlag RunFlag           -- a run-time flag, defined in Common.hs
 
-    | Verbose
     | Output String
     deriving (Eq,Ord,Show)
 
@@ -175,25 +177,32 @@ optionControl = [
                  -- actions
       Opt.Option ['c']      ["compile"] (Opt.NoArg Compile)             "Compile SFDL (default action); \
                                                                         \.runtime"
-    , Opt.Option ['G']      ["mkgraph"] (Opt.NoArg MakeGraph)           "generate a UDrawGraph file; .udg"
-    , Opt.Option ['r']      ["run"]     (Opt.NoArg Run)                 "Run circuit; .run"
+    , Opt.Option ['G']      ["mkgraph"] (Opt.NoArg MakeGraph)           "generate a UDrawGraph file; .cct -> .udg"
+    , Opt.Option ['r']      ["run"]     (Opt.NoArg Run)                 "Run circuit; .gates -> .run"
     , Opt.Option [   ]      ["prune"]   (Opt.ReqArg getPruneArgs
                                                     "<start node>,<path len>")
-                                                                        "Prune the circuit; .cct"
+                                                                        "Prune the circuit around a given node;\n.cct -> .cct"
 
     , Opt.Option ['V','?']  ["version"] (Opt.NoArg Version)             "Show version number"
     , Opt.Option ['h']      ["help"]    (Opt.NoArg Help)                "Print help (this text)"
 
+    , Opt.Option ['o']      ["output"]  (Opt.ReqArg Output "<file>")    "Output to <file>"
+
+    , Opt.Option [  ]       []          (Opt.NoArg Help)                "Flags:"
+
                 -- flags
     , Opt.Option [  ]       ["dump-gates",
-                             "dgt"]     (Opt.NoArg DumpGates)           "dump the list of gates \
-                                                                         \in Read/Show form; .gates"
+                             "dgt"]     (Opt.NoArg (RunFlag DumpGates)) "dump the list of gates \
+                                                                         \in Read/Show form; -> .gates"
     , Opt.Option [  ]       ["dump-graph",
-                             "dgr"]     (Opt.NoArg DumpGraph)           "dump the graph in Read/Show form; \
-                                                                        \.cct"
+                             "dgr"]     (Opt.NoArg (RunFlag DumpGraph)) "dump the graph in Read/Show form; \
+                                                                        \-> .cct"
+    , Opt.Option ['p']      ["gen-print"
+                            ]           (Opt.NoArg (RunFlag DoPrint))   "Generate Print gates from print() \
+                                                                         \statements.\nIf not set, \
+                                                                         \print statements are ignored."
 
-    , Opt.Option ['v']      ["verbose"] (Opt.NoArg Verbose)             "Chatty output on stderr"
-    , Opt.Option ['o']      ["output"]  (Opt.ReqArg Output "<file>")    "Output to <file>"
+    , Opt.Option ['v']      ["verbose"] (Opt.NoArg (RunFlag Verbose))   "Chatty output on stderr"
      ]
 
 
@@ -203,6 +212,10 @@ getPruneArgs str = let (start,str1) = head $ reads str
                        (dist,[])    = head $ reads str2
                    in
                      PruneGraph start dist
+
+getRTFlags :: [Flag] -> [RunFlag]
+getRTFlags flags = [rtf | (RunFlag rtf) <- flags]
+
 
 usage name = Opt.usageInfo ("Usage: " ++ name ++
                             " <options> in.sfdl\n\
@@ -239,7 +252,7 @@ putStrV v s = if v > 1 then putStrLn s else return ()
 cCOMPILE_INTERMEDIATE_INFO = [ (DumpGraph, "cct"),
                                (DumpGates, "gates") ]
 
-doCompile v parser filenameIn extras hOut strIn =
+doCompile v rtFlags parser filenameIn hOut strIn =
     let tokens  = myLexer strIn
         ast     = parser tokens
     in case ast of
@@ -250,7 +263,8 @@ doCompile v parser filenameIn extras hOut strIn =
          Ok  prog@(Prog _ _) ->
            do logmsg INFO "Parse Successful!"
               case typeCheck prog of
-                (Left err)        -> hPutStrLn stderr $ "Type Error! " << err
+                (Left err)        -> do hPutStrLn stderr $ "Type Error! " ++ showErrs err
+                                        exitFailure
                 (Right prog@(Im.Prog pname
                              Im.ProgTables {Im.types=typ_table,
                                             Im.funcs=fs}))      ->
@@ -261,22 +275,27 @@ doCompile v parser filenameIn extras hOut strIn =
                       -- hPrint stderr prog_flat
                       logmsg PROGRESS "Flattened program"
                       case Ur.unrollProg prog_flat of
-                        (Left err)       -> hPutStrLn stderr $ "Unrolling Error! " << err
+                        (Left err)       -> do hPutStrLn stderr $ "Unrolling Error! " ++ showErrs err
+                                               exitFailure
                         (Right stms)     ->
                            do hPrint stderr (PP.vcat (map Im.docStm stms))
                               logmsg PROGRESS "Unrolled main; Starting to generate the circuit"
 
                               let -- compile the circuit
                                   args          = CG.extractInputs prog
-                                  (cct,gates)   = CG.genCircuit typ_table stms args
+                                  (cct,gates)   = CG.genCircuit rtFlags typ_table stms args
 
                               -- write the .runtime file
                               mapM_ (hPutStr hOut . CG.cctShow) gates
                               logmsg PROGRESS "Wrote the circuit runtime file"
 
                               -- and the extra outputs requested
+                              let extras        = rtFlags `intersect` cCOMPILE_EXTRAS
                               mapM_ (doExtras filenameIn (cct,gates)) extras
 
+
+showErrs (EWC (e, cs))  = show e ++
+                          concatMap (("\n\tIn context of:\n" ++)) (reverse cs)
 
 doExtras filenameIn ccts flag
     = do let outfile = modFileExt filenameIn

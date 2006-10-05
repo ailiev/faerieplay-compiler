@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fallow-overlapping-instances -fglasgow-exts #-}
+-- -fglasgow-exts for parallel list comprehension
+
 -- code to split the AST into several namespaces of global bindings:
 -- constants, types, variables and functions
 
@@ -12,10 +15,10 @@ import Maybe    (fromJust)
 import qualified Data.Map as Map
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
 import Control.Monad.Writer (Writer, runWriter, tell)
-import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg)
+import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg,ErrorT(..))
 import Control.Monad.Trans (lift)
 
-import Common (MyError(..), ErrMonad, trace)
+import Common (MyError(..),MyErrorCtx, ErrCtxMonad, trace, logDebug)
 
 import SashoLib ((<<), ilog2,
                  myLiftM, concatMapM, (>>==), mapTuple2,
@@ -26,6 +29,8 @@ import Stack                            (Stack(..), maybeLookup)
 
 import qualified Container as Cont
 
+import qualified ErrorWithContext                   as EWC
+
 
 -- the abstract syntax tree description
 import qualified SFDL.Abs as T
@@ -34,7 +39,7 @@ import qualified SFDL.Print as Print
 import qualified Intermediate as Im
 
 
-type TypeError = MyError
+type TypeError = MyErrorCtx
 
 
 
@@ -62,11 +67,11 @@ data TCState = TCS { vars   :: [Im.VarTable],
 type MyStateT = TCState
 
 
-type StateWithErr = St.StateT MyStateT ErrMonad
+type StateWithErr = ErrorT MyErrorCtx (St.State MyStateT)
 
 
 throwErr :: Int -> String -> StateWithErr a
-throwErr p msg = lift $ Left $ Err p msg
+throwErr p msg = throwError $ EWC.EWC (Err p msg, [])
 
 
 instance Im.TypeTableMonad StateWithErr where
@@ -74,16 +79,19 @@ instance Im.TypeTableMonad StateWithErr where
 
 
 
-
-typeCheck :: T.Prog -> ErrMonad Im.Prog
+-- here we will compose the Error and State monads with the state monad inside the error
+-- transformer.
+-- main reason is because the Error context manipluation operator (<?>) needs direct
+-- access to the error parameter.
+typeCheck :: T.Prog -> ErrCtxMonad Im.Prog
 typeCheck p = let startState = TCS { vars   = [Map.empty],
-                                               consts = Map.empty,
-                                               funcs  = Map.empty,
-                                               types  = Map.empty  }
-                  out = St.runStateT (checkProg p) startState
-              in  case out of
-                  Left err           -> Left err
-                  Right (p_new, _ )  -> Right p_new
+                                     consts = Map.empty,
+                                     funcs  = Map.empty,
+                                     types  = Map.empty  }
+--                  out = St.runStateT (checkProg p) startState
+                  -- we do not need the end state.
+                  (val_or_err,state') = St.runState (runErrorT $ checkProg p) startState
+              in  val_or_err
 
 
 
@@ -123,12 +131,14 @@ checkDec :: T.Dec -> StateWithErr ()
 
 
 -- addendum - we want to flag global variables
-checkDec dec@(T.VarDecl t ids) = do im_t        <- checkTyp t
+checkDec dec@(T.VarDecl t ids) = setContext dec $
+                                 do im_t        <- checkTyp t
                                     isGlobal    <- atGlobalScope
                                     let flags   = if isGlobal then [Im.Global] else []
                                     mapM_ (\(T.Ident id) -> addToVars im_t flags id) ids
 
 checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
+    setContext dec $
     do im_t <- checkTyp t
        -- now prepare the new scope for this function, by pushing a new empty
        -- Map to the top of the SymbolTable stack
@@ -166,7 +176,8 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
 
 
 -- special treatment for an Enum type declaration
-checkDec (T.TypeDecl (T.Ident name) t@(T.EnumT ids)) =
+checkDec d@(T.TypeDecl (T.Ident name) t@(T.EnumT ids)) =
+    setContext d$
     do (Im.EnumT _ size) <- checkTyp t
        let im_t = (Im.EnumT name size)
        -- add all the id's as instances of im_t, with an Immutable flag
@@ -178,9 +189,10 @@ checkDec (T.TypeDecl n@(T.Ident name) t) = do im_t <- checkTyp t
                                               addToTypes name im_t
 
 
-checkDec (T.ConstDecl (T.Ident name) val) =
+checkDec d@(T.ConstDecl (T.Ident name) val) =
+    setContext d$
     do im_val   <- checkExp val
-       int_val  <- lift $ Im.evalStatic im_val
+       int_val  <- Im.evalStatic im_val
        St.modify $ projFromConst $ Map.insert name int_val
 
 {-
@@ -194,7 +206,9 @@ checkDec (T.ConstDecl (T.Ident name) _)          =
 checkStm :: T.Stm -> StateWithErr Im.Stm
 -- :::::::::::::::::::::
 
-checkStm (T.SBlock decs stms) = do pushScope
+checkStm s@(T.SBlock decs stms)
+                              = setContext s $
+                                do pushScope
                                    mapM checkDec decs
                                    new_stms <- mapM checkStm stms
                                    var_tab <- popScope
@@ -203,20 +217,25 @@ checkStm (T.SBlock decs stms) = do pushScope
                                                       (init_stms ++ new_stms)
 
 
-checkStm s@(T.SAss lval val)   = do lval_new <- checkLVal lval
+checkStm s@(T.SAss lval val)   = setContext s $
+                                 do lval_new <- checkLVal lval
                                     val_new  <- checkExp val
                                     [lv', v'] <- mapM (canonicalize . Im.getExpTyp) [lval_new, val_new]
                                     if lv' == v'
                                        then return $ Im.SAss lval_new val_new
-                                       else throwErr 42 $ "Type mismatch in assignment " << s
+                                       else throwErr 42 ("Type mismatch in assignment; types are "
+                                                         << lv' << " and " << v')
 
 
-checkStm (T.SPrint prompt vals) = do vals_new   <- mapM checkExp vals
+checkStm s@(T.SPrint prompt vals)
+                                = setContext s $
+                                  do vals_new   <- mapM checkExp vals
                                      return $ Im.SPrint prompt vals_new
 
 
 
 checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
+    setContext s $
     do new_lo <- checkExp lo
        new_hi <- checkExp hi
        pushScope
@@ -234,16 +253,17 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
                                    
 
 checkStm s@(T.SIf cond stm) =
+    setContext s $
     do new_cond@(Im.ExpT t _) <- checkExp cond
        case t of
               (Im.BoolT) -> return ()
-              _          -> throwErr 42 $ "In if statement " << s << ", " << cond
-                                      << " is not boolean"
+              _          -> throwErr 42 $ "Condition \"" << cond << "\" is not a boolean"
        new_stm <- checkStm stm
        return $ Im.SIfElse new_cond (extractLocals new_stm, [new_stm]) (Cont.empty, [])
 
 -- reuse the above code a bit...
 checkStm s@(T.SIfElse cond stm1 stm2) =
+    setContext s $
     do (Im.SIfElse new_cond (locals1,new_stm1s) _) <- checkStm (T.SIf cond stm1)
        new_stm2 <- checkStm stm2
        let locals2 = extractLocals new_stm2
@@ -262,7 +282,8 @@ checkStm s@(T.SIfElse cond stm1 stm2) =
 ---------------
 checkTyp :: T.Typ -> StateWithErr Im.Typ
 
-checkTyp (T.StructT fields)     = do im_fields      <- mapM checkTypedName fields
+checkTyp t@(T.StructT fields)   = setContext t$
+                                  do im_fields      <- mapM checkTypedName fields
                                      -- note that by the time expandType is called here,
                                      -- checkTypedName has already checked the sub-types
                                      -- in the struct fields, so we cannot get an error 
@@ -281,17 +302,22 @@ checkTyp (T.StructT fields)     = do im_fields      <- mapM checkTypedName field
                                                         | blen <- bytelens])
                                      return $ Im.StructT fields'
                                     
-checkTyp (T.ArrayT t sizeExp)   = do im_t       <- checkTyp t
+checkTyp t'@(T.ArrayT t sizeExp)= setContext t' $
+                                  do im_t       <- checkTyp t
                                      im_size    <- checkExp sizeExp
-                                     int_size   <- lift $ Im.evalStatic im_size
+                                     int_size   <- Im.evalStatic im_size
                                      return (Im.ArrayT im_t (Im.lint int_size))
 
-checkTyp (T.SimpleT (T.Ident name)) = do lookupType name
-                                         return (Im.SimpleT name)
+checkTyp t@(T.SimpleT (T.Ident name))
+                                = setContext t $
+                                  do lookupType name
+                                     return (Im.SimpleT name)
                                           
-checkTyp (T.IntT i)             = do new_i <- checkExp i
-                                     int_i <- lift $ Im.evalStatic new_i
+checkTyp t@(T.IntT i)           = setContext t $
+                                  do new_i <- checkExp i
+                                     int_i <- Im.evalStatic new_i
                                      return $ intlitType int_i
+
 -- FIXME: this should only occur in the context of function
 -- parameters, should check it:
 checkTyp (T.GenIntT)            = return Im.GenIntT
@@ -306,11 +332,6 @@ checkTyp (T.RefT t)             = do im_t  <- checkTyp t
 
 
 
-
----------------------
--- expandType fully unrolls a type, resolving all type names
--- FIXME: this is a duplicate of Im.expandTypee, modulo Monad differences
----------------------
 
 
 -- type of a literal int
@@ -333,6 +354,7 @@ checkExp :: T.Exp -> StateWithErr Im.Exp
 
 -- for all these Exp's, want to figure out which are const and 
 checkExp e@(T.EIdent (T.Ident nm)) =
+    setContext e $
     do ent <- extractEnt e nm
        case ent of
                 -- same as a literal int!
@@ -349,7 +371,8 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                                              then Im.EStatic $ Im.EVar v
                                              else Im.EVar v
                 _                  ->
-                    throwErr 42 $ "Identifier " << nm << " is illegal in expression " << e
+                    throwErr 42 $ "Identifier " << nm << " is invalid in this expression, \
+                                                          \expected a const or a variable"
 
 
 
@@ -361,7 +384,8 @@ checkExp T.EFalse            = return $ annot Im.BoolT (Im.ELit $ Im.LBool False
 
 -- here we also deal with bit-access on ints, which has the same concrete
 -- syntax as array access
-checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
+checkExp e@(T.EArr arr idx)    = setContext e $
+                                 do new_arr <- checkExp arr
                                     new_idx <- checkExp idx
                                     -- check some error conditions, and get the
                                     -- element type
@@ -370,12 +394,18 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
     -- returns the type of the array elements
     where check arr@(Im.ExpT arr_t _) idx =
               do idx'       <- checkIdx idx
-                 arr_t_full <- Im.expandType [Im.DoAll] arr_t
-                 case (Im.stripRefQual arr_t) of
+                 -- how much type expansion do we want here?
+                 -- looks like just one level, so it resolves a typedef'd Array
+                 -- (eg type MyArr = Int[N];)
+                 -- but leaves all components intact. Thus, DoTypeDefs without
+                 -- DoArrayElems is right.
+                 arr_t_full <- Im.expandType [Im.DoTypeDefs] arr_t
+                 case (Im.stripRefQual arr_t_full) of
                    (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx')    )
                    (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx') )
-                   _                  -> throwErr 42 ( "Array " << arr << " in " << e
-                                                       << " is not an array or int!")
+                   t                  -> throwErr 42 ("Supposed array " << arr
+                                                      << " is not an array or int, it is of type "
+                                                      << t)
           -- index type has to be int; annotate the index expression with EStatic if it is
           -- static.
           checkIdx idx = let (Im.ExpT idx_t _) = idx
@@ -393,12 +423,12 @@ checkExp e@(T.EArr arr idx)    = do new_arr <- checkExp arr
                                                                  << " is not static"))
                                 case idx_t_full of
                                     (Im.IntT _)  -> return idx'
-                                    _            -> throwErr 42 ("Array index in " <<
-                                                                 e << " is not an Int")
+                                    _            -> throwErr 42 ("Array index is not an Int")
 
 
 checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
-    = do new_str@(Im.ExpT strT _) <- checkExp str
+    = setContext e $
+      do new_str@(Im.ExpT strT _) <- checkExp str
          typ_full                <- Im.expandType [Im.DoTypeDefs, Im.DoRefs] strT
          (typ,new_e)             <- check typ_full new_str
          return $ annot typ new_e
@@ -423,8 +453,8 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
           check (Im.GenIntT) new_str = let val = Im.EStatic $ Im.UnOp Im.Bitsize new_str
                                        in  return (Im.IntT (Im.UnOp Im.Bitsize val) , val)
 
-          check typ _              = throwErr 42 (str << " in " << e <<
-                                                  " is not a struct, it is " <<
+          check typ _              = throwErr 42 (str <<
+                                                  " is not a struct, it is of type " <<
                                                   typ)
 
           doStruct fields_info new_str = 
@@ -435,8 +465,7 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
                                                          findIndex ((== fieldname) . fst) $
                                                          fields
                                          return (t, Im.EStruct new_str field_idx)
-                          _        -> throwErr 42 $ "in " << e << ", struct has no field "
-                                                      << fieldname
+                          _        -> throwErr 42 $ ("struct has no field " << fieldname)
 
 
 checkExp e@(T.EStruct str _)
@@ -469,7 +498,8 @@ checkExp e@(T.EFunCall (T.Ident fcnName) args) =
 
 checkExp e
     | Just (_, op, e1, e2) <- analyzeBinExp e
-         = do new_e1 <- checkExp e1
+         = setContext e $
+           do new_e1 <- checkExp e1
               new_e2 <- checkExp e2
               (Im.ExpT t new_e) <- case classifyBinExp e of
                                       Arith      -> checkArith op new_e1 new_e2
@@ -482,7 +512,8 @@ checkExp e
                                False -> Im.ExpT t             new_e
               return static_e
 
-    | Just (op, arg_e) <- analyzeUnaryOp e   = do new_arg_e <- checkExp arg_e
+    | Just (op, arg_e) <- analyzeUnaryOp e   = setContext e $
+                                               do new_arg_e <- checkExp arg_e
                                                   res_t     <- getUnaryOpTyp op new_arg_e
                                                   let new_e = (Im.ExpT res_t $ Im.UnOp op new_arg_e)
                                                   typ <- checkUnary new_e
@@ -498,8 +529,7 @@ checkExp e
           getUnaryOpTyp op     (Im.ExpT (Im.IntT i) _)
               | op /= Im.Not                        = return $ Im.IntT i
           getUnaryOpTyp op      e                   = throwErr 42 ("Unary expression arg " << e
-                                                                   << " to operator " << op
-                                                                   << " has bad type")
+                                                                   << " has invalid type")
 
 
 
@@ -521,20 +551,35 @@ checkLVal :: T.LVal -> StateWithErr Im.Exp
 checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
     do ent <- extractEnt lv name
        case ent of
-          (EntVar (t,v))
-              | not $ elem Im.Immutable (Im.vflags v) 
+          (EntVar (t,v)) | not $ elem Im.Immutable (Im.vflags v) 
                   -> return (Im.ExpT t $ Im.EVar v)
-          _       -> throwErr 42 $ "Assigning to immutable value " << name
+          _
+                  -> throwErr 42 $ "Assigning to immutable identifier " << name
 
 checkLVal (T.LVal e) =
+    setContext e $
+    -- here we do a checkLVal on the array and struct sub-expressions, to make sure they
+    -- are themselves valid lvals, to catch stuff like
+    -- const N = ...;
+    -- N[i] = x;
     do im_e <- case e of
-                   e@(T.EStruct _ _) -> checkExp e
-                   e@(T.EArr _ _)    -> checkExp e
-                   _                 -> throwErr 42 $ e << " is not an lvalue"
+                   e@(T.EStruct e_str _) -> do checkLVal (T.LVal e_str)
+                                               checkExp e
+                   e@(T.EArr e_arr _)    -> do checkLVal (T.LVal e_arr)
+                                               checkExp e
+                   _                 -> throwErr 42 $ e << " is not a legal lvalue"
        return im_e
 
 
+-- x <?> ctx = 
 
+{-
+-- just to tinker with the (Haskell) types here.
+foo :: Integer -> ErrMonad Integer
+foo i
+    | i < 10    = return 2
+    | otherwise = throwError $ Err 47 "kuku"
+-}
 
 
 checkLoopCounter :: (StreamShow a) => a -> Im.Ident -> StateWithErr ()
@@ -546,7 +591,7 @@ checkLoopCounter ctx name =
        case var of
          (EntVar (_,v))
              | elem Im.LoopCounter (Im.vflags v)  -> throwErr 42 $ "Loop counter " << name
-                                                                << " reused"
+                                                                << " reused in nested loop"
          _                                        -> return ()
          
 
@@ -556,15 +601,16 @@ checkLoopCounter ctx name =
 -- set all int sizes to be the same,
 -- strip RefT's
 -- substitute all top-level typedefs referring to simple scalar types (Int and
--- Bool),
+-- Bool), but leave typedefs referring to Structs and Arrays.
 canonicalize :: Im.Typ -> StateWithErr Im.Typ
-canonicalize (Im.IntT i)          = return $ Im.IntT 32
-canonicalize (Im.RefT t)          = canonicalize t
-canonicalize t                    = do t'    <- Im.expandType [Im.DoTypeDefs] t
-                                       case t' of
-                                         (Im.IntT _)      -> canonicalize t'
-                                         (Im.BoolT)       -> return t
-                                         _                -> return t
+canonicalize t = (flip logDebug) ("canonicalize " << t) $
+                 case t of (Im.IntT i)          -> return $ Im.IntT 32
+                           (Im.RefT t')         -> canonicalize t'
+                           _                    -> do t'    <- Im.expandType [Im.DoTypeDefs] t
+                                                      case t' of
+                                                        (Im.IntT _)      -> canonicalize t'
+                                                        (Im.BoolT)       -> return t
+                                                        _                -> return t
 
 
 
@@ -613,6 +659,15 @@ mkVarInits local_table = do let varlist  = Map.toList local_table
                                                                             field_idx))
 
 
+-- | Here we always apply strShow to get the pretty context
+
+-- type is same as EWC.setContext except for the StreamShow instance
+setContext :: (StreamShow c, Error e, Monad m) =>
+              c ->
+              ErrorT (EWC.ErrorWithContext e String) m a ->
+              ErrorT (EWC.ErrorWithContext e String) m a
+setContext = EWC.setContext . strShow
+
 
 -- extract the local variables declared below the given statement,
 -- (ie. declared in SBlock blocks)
@@ -648,9 +703,8 @@ extractEnt ctx name = do TCS {types=ts,
                               vars=vs} <- St.get
                          case extractHelper (ts,cs,fs,vs) name of
                            (Just ent)   -> return ent
-                           _            -> throwErr 42 $ "Entity " << name
-                                                           << " not in scope in "
-                                                           << ctx
+                           _            -> throwErr 42 $ "Identifier " << name
+                                                           << " not in scope"
 
 -- the first one that succeeds will be the result (which is what msum
 -- does in the Maybe monad)
@@ -668,7 +722,7 @@ extractHelper (ts,cs,fs,vs) name = msum [(maybeLookup name vs >>=
 extractFunc ctx name = do TCS {funcs=fs} <- St.get
                           let res = maybeLookup name [fs]
                           case res of (Just f) -> return f
-                                      _        -> throwErr 42 $ name << " in " << ctx
+                                      _        -> throwErr 42 $ name
                                                               << " is not in scope as a function"
 
 -- check a unary opeartion, and return its type.
@@ -689,9 +743,10 @@ checkUnary e@(Im.ExpT t inner_e) =
 checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
     do t1_full <- checkExpExpand t1
        t2_full <- checkExpExpand t2
+       let exp_out = (Im.BinOp op e1 e2)
        case (t1_full, t2_full) of
-                (Im.BoolT, Im.BoolT) -> return (Im.ExpT Im.BoolT (Im.BinOp op e1 e2))
-                _                    -> throwErr 42 $ "Logical expression " << (Im.BinOp op e1 e2)
+                (Im.BoolT, Im.BoolT) -> return $ Im.ExpT Im.BoolT exp_out
+                _                    -> throwErr 42 $ "Logical expression " << exp_out
                                                    << " does not have Bool args"
 
 -- check an arithmetic expression whose components e1 and e2 are already checked.
@@ -738,7 +793,7 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
           (Im.EnumT nm1 _, Im.EnumT nm2 _) | nm1 == nm2 -> return answer
           _                      -> throwErr 42 $ "Args to comparison expression "
                                                   << answer
-                                                  << " are invalid; the two types are "
+                                                  << " are of incompatible types "
                                                   << full_t1 << " and " << full_t2
 
 -- a type expand function for the check expression functions above
@@ -783,7 +838,9 @@ computeStaticExp e
                      let val = maybeLookup nm [ct]
                      case val of
                               (Just i) -> return i
-                              _        -> throwErr 42 $ "Static expression " << e << " not static: " << nm
+                              _        -> throwErr 42 ("Supposedly static expression " << e
+                                                       << " is not static: "
+                                                       << nm << " is not a constant")
                _                -> throwErr 42 $ "Invalid static expression " << e
 
 
@@ -896,9 +953,18 @@ doOp (T.ETimes _ _) = (*)
 
 -- give quick StreamShow instances to the concrete syntax types which need it here, via
 -- their provided Show instances
+{-
 instance StreamShow T.Stm   where strShows  = showsPrec 0
 instance StreamShow T.Exp   where strShows  = showsPrec 0
 instance StreamShow T.LVal  where strShows  = showsPrec 0
+instance StreamShow T.Dec   where strShows  = showsPrec 0
+instance StreamShow T.Typ   where strShows  = showsPrec 0
+-}
+instance StreamShow T.Stm   where strShow  = Print.printTree
+instance StreamShow T.Exp   where strShow  = Print.printTree
+instance StreamShow T.LVal  where strShow  = Print.printTree
+instance StreamShow T.Dec   where strShow  = Print.printTree
+instance StreamShow T.Typ   where strShow  = Print.printTree
 
 
 testDecs = [ T.ConstDecl (T.Ident "x") (T.EInt 10),
