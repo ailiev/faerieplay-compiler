@@ -1,5 +1,13 @@
 2006-10-13  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
+	* HoistStms.hs (flatten SPrint): add assignments *to* the
+	expressions after the SPrint.
+
+	* TypeChecker.hs (checkStm SPrint): make sure expressions are
+	legal lval's.
+
+
+	
 	* SashoLib.hs (trs): added.
 
 	* sfdlc.hs (g_version): Expanded to include date and svn revision,

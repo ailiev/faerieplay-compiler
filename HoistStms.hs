@@ -87,12 +87,18 @@ flatten s =
                               return $ stms ++ [(SAss lval val_new)]
 
       -- here we generate vars for all the vals, assign each var the right val, and use
-      -- the generated vars in the resulting SPrint node.
+      -- the generated vars in the resulting SPrint node, then assign back to the printed
+      -- expressions, to make sure the print gate is fully in the data flow of the printed
+      -- expressions.
       (SPrint p vals)   -> do (stmss,vals_new)  <- mapM extrStms vals >>== unzip
                               is                <- replicateM (length vals) nextInt
                               let t_is          = zipWith tempVarForExp vals_new is
                                   ass's         = zipWith SAss t_is vals_new
-                              return $ concat stmss ++ ass's ++ [(SPrint p t_is)]
+                                  reass's       = zipWith SAss vals_new t_is
+                              return $ concat stmss ++
+                                       ass's ++
+                                       [(SPrint p t_is)] ++
+                                       reass's
 
       (SBlock vars stms)-> do pushScope
                               stmss <- mapM flatten stms

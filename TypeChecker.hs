@@ -230,6 +230,11 @@ checkStm s@(T.SAss lval val)   = setContext s $
 checkStm s@(T.SPrint prompt vals)
                                 = setContext s $
                                   do vals_new   <- mapM checkExp vals
+                                     (mapM checkLVal $ map T.LVal vals)
+                                        `catchError`
+                                        (\e -> throwErr
+                                               42
+                                               "Arguments to print() must be legal lval's")
                                      return $ Im.SPrint prompt vals_new
 
 
