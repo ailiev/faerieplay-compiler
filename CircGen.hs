@@ -36,8 +36,8 @@ module CircGen (
 
 
 import Array    (array, (!))
-import Monad    (foldM, mplus, liftM)
-import Maybe    (fromJust, isJust, fromMaybe, catMaybes)
+import Monad    (foldM, mplus, liftM, zipWithM)
+import Maybe    (fromJust, isJust, fromMaybe, catMaybes, isNothing)
 import List
 
 import Control.Monad.Trans                      (lift)
@@ -127,7 +127,7 @@ data Op =
   -- write to the (sliced) array location
   | WriteDynArray Im.FieldLoc
 
-  -- an input gate for a primitive type, IntT or BoolT
+  -- an input gate
   | Input
 
   -- select one of two values based on a test; the input wires are to
@@ -472,7 +472,7 @@ genCircuitM stms args =
 -- | Generate the initial graph for the inputs; it will consist of several Input gates,
 -- and no edges.
 genInputs :: [TypedName] -> OutMonad Circuit
-genInputs names     = do gatess     <- mapM (createInputGates True) names
+genInputs names     = do gatess     <- mapM createInputGates names
                          return     (Gr.mkGraph (map gate2lnode (concat gatess)) [])
 
 
@@ -485,44 +485,63 @@ genInputs names     = do gatess     <- mapM (createInputGates True) names
 -- in recursive calls (then we'd be inserting struct field names as
 -- actual vars)
 
-createInputGates :: Bool -> TypedName -> OutMonad [Gate]
-createInputGates addvars (name, typ) =
-    do let var         = add_vflags [FormalParam] (VSimple name)
-       type_table      <- getTypeTable
-       case typ of
-        (StructT (fields,_))
-                -> do gates <- concatMapM (createInputGates False) fields
-                      let is = map gate_num gates
-                      if addvars then setVarAddrs is var else return ()
+-- also have some gymnastics to generate full annotations for the gates
+createInputGates :: TypedName -> OutMonad [Gate]
+createInputGates (name, typ) =
+ do typ'    <- Im.expandType [DoFields, DoTypeDefs] typ
+    createInputGates' Nothing Nothing (name, typ')
+
+   where
+    createInputGates' mb_parent_exp mb_field_num (name, typ) =
+         do let var         = add_vflags [FormalParam] (VSimple name)
+            -- NOTE: the ExpT annotation here is important so we can later
+            -- print actual field names, and not just field numbers; see
+            -- Intermediate.docExp
+                this_exp    = ExpT typ $ maybe (EVar var)
+                                               (\e -> EStruct
+                                                      e
+                                                      (fromJustMsg "createInputGates"
+                                                                   mb_field_num)
+                                               )
+                                               mb_parent_exp
+            case typ of
+              (StructT (fields,_))
+                -> do gatess <- zipWithM (createInputGates' (Just this_exp))
+                                         (map Just [0..])
+                                         fields
+                      let gates = concat gatess
+                          is    = map gate_num gates
+                      -- if we have a parent expression, must be a part of a parent
+                      -- struct, so do not add gate locations.
+                      if isNothing mb_parent_exp then setVarAddrs is var
+                                                 else return ()
                       return gates
-
-
+                      
+{-
         (SimpleT tname)
                 -> let typ' = fromJust $ Map.lookup tname type_table
-                   in  createInputGates True (name, typ')
+                   in  createInputGates (name, typ')
+-}
 
 
         -- IntT, BoolT, ArrayT (for dynamic arrays):
-        _         -> do i <- nextInt
-                        if addvars
+              _   -> do i <- nextInt
+                        if isNothing mb_parent_exp
                           then setVarAddrs [i] var
                                    `trace`
                                    ("inserting input var " << var << " into VarTable")
                           else return ()
-                        -- FIXME: this adds an incorrect doc
-                        -- annotation to the gate - it show struct
-                        -- field names as variable names
-                        gate <- mkGate i typ (EVar var)
+                        gate <- mkGate i typ this_exp
                         return [gate]
 
-    where mkGate i typ doc_exp = do typ_full <- Im.expandType [DoAll] typ
-                                    return $ Gate i
-                                                  typ_full
-                                                  Input
-                                                  []
-                                                  0
-                                                  []
-                                                  [doc_exp]
+    mkGate i typ doc_exp = do typ_full <- Im.expandType [DoAll] typ
+                              return $ Gate i
+                                            typ_full
+                                            Input
+                                            []
+                                            0
+                                            []
+                                            [doc_exp]
 
 
 

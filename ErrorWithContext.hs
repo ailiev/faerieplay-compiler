@@ -55,9 +55,11 @@ instance (Error e, ErrorContext c) => MonadError (e,c) (ErrorWithContext e c) wh
 (<?>) :: (Error e, ErrorContext c, Monad m) =>
          ErrorT (ErrorWithContext e c) m a -> c -> ErrorT (ErrorWithContext e c) m a
 x <?> ctx       = ErrorT $
+                  -- this 'do' is in the ErrorT's inner monad, 'm' in the type signature
+                  -- above.
                   do x_err <- runErrorT x
-                     case x_err of err@(Left (EWC (e, cs)))    -> return $ Left $ EWC (e, (ctx:cs))
-                                   r@  (Right _)               -> return r
+                     case x_err of (Left (EWC (e, cs)))      -> return $ Left $ EWC (e, (ctx:cs))
+                                   r@(Right _)               -> return r
 
 setContext ctx x = x <?> ctx
 

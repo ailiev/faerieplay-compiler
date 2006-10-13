@@ -29,6 +29,7 @@ module SashoLib (
          hex,
 
          tr,
+         trs,
 
 --         mkList,
 
@@ -386,6 +387,9 @@ tr (from,to) xs = let (pre,badL)        = breakList (from `isPrefixOf`) xs
                       then xs
                       else pre ++ to ++ (tr (from,to) postBad)
 
+-- | substitute each of several patterns.
+trs :: (Eq a) => [([a],[a])] -> [a] -> [a]
+trs subs = foldl (.) id $ reverse $ map tr subs
 
 
 -- from http://haskell.org/hawiki/LicensedPreludeExts

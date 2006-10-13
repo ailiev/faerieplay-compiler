@@ -1,3 +1,17 @@
+2006-10-13  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* SashoLib.hs (trs): added.
+
+	* sfdlc.hs (g_version): Expanded to include date and svn revision,
+	nicely formatted.
+
+	* CircGen.hs (createInputGates): Cleaned up comment generation on
+	Input gates, so the full expression is shown, and not just the
+	last field name.
+
+	* Intermediate.hs (docExp): Added support for printing struct
+	field names if available through a type annotation.
+
 2006-10-05  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* ErrorWithContext.hs: Added; an extended Error type, with a stack

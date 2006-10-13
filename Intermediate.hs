@@ -788,14 +788,16 @@ docStm (SPrint prompt xs)               = cat [text "print",
 docExp e = case e of
     (EVar v)            -> docVar v
 
-{-
-    -- if we have a type annotation with a struct expression, use it to get the field name
-    (ExpT t (EStruct str fld_idx))
-                        -> let field_name = getFieldName t fld_idx
-                           in  cat [docExp str, text ".", text field_name]
--}
-    (EStruct str fld_idx)
-                        -> cat [docExp str, text ".", int fld_idx]
+    -- here we use a type annotation if available, to get the field name, and not just
+    -- number.
+    (EStruct str_e fld_idx)
+                        -> let field_doc =
+                                case str_e of
+                                 (ExpT t str_e')
+                                        -> let fld_name = getFieldName t fld_idx
+                                           in  text fld_name
+                                 _      -> int fld_idx
+                           in  cat [docExp str_e, text ".", field_doc]
 
     (EArr arr idx)      -> cat [docExp arr, text "[Arr:", docExp idx, text "]"]
     (ELit l)            -> docLit l
@@ -816,6 +818,7 @@ docExp e = case e of
     -- throw away the expression type if not needed (ie. used above)
 --    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
     (ExpT t e)          -> docExp e
+
 
 -- print a Typ for human eyes
 docTyp :: Typ -> Doc

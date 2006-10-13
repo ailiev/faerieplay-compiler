@@ -49,14 +49,18 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-10-05 14:30:24 sasho"
+-- g_timestamp = "2006-10-05 14:54:36 sasho"
 
 -- these two updated by subversion, with property "svn:keywords" set to at least
 -- "Date Revision"
-g_svn_id = "subversion $Revision$"
-g_svn_date = "$Date$"
+g_svn_id = "subversion  $Revision$"
+g_svn_date = " $Date$"
 
-g_version = tr ("$", "") $ g_svn_id ++ " last modified on " ++ g_svn_date
+g_version = trs [(" $",     ""),
+                 ("$",      ""),
+                 ("Revision:", "revision"),
+                 ("Date: ", "")]
+            $ g_svn_id ++ "; last modified on " ++ g_svn_date
 
 
 logmsg prio msg = hPutStrLn stderr $ show prio ++ ": " ++ msg
@@ -107,7 +111,7 @@ main = do argv          <- getArgs
             MakeGraph       -> driveGraph   hIn hOut
             PruneGraph s d  -> doPruneGraph s d hIn hOut
 
-            Version         -> putStrLn $ name ++ " Version " ++ g_version
+            Version         -> putStrLn $ name ++ " " ++ g_version
             Help            -> hPutStrLn stderr $ usage name
 
             -- by default, compile
