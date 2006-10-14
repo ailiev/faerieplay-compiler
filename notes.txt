@@ -209,3 +209,17 @@ A compilation run on eisenhower with LOGN=8, MEAN_D=10:
 - 171 mins
 - 2550 RAM
 - write_circuit failed due to disk quota, so do not have dijkstra.cct
+
+
+
+<date>Fri Oct 13 16:07:31 2006</date>
+
+Where to check location updates for array possibility:
+lines:
+- 516
+- 530
+- 675
+- 898
+- 724
+- 755
+- 1338

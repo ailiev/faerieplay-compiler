@@ -44,10 +44,6 @@ used with values from before the conditional, and not values generated inside
 the conditional? Since I believe the condition's gate(s) are generated after the
 branches.
 
-<date>Tue Sep 26 19:29:46 2006</date>
-
-Remove the lit_table from CircGen's state.
-
 
 <date>Wed Sep 27 10:27:30 2006</date>
 
@@ -56,3 +52,12 @@ execution. will be an important part of the software manual. Also, need a more
 solid way to specify input/output names, and owners. Could be done via the
 comment field, but that seems not very "serious". Can be made serious by
 specifying it exactly.
+DONE: more or less - we'll leave the task of specifying I/O owners to other
+components and not the compiler - it can just take input as args to main, and
+outputs as returns of main.
+
+
+<date>Fri Oct 13 16:05:13 2006</date>
+
+Standardize all the variable location nomencalture in CircGen---right now have
+VarTable, setVarAddrs, etc - make those LocTable, setVarLoc, etc.

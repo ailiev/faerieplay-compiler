@@ -664,8 +664,7 @@ genStm circ stm =
              return circ
 
       s@(SAss lval@(EVar var) exp) ->
-          do -- var_table  <- getVars
-             circ'      <- checkOutputVars circ var Nothing
+          do circ'      <- checkOutputVars circ var Nothing
                                {- `trace` ("genStm " << s <<
                                         "; var=" << var <<
                                         "; vartable=" << var_table) -}
@@ -705,12 +704,15 @@ genStm circ stm =
                                           (c5, [idx_n]) <- genExp c4 idx_e
                                           depth         <- getDepth
                                           i             <- nextInt
-                                          let prep_slice locs   = (fst $ head locs, sum $ map snd locs)
+                                          let prep_slice locs   = (fst $ head locs,
+                                                                   sum $ map snd locs)
                                               -- get the slice parameters from the field
                                               -- location info given by extractEArr above
-                                              slice             = Im.FieldLoc
-                                                                  { byteloc = prep_slice $ map Im.byteloc locs,
-                                                                    valloc  = prep_slice $ map Im.valloc  locs }
+                                              slice         = Im.FieldLoc
+                                                              { byteloc = prep_slice $
+                                                                          map Im.byteloc locs,
+                                                                valloc  = prep_slice $
+                                                                          map Im.valloc locs }
                                               (ExpT arr_t _)    = arr_e
                                               -- Adding the index expression as an
                                               -- annotation, so we can tell later if it
@@ -873,32 +875,29 @@ getVarFlags var = case (elem RetVar $ vflags var, varName var) of
 
 
 -- do most of the work for a single expression in an SPrint
-doSPrintExp prompt circ e =        do (circ', x_ns)     <- genExp circ e
-                                      slice_is          <- replicateM (length x_ns) nextInt
-                                      let (t,var) = case (e `trace` "SPrint e = " << e) of
-                                                     (ExpT t (EVar v))   -> (t,v)
-                                                     (ExpT t _)          -> error ("SPrint `" << prompt
-                                                                                   << "' got a non-var: "
-                                                                                   << e
-                                                                                   << " of type "
-                                                                                   << t)
-                                      t_full <- Im.expandType [DoAll] t
-                                      let tinfo@(ts, locs)      = case t_full of
-                                                                     (StructT (tn's, locs))
-                                                                         -> (map snd tn's,
-                                                                             locs)
-                                                                     _
-                                                                         -> let blen =
-                                                                                    Im.typeLength Im.tblen
-                                                                                                  t_full
-                                                                            in
-                                                                              ([t_full],
-                                                                               [Im.FieldLoc (0,blen)
-                                                                                            (0,1)])
-
-                                      setVarAddrs slice_is var
-
-                                      return (circ', x_ns, ts, slice_is, locs)
+doSPrintExp prompt circ e =
+    do (circ', x_ns)     <- genExp circ e
+       slice_is          <- replicateM (length x_ns) nextInt
+       let (t,var) = case (e `trace` "SPrint e = " << e) of
+                       (ExpT t (EVar v))   -> (t,v)
+                       (ExpT t _)          -> error ("SPrint `" << prompt
+                                                     << "' got a non-var: "
+                                                     << e
+                                                     << " of type "
+                                                     << t)
+       t_full <- Im.expandType [DoAll] t
+       let tinfo@(ts, locs)      = case t_full of
+                                     (StructT (tn's, locs))
+                                         -> (map snd tn's,
+                                             locs)
+                                     _
+                                         -> let blen = Im.typeLength Im.tblen
+                                                                     t_full
+                                            in ([t_full],
+                                                [Im.FieldLoc (0,blen)
+                                                             (0,1)])
+       setVarAddrs slice_is var
+       return (circ', x_ns, ts, slice_is, locs)
 
 
 
@@ -906,11 +905,11 @@ doSPrintExp prompt circ e =        do (circ', x_ns)     <- genExp circ e
 -- also return the list of field-locations (in bytes) of the array element type
 -- which are covered by the whole expression
 -- and also return the offset of the array expression under its root variable.
--- by example, say we have an expression x.y[i].z
+-- by example, say we have an expression x.y[i].z.v
 -- then, the outputs are
 -- ( the array expression x.y[i],
 --   the offset of .y under x,
---   the SliceAddr's of .z under x.y[i]
+--   the SliceAddr's of .z.v under x.y[i]
 -- )
 -- return Nothing if there is no array subexpression
 extractEArr :: (TypeTableMonad m) => Exp -> m ( Maybe (Exp,
@@ -940,7 +939,7 @@ extractEArr' e@(EStruct str_e idx) =
                  return (arr_exp,
                          arr_off,
                          (take len $ drop off sublocs))
-                            `trace`
+                            `logDebug`
                                 ("extractEArr' (" << e << ")" <<
                                  "; sublocs=" << sublocs <<
                                  "; off=" << off <<
@@ -1133,7 +1132,7 @@ foo    ((x,y):rest)  (z:zs)
     | otherwise         = (z : foo rest zs)
 -- in case we run out of replacements prematurely, just use the first of the
 -- pair for the rest (arbitrarily)
-foo    ((x,y):rest) []  = (x : map fst rest)
+foo    ((x,y):rest) []  = error "CircGen.foo ran out of replacement values!" --(x : map fst rest)
 foo [] _  = []
 
 
