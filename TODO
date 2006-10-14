@@ -61,3 +61,5 @@ outputs as returns of main.
 
 Standardize all the variable location nomencalture in CircGen---right now have
 VarTable, setVarAddrs, etc - make those LocTable, setVarLoc, etc.
+DONE
+

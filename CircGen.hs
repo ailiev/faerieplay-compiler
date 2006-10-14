@@ -76,7 +76,7 @@ import qualified    GraphLib                    as GrLib
 
 import Common (trace,LogPrio(..),logmsg,logProgress,logDebug,logDump,RunFlag(..))
 
-import Intermediate as Im hiding (VarTable)
+import Intermediate as Im
 
 
 
@@ -193,7 +193,7 @@ gateProjFlags f g@(Gate {gate_flags=fs})    = g { gate_flags = f fs }
 -- needed to lookup a variable's current gate number
 -- Structs and direct arrays occupy multiple gates, so need to actually store
 -- a list of gate numbers
-type VarTable = Map.Map Var [Int]
+type LocTable = Map.Map Var [Int]
 
 
 
@@ -217,7 +217,7 @@ genCircuit :: TypeTable ->      -- the type table
 
 -- | Generate the circuit for these unrolled statements, with the given input parameters.
 genCircuit rtFlags type_table stms args =
-    let startState      = MyState { vartable    = [Map.empty],
+    let startState      = MyState { loctable    = [Map.empty],
                                     counter     = 0,
                                     typetable   = type_table,
                                     flags       = rtFlags `intersect` cRELEVANT_RUN_FLAGS
@@ -478,10 +478,10 @@ genInputs names     = do gatess     <- mapM createInputGates names
 
 
 -- create the input gates for this argument to main(), and add the vars
--- to the top-level VarTable
+-- to the top-level LocTable
 -- will make this return a [Gate], for when we deal with arrays etc
 --
--- we'll only insert mappings into the VarTable at the top level, not
+-- we'll only insert mappings into the LocTable at the top level, not
 -- in recursive calls (then we'd be inserting struct field names as
 -- actual vars)
 
@@ -513,7 +513,7 @@ createInputGates (name, typ) =
                           is    = map gate_num gates
                       -- if we have a parent expression, must be a part of a parent
                       -- struct, so do not add gate locations.
-                      if isNothing mb_parent_exp then setVarAddrs is var
+                      if isNothing mb_parent_exp then setVarLoc is var
                                                  else return ()
                       return gates
                       
@@ -527,9 +527,9 @@ createInputGates (name, typ) =
         -- IntT, BoolT, ArrayT (for dynamic arrays):
               _   -> do i <- nextInt
                         if isNothing mb_parent_exp
-                          then setVarAddrs [i] var
+                          then setVarLoc [i] var
                                    `trace`
-                                   ("inserting input var " << var << " into VarTable")
+                                   ("inserting input var " << var << " into LocTable")
                           else return ()
                         gate <- mkGate i typ this_exp
                         return [gate]
@@ -553,7 +553,7 @@ createInputGates (name, typ) =
 -- expressions (ie. parts of other complex types)
 genComplexInit lval size =
     case lval of
-      (EVar var)        -> setVarAddrs (replicate size (-12345678)) var
+      (EVar var)        -> setVarLoc (replicate size (-12345678)) var
       _                 -> return ()
 
 
@@ -667,12 +667,12 @@ genStm circ stm =
           do circ'      <- checkOutputVars circ var Nothing
                                {- `trace` ("genStm " << s <<
                                         "; var=" << var <<
-                                        "; vartable=" << var_table) -}
+                                        "; loctable=" << var_table) -}
              (c',nodes) <- genExpWithDoc circ'
                                           (addOutputFlag var)
                                           exp
                                           lval
-             setVarAddrs nodes var
+             setVarLoc nodes var
              return c'
 
       -- get the gates for this 'val', and set the address of 'lval'
@@ -896,7 +896,7 @@ doSPrintExp prompt circ e =
                                             in ([t_full],
                                                 [Im.FieldLoc (0,blen)
                                                              (0,1)])
-       setVarAddrs slice_is var
+       setVarLoc slice_is var
        return (circ', x_ns, ts, slice_is, locs)
 
 
@@ -1037,9 +1037,9 @@ updateLabel f gr node = let (mctx,gr')      = {-# SCC "#extract" #-}
 genCondExit :: (Cont.Container c Var) =>
                Gr.Node          -- ^ Number of the gate with the condition test value
             -> Circuit          -- ^ Starting circuit
-            -> ([VarTable],       -- ^ The parent variable scope
-                VarTable,       -- ^ Var scope from the branch to take if true
-                VarTable)       -- ^ Var scope from the branch to take if false
+            -> ([LocTable],       -- ^ The parent variable scope
+                LocTable,       -- ^ Var scope from the branch to take if true
+                LocTable)       -- ^ Var scope from the branch to take if false
             -> (c,              -- ^ all the variables declared in the true branch
                 c)              -- ^ all the variables declared in the false branch
             -> OutMonad Circuit -- ^ The circuit with all the Select gates added in.
@@ -1109,7 +1109,7 @@ genCondExit testGate
                    let c2       = rmOutputFlag c $
                                   -- concat all the elements of the list of pairs
                                   foldr (\(a,b) l -> (a:b:l)) [] changed_gates
-                   setVarAddrs new_gates var
+                   setVarLoc new_gates var
                    -- work all the new Contexts into circuit c
                    return $ addCtxs c2 ctxs
 
@@ -1230,7 +1230,7 @@ genExp' c exp =
                               return (c, Right gates)
 {-
                                          `trace`
-                                         ("genExp' EVar " << var << ", vartable=" << show var_table <<
+                                         ("genExp' EVar " << var << ", loctable=" << show var_table <<
                                           " -> " << gates)
 -}
 
@@ -1406,7 +1406,7 @@ extractInputs (Prog pname (ProgTables {funcs=fs})) =
 --------------------
 
 -- the state in these computations:
-data MyState = MyState { vartable   :: [VarTable], -- ^ stack of table Var -> [Node]
+data MyState = MyState { loctable   :: [LocTable], -- ^ stack of table Var -> [Node]
                          counter    :: Int,        -- ^ a counter to number the gates
                                                    -- sequentially
                          typetable  :: TypeTable,  -- ^ the type table is read-only, so
@@ -1422,7 +1422,7 @@ instance St.MonadState Int (St.State MyState) where
 
 
 
-getsVars        f   = St.gets $ f . vartable
+getsVars        f   = St.gets $ f . loctable
 getsTypeTable   f   = St.gets $ f . typetable
 
 getFlags = St.gets flags
@@ -1433,7 +1433,7 @@ getVars = getsVars id
 
 
 -- modify the various parts of the state with some function
-modifyVars f = St.modify $ \st@(MyState{ vartable = x }) -> st { vartable = f x }
+modifyVars f = St.modify $ \st@(MyState{ loctable = x }) -> st { loctable = f x }
 modifyInt  f = St.modify $ \st@(MyState{ counter  = x }) -> st { counter = f x }
 
 -- OutMonad does carry a TypeTable around
@@ -1457,7 +1457,7 @@ updateVar f var = modifyVars $ \maps -> let curr    = maybeLookup var maps
 
 -- two common usages:
 -- just set the var gates completely, regardless if the var is already present or not
-setVarAddrs new_gates = updateVar (const new_gates)
+setVarLoc new_gates = updateVar (const new_gates)
 -- splice in new gates into a part of the current list. error if the var not already
 -- present
 spliceVar loc@(off,len) new_gates var = updateVar (splice loc new_gates .
@@ -1481,7 +1481,7 @@ nextInt = do modifyInt (+1)
              getInt
 
 pushScope = modifyVars $ push Map.empty
--- pop the scope stack, and return the top scope/VarTable
+-- pop the scope stack, and return the top scope/LocTable
 popScope  = do scope <- getsVars peek
                modifyVars pop
                return scope
@@ -1680,7 +1680,7 @@ showCctGraph g =
 -- some tests
 -------------------------------------
 
-testNextInt = let startState    = MyState { vartable    = [Mapping.empty],
+testNextInt = let startState    = MyState { loctable    = [Mapping.empty],
                                             counter     = 0,
                                             typetable   = Mapping.empty,
                                             flags       = []
