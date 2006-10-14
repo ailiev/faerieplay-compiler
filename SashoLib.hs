@@ -42,9 +42,6 @@ module SashoLib (
         mapOnTail,
         interleave,
 
-        iterateTree,
-        pruneTree,
-
         nubOrds,
 
         compareWith,
@@ -92,8 +89,6 @@ module SashoLib (
         bitMask,
         getBits,
 
-        mapTreeM, mapTree,
-
 		 factorial,
                  choose,
                  sumOp,
@@ -133,7 +128,6 @@ import Numeric                      (showHex)
 import Data.Bits            ((.&.), (.|.))
 import qualified Data.Bits                      as Bits
 
-import qualified Data.Tree                      as Tree
 import qualified Data.Map                       as Map
 
 
@@ -705,32 +699,6 @@ tup4_proj_3 f (x1,x2,x3,x4) = (x1  , x2  , f x3, x4  )
 tup4_proj_4 f (x1,x2,x3,x4) = (x1  , x2  , x3  , f x4)
 
 
-
-----------------------
--- Tree functions
-----------------------
-
--- | map a monadic function on all the nodes of a 'Tree'.
-mapTreeM :: (Monad m) => (a -> m b) -> Tree.Tree a -> m (Tree.Tree b)
-mapTreeM f t@(Tree.Node l ts) = do l'  <- f l
-                                   ts' <- mapM (mapTreeM f) ts -- works for ts == []
-                                   return $ Tree.Node l' ts'
-
--- | map a normal function over a tree
-mapTree :: (a -> b) -> Tree.Tree a -> Tree.Tree b
-mapTree f t = runIdentity $ mapTreeM (myLiftM f) t
-
-
--- | iterate a function which produces a finite list, to produce a Tree
-iterateTree :: (a -> [a]) -> a -> Tree.Tree a
-iterateTree f x = Tree.Node x (map (iterateTree f) (f x))
-
-
--- | prune a tree up to and including depth 'd' (ie. the root is always kept)
-pruneTree :: (Ord a, Num a) => a -> Tree.Tree b -> Tree.Tree b
-pruneTree d (Tree.Node r subs)
-    | d <= (fromInteger 0)  = Tree.Node r []
-    | otherwise             = Tree.Node r (map (pruneTree (d-1)) subs)
 
 
 -- | class of types which are convertable to a Doc for pretty-printing.

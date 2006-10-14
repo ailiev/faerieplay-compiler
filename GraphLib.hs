@@ -31,8 +31,10 @@ import qualified Data.Graph.Inductive.Tree      as TreeGr
 import qualified Data.Graph.Inductive.Query.DFS as GrDFS
 import qualified Data.Graph.Inductive.Query.BFS as GrBFS
 
-import SashoLib                                 (comp2_1,expand,proj_tup2,iterateTree,pruneTree,(<<),
+import SashoLib                                 (comp2_1,expand,proj_tup2,(<<),
                                                 StreamShow(..), strictEval)
+import qualified TreeLib
+
 import Common                                   (trace)
 
 
@@ -205,8 +207,8 @@ pruneGraph ::   (Gr.Graph gr) =>
              -> gr v e
              -> gr v e
 pruneGraph dir center dist gr =
-    let paths       = iterateTree (dir . Gr.context gr) center
-        shortPaths  = pruneTree dist paths
+    let paths       = TreeLib.iterate (dir . Gr.context gr) center
+        shortPaths  = TreeLib.prune dist paths
         wantNodes   = Tree.flatten $ shortPaths
         -- use a Set data structure for efficiency here, as List.\\ is O(n * m)
         delNodes    = IS.elems $ IS.fromList (Gr.nodes gr) `IS.difference`
