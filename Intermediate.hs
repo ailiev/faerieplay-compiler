@@ -134,12 +134,21 @@ data TypedName =
 
 -- I would ideally not have an SBlock here, but it conveys variable scoping
 -- information, so we'll keep the blocks until scoping of variables (VScoped) is
--- done, then SBlock will be done away with
+-- done during unrolling, then SBlock will be done away with
 data Stm =
    SBlock VarSet [Stm]
  | SAss Exp Exp
  | SPrint String [Exp]
- | SFor Var Exp Exp [Stm]
+ | SFor                         -- ^ A for-loop
+   Var                          -- ^ The loop counter variable
+   Exp                          -- ^ The start value; should be static
+   Exp                          -- ^ The end value; should be static; can be smaller or
+                                -- bigger than the start, this determines loop direction
+   [Stm]                        -- ^ The loop statements. From the concrete syntax, can
+                                -- only have one Stm here (SBlock if multiple), but that
+                                -- single statement may be expanded to multiple ones
+                                -- during canonicalization, so have a
+                                -- list here. No need to carry a VarSet though.
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
   deriving (Eq,Ord
            , Show, Read
@@ -392,11 +401,10 @@ expandType' type_table flags t =
 
 
 -- for a structure, get a field name given the number
--- TODO: may need to expand the type in case of a type alias which points to a struct
--- type.
+-- cannot get the field name if it is an alias type (SimpleT), as we cannot expand it
+-- here. In that case just print the field number.
 getFieldName (StructT (names,_))  fld_idx = fst $ names !! fld_idx
-getFieldName t                    _       = "getFieldName called on non-struct type "
-                                              ++ show t
+getFieldName t                    fld_idx = show fld_idx
 
 
 -- | return the total (summed) length of a type,
@@ -816,8 +824,8 @@ docExp e = case e of
     (EArrayInit name elem_size len)  -> text "ArrayInit" <> text name <>
                                         parens (int elem_size <> comma <> integer len)
     -- throw away the expression type if not needed (ie. used above)
---    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
-    (ExpT t e)          -> docExp e
+    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
+--    (ExpT t e)          -> docExp e
 
 
 -- print a Typ for human eyes

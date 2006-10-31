@@ -56,8 +56,9 @@ TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [TypedName] ")" ":" Typ
 -- types
 -----------
 
--- NOTE: semantically, the size Exp for Int and arrays has to be a
--- compile-time integer constant
+-- NOTE: semantically, the size Exp for Int and arrays has to be a compile-time integer
+-- constant. TODO: May be better to define another subset of Exp for this purpose, ie. Int
+-- size and array length.
 
 -- FIXME: the bitsize of an Int should be an expression (even if a
 -- compile-time exp) and not just an Integer. This is not doable with
@@ -109,7 +110,8 @@ SPrint.     Stm     ::= "print" "(" String "," [Exp] ")" ;
 separator Exp "," ;
 
 -- none of these statements need a trailing semicolon. so, only
--- Assignment needs it (as specified above)
+-- Assignment needs it (as specified above). NOTE: most likely the Stm's contained in the
+-- following generations are SBlock's.
 SFor.       Stm     ::= "for" "(" Ident "=" Exp "to" Exp ")" Stm ;
 SIf.        Stm     ::= "if" "(" Exp ")" Stm ;
 SIfElse.    Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;

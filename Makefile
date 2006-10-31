@@ -17,6 +17,9 @@ GHC = $(HOME)/work/minime/ghc-6.6-RC2-sasho/bin/ghc
 ODIR = build
 
 
+include ../sfdl/shared.make
+
+
 #
 # which build?
 #

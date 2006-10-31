@@ -223,3 +223,17 @@ lines:
 - 724
 - 755
 - 1338
+
+
+
+<date>Mon Oct 30 13:19:19 2006</date>
+
+About lexical scope management:
+- variables are lexically scoped as usual.
+
+- implemented in Unroll.unroll(SBlock), where all local vars inside the scope
+(ie. vars declared inside the scope, and thus found in the SBlock's VarSet) are
+annotated with that scope's location. Since the innermost scope annotation is
+done last, a variable reference (LHS or RHS of an assignment) ends up annotated
+with the innermost/deepest scope where it is defined. Hence, the standard
+lexical scoping semantics.

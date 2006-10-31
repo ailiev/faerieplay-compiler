@@ -60,7 +60,8 @@ data LogPrio = DUMP | DEBUG | INFO | PROGRESS | WARNING | ERROR
 
 cMINPRIO = 
 #ifdef TRACE
-       DEBUG
+--       DEBUG
+       DUMP
 #else
        PROGRESS
 #endif

@@ -51,3 +51,7 @@ instance Mapping (IM.IntMap a) Int a where
 -- | Return the keys of a Mapping
 keys :: (Mapping c k a) => c -> [k]
 keys = map fst . toList
+
+-- | Do a series of updates to the map
+insertMany :: (Mapping c k a) => [(k,a)] -> c -> c
+insertMany news m = foldr (\(k,v) m -> insert k v m) m news

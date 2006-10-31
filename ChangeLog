@@ -1,3 +1,31 @@
+2006-10-30  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs
+	(setVarLocsFull,setScalarLocs,extractVarLocs,lookupVarLocs,etc.):
+	reworked the var location handling comprehensively, so that arrays
+	are kept in a single location map, across conditional scopes.
+	Scalars are still in a stack of location maps, one per conditional
+	scope. The separation is done by looking at the type of a variable
+	whose location is being set. Hence, all calls to setScalarLocs etc
+	must include the variable's type. The MyState type is accordingly
+	a bit more complicated and nastier. Also needed some changes in
+	(genCondExit).
+
+	* SashoLib.hs (spliceInIf,mapSplice,updateSome): added.
+
+	* HoistStms.hs: added 'addVar' and several calls to it. Now,
+	generated temp vars will be scoped too. Not sure how things were
+	working with unscoped temp vars, unique only within a function.
+	(): added an export list.
+	(combHoisted): removed unneeded use of pattern guards.
+
+	* Unroll.hs: improved some propagation of ExpT.
+
+	* Mapping.hs(insertMany): added.
+
+	* Container.hs: added Container instance for Data.Set.
+
+	
 2006-10-13  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* HoistStms.hs (flatten SPrint): add assignments *to* the

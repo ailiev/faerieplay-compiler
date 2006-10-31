@@ -49,7 +49,7 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-10-05 14:54:36 sasho"
+-- g_timestamp = "2006-10-30 13:09:53 sasho"
 
 -- these two updated by subversion, with property "svn:keywords" set to at least
 -- "Date Revision"
@@ -63,7 +63,7 @@ g_version = trs [(" $",     ""),
             $ g_svn_id ++ "; last modified on " ++ g_svn_date
 
 
-logmsg prio msg = hPutStrLn stderr $ show prio ++ ": " ++ msg
+logmsg prio msg = hPutStrLn stderr $ "main log " ++ show prio ++ ": " ++ msg
 
 
 main = do argv          <- getArgs
@@ -276,14 +276,19 @@ doCompile v rtFlags parser filenameIn hOut strIn =
                       logmsg PROGRESS "Typechecking done"
 
                       let prog_flat = Ho.flattenProg prog
-                      -- hPrint stderr prog_flat
                       logmsg PROGRESS "Flattened program"
+                      logmsg DEBUG $ "The flattened program:\n" ++
+                                     strShow prog_flat
                       case Ur.unrollProg prog_flat of
-                        (Left err)       -> do hPutStrLn stderr $ "Unrolling Error! " ++ showErrs err
+                        (Left err)       -> do hPutStrLn stderr $ "Unrolling Error! " ++
+                                                                  showErrs err
                                                exitFailure
                         (Right stms)     ->
-                           do hPrint stderr (PP.vcat (map Im.docStm stms))
-                              logmsg PROGRESS "Unrolled main; Starting to generate the circuit"
+                           do logmsg PROGRESS "Unrolled main; \
+                                               \Starting to generate the circuit"
+                              logmsg DEBUG $ "The unrolled statements:\n" ++
+                                                   PP.render (PP.vcat $ map Im.docStm stms)
+
 
                               let -- compile the circuit
                                   args          = CG.extractInputs prog

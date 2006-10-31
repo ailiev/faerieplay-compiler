@@ -24,13 +24,15 @@
 -- convert SIf into an SIfElse with an empty else-clause
 
 
-module HoistStms where
+module HoistStms (flattenProg,
+                  flattenFunc   -- for testing in sfdlc.hs apparently.
+                 ) where
 
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
 import SashoLib (mapTuple2, (>>==), replicateM)
-import qualified Container as Cont
+import qualified Container                      as Cont
 import Stack                                    (Stack(..))
 
 
@@ -50,7 +52,14 @@ getsVarSet = snd
 
 modifyInt f (i,vs) = (f i, vs)
 modifyVarSet f (i, vs) = (i, f vs)
- 
+
+
+-- | add a variable to the current scope's (ie. Func or deepest SBlock) var set
+-- param is an EVar, or (ExpT (EVar v))
+addVar :: Exp -> St.State MyState ()
+addVar = St.modify . modifyVarSet . modtop . Cont.insert . extrVar
+    where extrVar evar = let (EVar v)  = stripExpT evar
+                         in  v
 
 
 
@@ -95,6 +104,7 @@ flatten s =
                               let t_is          = zipWith tempVarForExp vals_new is
                                   ass's         = zipWith SAss t_is vals_new
                                   reass's       = zipWith SAss vals_new t_is
+                              mapM addVar t_is
                               return $ concat stmss ++
                                        ass's ++
                                        [(SPrint p t_is)] ++
@@ -118,7 +128,8 @@ flatten s =
                                      s2ss_new  <- mapM flatten s2s
                                      s1ss_new  <- mapM flatten s1s
                                      i         <- nextInt
-                                     let t_i = tempVar i
+                                     let t_i = tempVarForExp t i
+                                     addVar t_i
                                      return $ t_stms ++
                                                 [SAss t_i t_new,
                                                  SIfElse t_i (locs1, concat s1ss_new)
@@ -150,9 +161,11 @@ hoist = mapExp f
 -- replace all function calls in 'e' with an ESeq which assigns the
 -- call to a temp var, and then returns the temp var
 subFunCalls e = mapExpM f e
-    where f (EFunCall nm args) = do sub_args   <- mapM subFunCalls args
+    where f f_e@(ExpT _ (EFunCall nm args)) =
+                                 do sub_args   <- mapM subFunCalls args
                                     i          <- nextInt
-                                    let t_i    =  tempVar i
+                                    let t_i    =  tempVarForExp f_e i
+                                    addVar t_i
                                     return $ ESeq [(SAss t_i (EFunCall nm sub_args))]
                                                   t_i
           f e                  = return e
@@ -200,12 +213,8 @@ combHoistedL cons component_es = let (stmss, new_es) = unzip $ map splitEseq com
                                     else (ESeq stms (cons new_es))
 
 combHoisted :: Exp -> Exp
-combHoisted e
-    | P1 cons e1      <- classe    = combHoistedL (\[e] -> cons e)         [e1]
-    | P2 cons (e1,e2) <- classe    = combHoistedL (\[e1,e2] -> cons e1 e2) [e1,e2]
-    | PList cons es   <- classe    = combHoistedL cons es
-    | P0              <- classe    = e
-    where classe = classifyExp e
-
-
-
+combHoisted e = case classifyExp e of
+                  P1 cons e1      -> combHoistedL (\[e] -> cons e)         [e1]
+                  P2 cons (e1,e2) -> combHoistedL (\[e1,e2] -> cons e1 e2) [e1,e2]
+                  PList cons es   -> combHoistedL cons es
+                  P0              -> e

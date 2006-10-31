@@ -6,11 +6,11 @@ program Test2 {
     
     function Key f (Key x) {
         f = x * 2;
-    };
+    }
 
 
 
-    function void main () {
+    function Key main () {
         var Key j, k;
 
         {
@@ -19,7 +19,7 @@ program Test2 {
             {
                 var Key b;
                 b = k;
-                main = b
+                main = b;
             }
             b = k+j;
         }

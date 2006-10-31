@@ -36,7 +36,7 @@ module SashoLib (
          maybeMapAdjust,
          fromJustMsg,
          maybeApply,
-         MaybeT, runMaybeT,
+         MaybeT(..),
                     
         modifyListHead,
         mapOnTail,
@@ -50,11 +50,15 @@ module SashoLib (
 
         strictEval,
 
+        sublist,
         splice,
         runSumFrom0,
         filterList,
         breakList,
         spanList,
+        updateSome,
+        mapSplice,
+        spliceInIf,
 
         mapOne,
 --        mapDupsBy,
@@ -130,6 +134,7 @@ import qualified Data.Bits                      as Bits
 
 import qualified Data.Map                       as Map
 
+import qualified Debug.Trace                    as Trace
 
 
 
@@ -191,6 +196,8 @@ instance StreamShow String where
 
 instance StreamShow Int     where strShows = showsPrec 0
 instance StreamShow Integer where strShows = showsPrec 0
+instance StreamShow Bool    where strShows = showsPrec 0
+
 
 strShowsList :: (StreamShow a) => [a] -> ShowS
 strShowsList = (foldl (.) id) . intersperse (", " ++) . map strShows
@@ -627,6 +634,54 @@ splice (offset,len) news l = (take offset l) ++
                              (drop (offset + len) l)
 
 
+-- | Splice in new values into a list (using a modifier function) where some predicate
+-- succeeds; if predicate fails, apply another function.
+spliceInIf :: (a -> Bool)       -- ^ Do we splice in at this element?
+           -> (a -> c -> b)     -- ^ Function used to update the value with a new one
+           -> (a -> b)          -- ^ Function to apply if predicate false
+           -> [c]               -- ^ The new values, should be as many as predicate
+                                -- returns True on
+           -> [a]               -- ^ The list
+           -> [b]
+
+spliceInIf p f g ns (x:xs)
+    | p x       = case ns of (n:ns')    -> f x n : rec ns' xs
+                             []         -> error "spliceInIf: ran out of replacement values"
+    | otherwise = g x : rec ns xs
+    where rec = spliceInIf p f g
+spliceInIf _ _ _ ns []  = case ns of [] -> []
+                                     _  -> error "WARNING: spliceInIf had replacements left over at the end" []
+
+
+-- | Update some of a list's elements, which pass a predicate, with a list of replacement
+-- values.
+updateSome :: (a -> Bool)       -- ^ Which elements to replace?
+           -> [a]               -- ^ The replacement values
+           -> [a]               -- ^ The list
+           -> [a]
+updateSome p = spliceInIf p (\old new -> new) id
+
+
+
+
+-- map a function onto a sublist of a list, and another function on the rest.
+mapSplice :: (a -> b)           -- ^ map onto the sublist
+          -> (a -> b)           -- ^ map onto the rest
+          -> (Int,Int)          -- ^ the sublist location; offset and length.
+          -> [a]                -- ^ the list
+          -> [b]
+mapSplice f g (offset,len) l = let before = take offset l
+                                   during = take len $ drop offset l
+                                   after  = drop (offset + len) l
+                               in  map g before ++ map f during ++ map g after
+
+                               
+
+
+
+sublist off len = take len . drop off
+
+
 
 
 --
@@ -652,6 +707,7 @@ tuple2list2 (x,y) = [x,y]
 -- parameters
 mapInputs2 :: a -> b -> [a -> b -> c] -> [c]
 mapInputs2 x y fs = map (\f -> f x y) fs
+
 
 
 

@@ -63,3 +63,26 @@ Standardize all the variable location nomencalture in CircGen---right now have
 VarTable, setVarAddrs, etc - make those LocTable, setVarLoc, etc.
 DONE
 
+
+<date>Mon Oct 23 11:11:22 2006</date>
+
+Remove the depth stuff, we don't need it with array gates with a gate-enable.
+
+
+<date>Mon Oct 30 11:55:06 2006</date>
+
+Remove the VarSet's on SIfElse in Intermediate. The case with SIfElse seems to
+be the same as with SFor, and VarSet is not needed, it's needed only for SBlock.
+
+<date>Mon Oct 30 13:05:08 2006</date>
+
+Do away with the bit-size expansion on addition etc, in TypeChecker. arithmetic
+should just preserve bit size. Or think it over a bit.
+
+
+<date>Mon Oct 30 13:15:59 2006</date>
+
+Should we add default initialization to declared vars (as is done now, in
+TypeChecker.mkVarInits)? Seems not, should have an error if var used
+uninitialized. But the error would only be caught in CircGen, where we're
+assuming no user errors remain.

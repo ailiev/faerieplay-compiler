@@ -686,6 +686,7 @@ extractLocals' = Im.mapStmM f_s f_e
                                         return s
           f_s s                 = return s
 
+          -- nothing to do for Exp.
           f_e                   = myLiftM id
 
 

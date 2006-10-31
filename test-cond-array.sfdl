@@ -1,0 +1,21 @@
+program TestCondArray {
+
+  type Word = Int<32`>;
+
+  function Word main (Word x) {
+    var Word[10] A;
+    var Word y;
+
+    if (x > 5) {
+      A[0] = x;
+      y = x;
+    }
+    else {
+      A[1] = 2*x;
+      y = 2*x;
+    }
+
+    main = y + A[3];
+  }
+
+}

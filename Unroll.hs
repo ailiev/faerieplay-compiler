@@ -21,7 +21,7 @@ import qualified Container              as Cont
 
 import Common
 import Intermediate
-import HoistStms                        hiding (popScope, pushScope)
+import HoistStms
 
 import qualified TypeChecker            as Tc
 
@@ -101,7 +101,9 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                      -- ditch the formal var type
                      -- annotations, and make var's from the formal names
                      (ref_args,
-                      nonref_args)  = mapTuple2 (map (\((nm,t),val) -> (formarg2var scope nm , val))) $
+                      nonref_args)  = mapTuple2 (map (\((nm,t),val) ->
+                                                          (formarg2var scope nm , val))
+                                                ) $
                                       partition (isRefType . snd . fst) $
                                       arg_complex
 
@@ -112,8 +114,10 @@ unroll s@(SAss lv e@(EFunCall nm args)) = genericUnroll unrollAss s
                                   stms
 
                      -- assignments to the non-ref formal params from their values
-                     ass's      = [SAss (EVar formarg)
-                                        actual_arg      | (formarg,actual_arg) <- nonref_args]
+                     ass's      = [SAss (ExpT t (EVar formarg))
+                                        actarg
+                                   | (formarg,
+                                      actarg@(ExpT t _)) <- nonref_args]
 
                      -- assignment to lval from the function return parameter
                      retass     = [SAss lv (fcnRetVar nm scope)]
@@ -235,7 +239,7 @@ scopeVars locals scope s = mapStm f_s f_e s
                                                        stms
           f_s s                                 = s
 
-          inScope :: VarSet -> Var -> Bool
+          inScope :: (Cont.Container c Var) => c -> Var -> Bool
           inScope locals var = Cont.member (stripScope var) locals 
 
                                

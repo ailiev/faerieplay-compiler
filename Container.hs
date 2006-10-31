@@ -6,9 +6,11 @@ module Container where
 
 import List (union)
 import qualified Data.IntSet                    as IS
+import qualified Data.Set                       as Set
 
 
 -- a set class, without mapping
+-- NOTE: multi-parameter type class.
 class (Eq a) => Container c a | c -> a where
     insert      :: a -> c -> c
     member      :: a -> c -> Bool
@@ -29,6 +31,21 @@ instance (Eq a) => Container ([a]) a where
     singleton x = [x]
 
 
+instance (Ord a) => Container (Set.Set a) a where
+    insert      = Set.insert
+    member      = Set.member
+    union       = Set.union
+    toList      = Set.toList
+    fromList    = Set.fromList
+    empty       = Set.empty
+    singleton   = Set.singleton
+
+
+-- NOTE: this instance would not be possible if Container class is not defined with 2
+-- params, ie. if we had
+-- class Container c where
+--     insert :: (Eq a) => a -> c a -> c a
+--     ...
 instance Container IS.IntSet Int where
     insert      = IS.insert
     member      = IS.member

@@ -13,7 +13,7 @@ program Test2 {
 	var byte b;
 	b = 129;
         g = x + 5;
-    };
+    }
     
     function Key f (Key x) {
         for (i = N/2 to N) {
@@ -22,11 +22,11 @@ program Test2 {
 //            g_count = g_count + 1;
         }
         f = x * 2;
-    };
+    }
 
 
 
-    function void main () {
+    function Key main () {
         var Key j, k, l;
 
         j = 12;
@@ -44,6 +44,8 @@ program Test2 {
         else {
             k = N*2;
         }
+
+	main = k;
     }
 
     
