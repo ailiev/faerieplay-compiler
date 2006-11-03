@@ -1,3 +1,12 @@
+2006-11-03  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs (genCondExit): Fixed the list comprehension, which
+	was removing some elements of 'sources' due to the condition, but
+	not of 'vars', thus the list of pairs sent to addSelect was
+	misaligned!
+	CircGen.hs (): a whole lot of 'logDebug' calls, till I caught
+	the above problem.
+
 2006-10-30  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* CircGen.hs

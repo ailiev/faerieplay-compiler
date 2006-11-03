@@ -3,19 +3,19 @@ program TestCondArray {
   type Word = Int<32`>;
 
   function Word main (Word x) {
-    var Word[10] A;
+    var Word[10] theArr;
     var Word y;
 
     if (x > 5) {
-      A[0] = x;
+      theArr[0] = x;
       y = x;
     }
     else {
-      A[1] = 2*x;
+      theArr[1] = 2*x;
       y = 2*x;
     }
 
-    main = y + A[3];
+    main = y + theArr[3];
   }
 
 }

@@ -18,6 +18,7 @@ ODIR = build
 
 
 include ../sfdl/shared.make
+SFDLCFLAGS += +RTS -xc -RTS
 
 
 #

@@ -106,11 +106,16 @@ data Op =
     Bin Im.BinOp
   | Un  Im.UnOp
 
-  -- read from a dynamic array; inputs: [array, index]; output is
+  -- read from a dynamic array;
+  -- inputs: [enable, array, index];
+  -- if 'enable' is true, output is
   -- 1: the new array value (or rather pointer, as the runtime will manage the actual
   --    values), and
   -- 2: of the array element type: either a basic type like Int etc, or a list of Slicer
   --    gates which extract the basic components of the complex type in this array
+  -- if 'enable' is false, output is
+  -- 1: the new array value (probably same as the old one)
+  -- 2: NIL
   | ReadDynArray
 
   -- initialize an array
@@ -119,13 +124,15 @@ data Op =
   -- 2) number of elems
   | InitDynArray Int Integer
 
-  -- update array; inputs = [array, index, val1, val2, ...]; output is
+  -- update array; inputs = [enable, array, index, val1, val2, ...]; output is
   -- the updated array. The parameters are:
   -- - a slice of where inputs (concatenated) should end up in the array element.
   --
   -- The input will consist of multiple gates in case of a complex
   -- type, and the runtime can just concat the values to get a lump to
   -- write to the (sliced) array location
+  --
+  -- if 'enable' is false, do not actually write the value.
   | WriteDynArray Im.FieldLoc
 
   -- an input gate
@@ -236,6 +243,7 @@ genCircuit :: TypeTable ->      -- the type table
 -- | Generate the circuit for these unrolled statements, with the given input parameters.
 genCircuit rtFlags type_table stms args =
     let startState      = MyState { loctable    = ([Map.empty], Map.empty),
+                                    cond_nodes  = [], -- empty stack
                                     counter     = 0,
                                     typetable   = type_table,
                                     flags       = rtFlags `intersect` cRELEVANT_RUN_FLAGS
@@ -483,8 +491,9 @@ keepNodes keeps g = let dels = Set.toList $
 -- | the stateful computation to generate the whole circuit.
 genCircuitM :: [Stm] -> [TypedName] -> OutMonad Circuit
 genCircuitM stms args =
-    do input_gates <- genInputs args
-       foldM genStm input_gates stms
+    do input_gates_cct  <- genInputs args
+       start_cct        <- initCondNodes input_gates_cct
+       foldM genStm start_cct stms
 
 
 -- | Generate the initial graph for the inputs; it will consist of several Input gates,
@@ -492,6 +501,22 @@ genCircuitM stms args =
 genInputs :: [TypedName] -> OutMonad Circuit
 genInputs names     = do gatess     <- mapM createInputGates names
                          return     (Gr.mkGraph (map gate2lnode (concat gatess)) [])
+
+-- | Initialize the stack of condition nodes, by adding a "True" literal for the
+-- unconditional area
+-- returns the circuit with the new condition node.
+initCondNodes cct   = do i                  <- nextInt
+                         d                  <- getDepth
+                         let rootCondCtx    = mkCtx $ Gate i
+                                                           BoolT
+                                                           (Lit $ LBool True)
+                                                           []
+                                                           d
+                                                           [] []
+                         pushCondNode i
+                         return $ rootCondCtx & cct
+                                                           
+                                                           
 
 
 
@@ -565,8 +590,8 @@ createInputGates (name, typ) =
 
 
 
--- this just adds an obvious dummy entry of the correct size in the var table
--- for this lval.
+-- this just adds an obvious dummy entry of the correct size (ie. number of graph nodes)
+-- in the loc table for this lval.
 -- we only need to do it for structs which are variables, and not
 -- expressions (ie. parts of other complex types)
 -- PRE: the lval does not have a top-level ExpT
@@ -745,6 +770,7 @@ genStm circ stm =
                                        {-# SCC "have-lval-array" #-}
                                        do (c4, [arr_n]) <- genExp c3 arr_e
                                           (c5, [idx_n]) <- genExp c4 idx_e
+                                          condNode      <- getCondNode
                                           depth         <- getDepth
                                           i             <- nextInt
                                           let prep_slice locs   = (fst $ head locs,
@@ -764,7 +790,8 @@ genStm circ stm =
                                                            Gate i
                                                                 arr_t
                                                                 (WriteDynArray slice)
-                                                                ([arr_n, idx_n] ++ gates)
+                                                                ([condNode, arr_n, idx_n]
+                                                                 ++ gates)
                                                                 depth
                                                                 [] [idx_e]
                                           spliceVarLocs (arr_off,1) (rv,rv_t) [i] 
@@ -788,6 +815,7 @@ genStm circ stm =
              -- gate for the index
              (c5, [idx_n])      <- genExp c4 idx_e
              depth              <- getDepth
+             cond_node          <- getCondNode
              i                  <- nextInt
              let (ExpT arr_t _)  = arr_e
                  ctx             = {-# SCC "mkCtx" #-}
@@ -795,12 +823,12 @@ genStm circ stm =
                                                  arr_t
                                                  -- NOTE: writing -1 here to mean "the end"
                                                  (WriteDynArray $ Im.FieldLoc (0,-1) (0,-1))
-                                                 ([arr_n, idx_n] ++ gates)
+                                                 ([cond_node, arr_n, idx_n] ++ gates)
                                                  depth
                                                  [] [])
              spliceVarLocs (off,1) (rv,rv_t) [i]
              return $ {-# SCC "ctx-&-c5" #-} (ctx & c5)
-                        `trace`
+                        `logDump`
                         ("SAss to EArr: \"" ++ show stm ++
                          "\n; inserting " ++ show ctx)
 
@@ -811,18 +839,23 @@ genStm circ stm =
       (SIfElse test@(ExpT _ (EVar testVar))
                (locs1, stms1)
                (locs2, stms2))  ->
-          {-# SCC "stm-ass-ifelse" #-}
+          {-# SCC "stm-ifelse" #-}
           do [testGate]         <- lookupVarLocs testVar >>==
                                    fromJustMsg ("Conditional var " << testVar
-                                                << " not found")
+                                                << " not found, within " << stm)
+             -- prepare the condition node, for array gates
+             circ'              <- prepareCondNode circ testGate
+
              -- do the recursive generation for both branches, and
              -- save the resulting var scopes
              pushScope
-             circ1'             <- foldM genStm circ stms1
+             circ1'             <- foldM genStm circ' stms1
              ifScope            <- popScope
              pushScope
              circ2'             <- foldM genStm circ1' stms2
              elseScope          <- popScope
+
+             popCondNode
 
              -- grab the parent scope
              parentScope        <- getsLocs fst
@@ -913,6 +946,20 @@ genStm circ stm =
                 flags   -> Just (gateProjFlags (\fs -> fs `union` flags))
                            
 
+-- | Make a gate to be the condition node for this conditional scope - it's just an AND of
+-- the current condition, and the next higher cond node.
+prepareCondNode cct this_cond
+                            = do parentNode     <- getCondNode
+                                 i              <- nextInt
+                                 d              <- getDepth
+                                 let node_ctx   = mkCtx $ Gate i
+                                                               BoolT
+                                                               (Bin Im.And)
+                                                               [this_cond, parentNode]
+                                                               d
+                                                               [] []
+                                 pushCondNode i
+                                 return $ node_ctx & cct
 
 -- what flags to attach to a gate for this 'var'.
 -- if it is called "main" and is a function return variable, it needs an Output flag.
@@ -1103,10 +1150,12 @@ genCondExit testGate
 --                  `trace` ("non-local scope vars: " << vars)
         -- make sure to not give vars with empty source lists to addSelect (eg. a struct
         -- with all array elements
-    in  foldM addSelect circ [ (v, (gs_true, gs_false)) | v <- vars
-                                                        | (gs_true, gs_false) <- sources
-                             , not $ null gs_true
-                             ]
+        select_args = [ (v, (gs_true, gs_false))
+                            | (v, (gs_true, gs_false)) <- zip vars sources , not $ null gs_true
+                      ]
+    in  foldM addSelect circ select_args
+        `logDump`
+        ("genCondExit select_args = " << select_args)
 
     where -- a var is non-local if was not declared in this scope,
           -- *and* it appears in the parent scope (needed in the case of
@@ -1133,27 +1182,40 @@ genCondExit testGate
                                        [False, True]       -> (parentScope, [elseScope]))
                                out   @(gates_true, gates_false) = mapTuple2 (gates var)
                                                                             scopes
-
                            in  assert (length gates_true == length gates_false)
                                       out
 --                                   `trace` ("varSources for " << var << ": "
 --                                            << out)
           -- find the gates for a var, looking in the given scope stack
           -- keep just LocTable entries with a Nothing annotation (ie. not arrays)
+          -- WARNING: using the annotation details here is not good, it should be exposed
+          -- just in 'getVarLocs' etc.
           gates var scopes = let leaves = fst $ fromJust $ maybeLookup var scopes
                                  ns     = [ n | (n, Nothing) <- leaves ]
                              in  ns
+                                   `logDump`
+                                   ("genCondExit.gates(" << var
+                                    << ") has scopes=" << show scopes
+                                    << "; ns -> " << ns << ";"
+                                   )
+                                                         
 
           -- add Select gates for a free variable, and update its
           -- wire locations, to the new Select gates
           -- need multiple select gates if it's a struct, but in this
           -- case we add Select only for the gates which were actually
           -- updated in this scope
+          -- PRE: the gates_true' and gates_false' inputs must be the same lenght, and not
+          -- null; the type of the var is not an array type
           -- this function is quite nasty!
           addSelect c (var, in_gates@(gates_true', gates_false'))
+              | assert (length gates_true' == length gates_false' &&
+                        not (null gates_true'))
+                       True
               = do let changed_gates    = filter (\(x,y) -> x /= y) $ uncurry zip in_gates
                    typ          <- lookupVarTyp var
-                   ts           <- mapM (getSelType c) changed_gates
+                   ts           <- assert (not (arrTyp typ))
+                                   mapM (getSelType c) changed_gates
                    -- get the right number of new int's
                    is           <- replicateM (length ts) nextInt
                    let ctxs      = zipWith3 (mkCtx' var) is ts changed_gates
@@ -1164,6 +1226,13 @@ genCondExit testGate
                                   -- concat all the elements of the list of pairs
                                   foldr (\(a,b) l -> (a:b:l)) [] changed_gates
                    setScalarLocs (var,typ) new_gates
+                     `logDump`
+                     ("addSelect, var= " << var
+                      << "; in_gates = " << in_gates
+                      << "; typ = " << typ
+                      << "; new_gates = " << new_gates
+                     )
+
                    -- work all the new Contexts into circuit c
                    return $ addCtxs c2 ctxs
 
@@ -1174,6 +1243,10 @@ genCondExit testGate
                   flags     = getVarFlags var
                   doc       = EVar var -- annotate gate with the variable name
               in  mkCtx (Gate i t Select src_gates depth flags [doc])
+
+          arrTyp (ArrayT _ _)   = True
+          arrTyp _              = False
+          
 
 
 -- take a list of pairs, and where a pair is equal, pass on that value, but
@@ -1338,6 +1411,7 @@ genExp' c exp =
                               (c2, [idx_n])        <- genExp c1 idx_e
                               readarr_n            <- nextInt
                               depth                <- getDepth
+                              cond_node             <- getCondNode
                               -- get the array type and the element type, from the array
                               -- expression annotations.
 
@@ -1350,7 +1424,7 @@ genExp' c exp =
                                   readarr_ctx       = mkCtx (Gate readarr_n
                                                                   arr_t
                                                                   ReadDynArray
-                                                                  [arr_n, idx_n]
+                                                                  [cond_node, arr_n, idx_n]
                                                                   depth
                                                                   [] [idx_e])
                               (e_locs,e_typs)      <- getTypLocs elem_t
@@ -1428,7 +1502,10 @@ mkCtx gate =    (map uAdj $ gate_inputs gate,
 -- | get all the scalar components within a Struct value of the given type.
 getStructLeaves :: Typ -> Exp -> [(Typ,Exp)]
 getStructLeaves typ e =
-    TreeLib.leaves $ TreeLib.iterate expandLevel (typ,e)
+    let leaves = TreeLib.leaves $ TreeLib.iterate expandLevel (typ,e)
+    in  leaves
+        `logDump`
+        ("getStructLeaves (" << typ << ", " << e << ") -> " << leaves)
 
     where expandLevel (StructT (fields, _), e) =
               let member_es = map (EStruct e) [0..length fields - 1]
@@ -1473,6 +1550,8 @@ extractInputs (Prog pname (ProgTables {funcs=fs})) =
 data MyState = MyState { loctable   :: ([LocTable], -- ^ stack of tables for scalars.
                                         ArrLocTable -- ^ A single table for arrays.
                                        ),
+                         cond_nodes :: [Gr.Node], -- ^ the stack of the condition nodes in
+                                                  -- the current stack of conditionals.
                          counter    :: Int,        -- ^ a counter to number the gates
                                                    -- sequentially
                          typetable  :: TypeTable,  -- ^ the type table is read-only, so
@@ -1500,6 +1579,8 @@ getInt              = St.gets counter
 -- modify the various parts of the state with some function
 modifyLocs f = St.modify $ \st@(MyState{ loctable = x }) -> st { loctable = f x }
 modifyInt  f = St.modify $ \st@(MyState{ counter  = x }) -> st { counter = f x }
+modifyCondNodes f   = St.modify $ \st@(MyState{ cond_nodes  = x }) -> st { cond_nodes = f x }
+
 
 -- OutMonad does carry a TypeTable around
 instance TypeTableMonad OutMonad where
@@ -1559,7 +1640,9 @@ setVarLocsFull       :: ([Maybe LocAnnot] -> [Bool])
 setVarLocsFull hook (var,typ) new_locs =
     do t_full       <- Im.expandType [Im.DoTypeDefs, Im.DoFields] typ
        mb_locs      <- lookupVarLocs var
-       let all_leaves   = getStructLeaves t_full (EVar var)
+       let -- prepare for debug messages
+           funcid       = "setVarLocsFull (" << var << ", " << typ << ")"
+           all_leaves   = getStructLeaves t_full (EVar var)
            -- the old locs if present, or a list of undefines. If a list of undefs, they
            -- should all be replaced in the spliceInIf call below
            locs         = fromMaybe (repeat (-1 :: Gr.Node))
@@ -1573,7 +1656,7 @@ setVarLocsFull hook (var,typ) new_locs =
                                 not (and entries_keep)
                                )
                                `logDump`
-                                ("setVarLocsFull (" << var << ", " << typ << ")"
+                                (funcid
                                  << "; new_locs = " << new_locs
                                  << "; entries_keep = " << entries_keep
                                  << "; locmap_entry = " << locmap_entry
@@ -1582,7 +1665,7 @@ setVarLocsFull hook (var,typ) new_locs =
                              )
                           ||
                           ( not (or entries_keep) )
-                          then error ("setVarLocsFull is not setting all locs for " << var
+                          then error (funcid << " is not setting all locs for " << var
                                       << ", but it does not have an entry already;\
                                           \ or no entries kept to set")
                           else -- put in the new locs where specified
@@ -1598,6 +1681,8 @@ setVarLocsFull hook (var,typ) new_locs =
            arr_entries  = [(e,n) | (n, Just (Array e)) <- new_entry]
            -- and now update the actual tables in our state.
        setVarEntry (var,typ) new_entry arr_entries
+          `logDump`
+          (funcid << " has arr_entries = " << arr_entries)
     where mk_entry (Im.ArrayT _ _, e) n = (n, Just $ Array e)
           mk_entry _                  n = (n, Nothing)
 
@@ -1686,6 +1771,16 @@ pushScope = modifyLocs $ projFst $ push Map.empty
 popScope  = do scope <- getsLocs $ peek . fst
                modifyLocs $ projFst pop
                return scope
+
+-- | Add a conditional node on the stack
+pushCondNode n = modifyCondNodes $ push n
+
+-- | And pop a node on exit from an SIfElse
+popCondNode = modifyCondNodes pop
+
+-- | Returns the current conditional node, from the top of the stack.
+getCondNode = St.gets (peek . cond_nodes)
+
 
 
 
@@ -1885,6 +1980,7 @@ showCctGraph g =
 -------------------------------------
 
 testNextInt = let startState    = MyState { loctable    = ([Mapping.empty], Mapping.empty),
+                                            cond_nodes  = [],
                                             counter     = 0,
                                             typetable   = Mapping.empty,
                                             flags       = []
