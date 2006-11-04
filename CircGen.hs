@@ -843,18 +843,21 @@ genStm circ stm =
           do [testGate]         <- lookupVarLocs testVar >>==
                                    fromJustMsg ("Conditional var " << testVar
                                                 << " not found, within " << stm)
-             -- prepare the condition node, for array gates
-             circ'              <- prepareCondNode circ testGate
+             -- add in the enable gates
+             (circ', t_en_node, f_en_node)  <- prepareCondNode circ testGate
 
              -- do the recursive generation for both branches, and
              -- save the resulting var scopes
+             pushCondNode t_en_node
              pushScope
              circ1'             <- foldM genStm circ' stms1
              ifScope            <- popScope
+             popCondNode
+
+             pushCondNode f_en_node
              pushScope
              circ2'             <- foldM genStm circ1' stms2
              elseScope          <- popScope
-
              popCondNode
 
              -- grab the parent scope
@@ -946,20 +949,28 @@ genStm circ stm =
                 flags   -> Just (gateProjFlags (\fs -> fs `union` flags))
                            
 
--- | Make a gate to be the condition node for this conditional scope - it's just an AND of
--- the current condition, and the next higher cond node.
+-- | Make a gates to be the two condition nodes for this conditional scope - the
+-- true-branch enable node is an AND of
+-- the current condition, and the next higher cond node; the false-branch enable is just a
+-- NOT of the true-enable.
+-- returns the circuit with the enable gates added in, as well as the two gate addresses.
 prepareCondNode cct this_cond
                             = do parentNode     <- getCondNode
-                                 i              <- nextInt
+                                 [tNode, fNode] <- replicateM 2 nextInt
                                  d              <- getDepth
-                                 let node_ctx   = mkCtx $ Gate i
+                                 let true_ctx   = mkCtx $ Gate tNode
                                                                BoolT
                                                                (Bin Im.And)
                                                                [this_cond, parentNode]
                                                                d
                                                                [] []
-                                 pushCondNode i
-                                 return $ node_ctx & cct
+                                     false_ctx  = mkCtx $ Gate fNode
+                                                               BoolT
+                                                               (Un Im.Not)
+                                                               [tNode]
+                                                               d
+                                                               [] []
+                                 return (addCtxs cct [true_ctx, false_ctx], tNode, fNode)
 
 -- what flags to attach to a gate for this 'var'.
 -- if it is called "main" and is a function return variable, it needs an Output flag.
@@ -1797,6 +1808,9 @@ instance StreamShow (Maybe LocAnnot) where strShows = showsPrec 0
 
 instance StreamShow Gate where
     strShows = cctShowsGate " :: " " ** "
+
+instance StreamShow Op where
+    strShows = cctShowsOp
 
 
 --

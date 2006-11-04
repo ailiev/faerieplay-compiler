@@ -1,3 +1,20 @@
+2006-11-04  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* sfdlc.hs (doRunCct): Pass on the runtime flags to simulator.
+
+	* Common.hs: added the RunTraceBinary runtime flag.
+
+	* Runtime.hs (formatRun): Enabled two different output formats,
+	human-readable (+/-), and binary, same as log format of run-circuit.cc.
+	(showsValBinary, showsValHuman, etc.): added/renamed.
+	(gate2func): Added support for enable inputs in ReadDynArray and
+	WriteDynArray.
+
+	* CircGen.hs(prepareCondNode): reform a bit, to generate and
+	insert both enable gates.
+	(genStm (SIfElse)): Corrected generation of enable nodes, which
+	obviously have to be complements in each of the two branches.
+
 2006-11-03  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* CircGen.hs (genCondExit): Fixed the list comprehension, which
@@ -6,6 +23,8 @@
 	misaligned!
 	CircGen.hs (): a whole lot of 'logDebug' calls, till I caught
 	the above problem.
+	CircGen.hs (): Added generation of enable inputs for ReadDynArray
+	and WriteDynArray.
 
 2006-10-30  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 

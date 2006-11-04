@@ -7,15 +7,17 @@ program TestCondArray {
     var Word y;
 
     if (x > 5) {
-      theArr[0] = x;
+      theArr[0] = x * 2;
+      theArr[1] = x;
       y = x;
     }
     else {
+      theArr[0] = x;
       theArr[1] = 2*x;
       y = 2*x;
     }
 
-    main = y + theArr[3];
+    main = y + theArr[1];
   }
 
 }

@@ -42,7 +42,7 @@ type ErrCtxMonad = Either MyErrorCtx
 
 -- | Runtime flags, built from the command line or other configuration settings, and
 -- passed to the various parts in different ways, eg. as part of MyState in CircGen.hs.
-data RunFlag = DumpGates | DumpGraph | DoPrint | Verbose
+data RunFlag = DumpGates | DumpGraph | DoPrint | Verbose | RunTraceBinary
     deriving (Read,Show,Eq,Ord)
 
 

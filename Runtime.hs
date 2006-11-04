@@ -8,7 +8,7 @@ import Monad
 import Ix
 import List
 import IO               (hFlush, stdout)
-import Common (trace)
+import Common (trace, RunFlag(..))
 
 import Array
 
@@ -30,6 +30,7 @@ import Data.Bits        ((.&.), (.|.), shiftL, shiftR, xor)
 import Text.Printf      (printf)
 
 import qualified Text.PrettyPrint               as PP
+import Text.PrettyPrint                         (($$))
 
 import SashoLib
 
@@ -41,29 +42,34 @@ import Intermediate                             as Im
 type ValArrayType = Maybe GateVal
 
 
--- general tactic:
--- produce NodeFunc's for each gate, which is a simple map.
--- go through graph with BFS and do the funcs
+formatRun :: [RunFlag]          -- ^ The runtime flags
+          -> [Gate]             -- ^ The graph gates in topological order
+          -> [[Integer]]        -- ^ The values of the inputs, each elements may be a
+                                -- singleton list for a scalar, and a list for arrays.
+          -> IO [String]        -- ^ The trace of formatted values for each gate.
+formatRun rtFlags gates ins = do outs <- run gates ins
+                                 return $ map printOuts $ zip gates outs
+    where printOuts = if elem RunTraceBinary rtFlags
+                      then printOutsBinary
+                      else printOutsHuman
 
-formatRun gates ins = do outs <- run gates ins
-                         return $ map printOuts $ zip gates outs
-    where -- NOTE: this should be kept synchronized with the LOG to 'gate_logger' in
+          -- NOTE: this should be kept synchronized with the LOG to 'gate_logger' in
           -- run-circuit.cc.
-          printOuts ( g, (ins, mb_val) ) =
+          printOutsBinary ( g, (ins, mb_val) ) =
               printf "%-6d%-8s%s"
                      (gate_num g)
                      (if null (gate_flags g) then "" else show (gate_flags g))
-                     (show mb_val)
-{-
-    where printOuts ( gate, (ins, mb_val) ) =
+                     (showsValBinary 0 mb_val "")
+
+          printOutsHuman ( gate, (ins, mb_val) ) =
               let flags     = gate_flags gate
                   flagsStr  = if null flags then "" else show flags
-                  insStr    = concat . intersperse ", " . map show $ ins
+                  insStr    = concat . intersperse ", " . map showVal $ ins
                   valStr    = if (elem Output flags)
-                              then show_mb_val mb_val
-                              else show_mb_val mb_val
+                              then showVal mb_val
+                              else showVal mb_val
                   doc       = PP.hsep   [PP.int (gate_num gate),
-                                         PP.text $ show $ gate_op gate,
+                                         PP.text $ strShow $ gate_op gate,
                                          PP.text flagsStr,
                                          PP.parens . PP.hcat . PP.punctuate PP.comma .
                                              map PP.int . gate_inputs $
@@ -75,7 +81,10 @@ formatRun gates ins = do outs <- run gates ins
                                      PP.text valStr)
               in
                 PP.render doc
--}
+
+          showVal v = showsValHuman 0 v ""
+
+
 {-
               printf "%-6d%-16s%-8s%-30s%s"
                                                     num
@@ -329,9 +338,11 @@ gate2func Gate { gate_op = op,
                                                    VArr $ listArray (0,len-1)
                                                                     (repeat val)
 
-        WriteDynArray slice -> \(v_arr:
+        WriteDynArray slice -> \(v_enable:
+                                 v_arr:
                                  v_idx:
-                                 v_vals)    -> do VArr arr              <- v_arr
+                                 v_vals)    -> do VScalar (ScBool en)   <- v_enable
+                                                  VArr arr              <- v_arr
                                                   -- turn v_vals into a GateVal, using
                                                   -- VList if needed
                                                   -- For now, always
@@ -345,20 +356,24 @@ gate2func Gate { gate_op = op,
                                                                      else let Just (VList vals) = arr ! idx
                                                                           in
                                                                             VList $ splice (off,len) v_vals vals
-                                                       if not $ inRange (bounds arr) idx
+                                                       if not en ||
+                                                          not (inRange (bounds arr) idx)
                                                         then fail ""
                                                         else return $ VArr $ arr // [(idx, Just new_val)] )
-                                                     `catchError` -- if v_idx is Nothing
+                                                     `catchError` -- if not enabled, v_idx is Nothing
                                                                   -- or out of range
                                                      ( const $ return $ VArr arr )
 
-        ReadDynArray        -> \[v_arr,
-                                 v_idx]     -> do VArr arr              <- v_arr
+        ReadDynArray        -> \([v_enable,
+                                  v_arr,
+                                  v_idx])   -> do VScalar (ScBool en)   <- v_enable
+                                                  VArr arr              <- v_arr
                                                   let ans_arr           =  Just $ VArr arr
                                                   -- if the index is Nothing or out of range, the value is
-                                                  -- Nothing
+                                                  -- Nothing; likewise for enable = False
                                                   let val = (do VScalar (ScInt idx)   <- v_idx
-                                                                val    <- if not $ inRange (bounds arr) idx
+                                                                val    <- if (not en ||
+                                                                              not (inRange (bounds arr) idx))
                                                                             then fail ""
                                                                             else arr ! idx
                                                                 return val
@@ -461,21 +476,23 @@ classifyBinOp o = case o of
 
 
 
+
 -- NOTE: this should be kept synchronized with the LOG to 'gate_logger' in
 -- run-circuit.cc.
-showsVal :: Int -> Maybe GateVal -> ShowS
+showsValBinary :: Int -> Maybe GateVal -> ShowS
 -- show a Nothing value as a zero byte followed by the bytes of a zero integer; would be
 -- better to use "N" or such, but the evaluator would have a hard time picking Nothing
 -- values out of a list.
-showsVal p Nothing      = str "0" . str "," . (showsPrec p $ ScInt $ 0)
-showsVal p (Just g)     = case g of
+showsValBinary p Nothing    = str "0" . str "," . (showsScalarBinary p $ ScInt 0)
+showsValBinary p (Just g)   =
+                    case g of
                             Blank     -> str "Blank"
 
                             -- a Just scalar needs an explicit '1' in front of it. For
                             -- arrays, it's understood as they should always be Just; For
                             -- Lists a Nothing value does not make sense, as they come out
                             -- of array gates so always have at least the array value
-                            VScalar s -> str "1" . str "," . rec s
+                            VScalar s -> str "1" . str "," . showsScalarBinary p s
 
                             -- the array contains (Maybe GateVal)'s.
                             -- Surround every array element with braces '{' and '}'
@@ -492,16 +509,33 @@ showsVal p (Just g)     = case g of
                             -- list of bytes.
                             VList l   -> (punctuate (str ",") $ map rec l)
 
-        where rec x      = showsPrec p x
+        where rec x      = showsValBinary p x
+
+
+showsScalarBinary p s = case s of (ScInt i)     -> showsInt_bytes p i
+                                  -- show boolean as the corresponding Int
+                                  (ScBool b)    -> rec $ ScInt $ toInteger $ fromEnum b
+                                  (ScString s)  -> showsPrec p s
+    where rec = showsScalarBinary p
 
 
 
+showsValHuman p Nothing = str "Nothing"
+showsValHuman p (Just gv) =
+                case gv of
+                      Blank     -> str "Blank"
+                      VScalar s -> rec s
+                      VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
+                      VList l   -> str "vl " . showList l
+        where rec x = showsPrec p x -- not a recursion, but anyway.
+              str   = (++)
 
-{-
-showsValDetail p val = case val of
-                         VArr arr  -> showsPrec p arr
-                         _         -> showsVal p val
--}
+
+showsScalarHuman p s = case s of (ScInt i)     -> showsPrec p i
+                                 (ScBool b)    -> showsPrec p b
+                                 (ScString s)  -> showsPrec p s
+
+
 
 
 -- Show a Bits instance as a list of bytes
@@ -514,21 +548,24 @@ showsInt_bytes p i = let bytes = map (i `extrByte`) [0..(bitSize i) `div` 8 - 1]
           bitSize _         = 32
 
 
+-- make Show instances for GateVal and Scalar, for use with trace, logDebug, etc.
 instance (Show (Maybe GateVal)) where
-    showsPrec = showsVal
+    showsPrec = showsValHuman
 
 instance (Show Scalar) where
-    showsPrec p s = case s of (ScInt i)     -> showsInt_bytes p i
-                              -- show boolean as the corresponding Int
-                              (ScBool b)    -> showsPrec p $ ScInt $ toInteger $ fromEnum b
-                              (ScString s)  -> showsPrec p s
+    showsPrec = showsScalarHuman
+
+
+
 
 -- this is useful in buidling ShowS instances - it appends a string.
 str        = (++)
 
+
 -- concatenate a list of ShowS with a separator.
 punctuate :: ShowS -> [ShowS] -> ShowS
 punctuate sep l = showsList $ intersperse sep $ l
+
 
 
 showsList :: [ShowS] -> ShowS

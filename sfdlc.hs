@@ -49,7 +49,7 @@ import SashoLib
 
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
--- g_timestamp = "2006-10-30 13:09:53 sasho"
+-- g_timestamp = "2006-11-03 11:49:45 sasho"
 
 -- these two updated by subversion, with property "svn:keywords" set to at least
 -- "Date Revision"
@@ -107,7 +107,7 @@ main = do argv          <- getArgs
           case action of
             Compile         -> driveCompile infile hIn hOut opts
                                `trace` ("Compiling into " ++ fOut)
-            Run             -> driveRunFile hIn hOut
+            Run             -> driveRunFile (getRTFlags opts) hIn hOut
             MakeGraph       -> driveGraph   hIn hOut
             PruneGraph s d  -> doPruneGraph s d hIn hOut
 
@@ -205,8 +205,10 @@ optionControl = [
                             ]           (Opt.NoArg (RunFlag DoPrint))   "Generate Print gates from print() \
                                                                          \statements.\nIf not set, \
                                                                          \print statements are ignored."
-
     , Opt.Option ['v']      ["verbose"] (Opt.NoArg (RunFlag Verbose))   "Chatty output on stderr"
+
+    , Opt.Option [  ]       ["bindump"] (Opt.NoArg (RunFlag RunTraceBinary)) "Produce a run trace in binary, for\
+                                                                              \ comparing with the real runtime"
      ]
 
 
@@ -342,11 +344,11 @@ doPruneGraph start dist hIn hOut =
          `trace` ("doPruneGraph: cct_pruned is\n" ++ show cct_pruned)
 
 
-doRunCct gates_fh hOut = 
+doRunCct rtFlags gates_fh hOut = 
     do logmsg PROGRESS "Now running the circuit"
        gates    <- hGetContents gates_fh >>= readIO
        ins      <- Run.getUserInputs gates
-       vals     <- Run.formatRun gates ins
+       vals     <- Run.formatRun rtFlags gates ins
        mapM_ (hPutStrLn hOut) vals
 
        
