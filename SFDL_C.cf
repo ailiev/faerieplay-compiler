@@ -1,0 +1,284 @@
+-- -*- haskell -*-
+
+-- C front-end syntax for Faerieplay 
+
+-- NOTES:
+--
+-- There is 1 shift-reduce conflict due to the classical
+-- ambiguous if () {} else {}
+-- putting a "fi" at the end of an if statement solves those, but
+-- breaks current SFDL syntax.
+
+---------------
+
+
+-- NOTE: annotated with FIXUP the rules whose productions have to be 'canonicalized'
+-- before going to the TypeChecker.hs
+
+
+-- tokens with position information
+-- position token PIdent (letter (letter|digit|'_'|'\'')*) ;
+
+-----------
+-- ordinary rules
+-----------
+
+-- program
+Prog.           Prog    ::= [Dec] ;
+
+
+-- how are lists of Dec treated
+-- not all declarations need a ; terminator, so mention it in the actual definition if
+-- needed.
+terminator Dec "" ;
+
+-- only an Assignment statement needs a ";" terminator, so specify
+-- that only there
+terminator Stm "" ;
+
+
+-- this is needed for Ident lists in enum types and var declarations.
+separator nonempty Ident "," ;
+
+
+-- declarations
+ConstDecl.      Dec     ::= "const" Typ Ident "=" Exp                   ";" ;
+TypeDecl.       Dec     ::= "typedef"  Typ Ident                        ";" ;
+
+-- FIXME: it seems difficult to distinguish the following declaration types without
+-- keywords introducing them. Not sure if possible to work around this here, and leave it
+-- to semantic analysis to distinguish the cases.
+
+-- FIXUP: convert to VarDecl with an ArrayT
+ArrVarDecl.     Dec     ::= "var" Typ Ident "[" ConstExp "]"            ";" ;
+
+VarDecl.        Dec     ::= "var" Typ [Ident]                           ";" ;
+
+-- FunDecl is not semicolon-terminated
+FunDecl.        Dec     ::= "function" Typ Ident "(" [TypedName] ")"
+                            "{" [Dec] [Stm] "}" ;
+
+
+
+
+
+-----------
+-- types
+-----------
+
+-- NOTE: semantically, the size Exp for Int and arrays has to be a compile-time integer
+-- constant. TODO: May be better to define another subset of Exp for this purpose, ie. Int
+-- size and array length.
+
+-- FIXME: the bitsize of an Int should be an expression (even if a
+-- compile-time exp) and not just an Integer. This is not doable with
+-- this parse arrangement though, unless the <> syntax is dropped, eg
+-- have:
+IntT.          Typ      ::= "int" ;
+-- generic int, without a specified size. can only be used in a
+-- function signature I believe
+-- GenIntT.        Typ     ::= "Int" "<`>" ;
+
+BoolT.          Typ     ::= "bool" ;
+VoidT.          Typ     ::= "void" ;
+
+StructT.        Typ     ::= "struct" "{" [TypedName] "}"                ";" ;
+EnumT.          Typ     ::= "enum" "{" [Ident] "}"                      ";" ;
+ArrayT.         Typ     ::= Typ "[" ConstExp "]" ;
+RefT.           Typ     ::= Typ "&" ;
+SimpleT.        Typ     ::= Ident ;
+
+-- this is a declaration of a named typed variable, like in a function
+-- param list, or struct field
+TypedName.             TypedName         ::= Typ Ident ;
+
+-- fields in a struct are separated by commas
+-- a void type can be defined as an empty struct. (TODO: or should the
+-- compiler define one?)
+-- both the above requirements apply to function arg lists too
+-- separator TypedName "," ;
+-- [].             [TypedName]   ::= ;
+-- (:).            [TypedName]   ::= TypedName "," [TypedName] ;
+separator TypedName "," ;
+
+
+-- statements
+
+-- a block statement is a "{", followed by a list of Declarations, followed by a
+-- list of Statements, and closed by a "}".
+SBlock.     Stm     ::= "{" [Dec] [Stm] "}" ;
+
+-- assignment
+SAssC.      Stm     ::= AssStm                                          ";" ;
+
+SReturn.    Stm     ::= "return" Exp                                    ";" ;
+
+-- AND for debugging:
+-- the String in there is meant to be a fixed string
+SPrint.     Stm     ::= "print" "(" String "," [Exp] ")"                ";" ;
+separator Exp "," ;
+
+-- none of these statements need a trailing semicolon. so, only
+-- Assignment needs it (as specified above). NOTE: most likely the Stm's contained in the
+-- following generations are SBlock's.
+-- FIXUP convert to SFor; but, this is very non-trivial, requires 
+SForC.      Stm     ::= "for" "("
+                      Ident "=" Exp ";" -- initialization
+                      Exp           ";" -- stopping condiiton
+                      AssStm ")"   -- update assignment
+                      Stm ;     -- loop body
+-- as in the SFDL grammer, a sensible canonical form.
+internal SFor. Stm  ::= "for" "(" Ident "=" Exp "to" Exp ")" Stm ;
+
+SIf.        Stm     ::= "if" "(" Exp ")" Stm ;
+SIfElse.    Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
+
+-- various assignment statements
+-- assignment with an operator (maybe just "=")
+internal SAss.  Stm ::= LVal "=" Exp                                    ";" ;
+
+-- FIXUP: convert all to SAss
+ASOpAss.    AssStm  ::= LVal AssOp Exp ;
+ASPostFix.  AssStm  ::= LVal PostFixOp ;
+ASPreFix.   AssStm  ::= PostFixOp LVal ;
+
+AssId.      AssOp       ::= "=" ;
+AssPlus.    AssOp       ::= "+=" ;
+AssMinus.   AssOp       ::= "-=" ;
+AssTimes.   AssOp       ::= "*=" ;
+AssDiv.     AssOp       ::= "/=" ;
+AssMod.     AssOp       ::= "%=" ;
+
+PFIncr.     PostFixOp   ::= "++" ;
+PFDecr.     PostFixOp   ::= "--" ;
+
+
+
+
+-- to allow extra semicolons; no effect on the AST
+-- causes 3 shift-reduce conflicts
+-- _.        Stm      ::= Stm ";" ;
+
+
+LVal.           LVal    ::= Exp ;
+-- for type annotation
+internal LValT. LVal    ::= "cast" "<" Typ ">" "(" LVal ")" ; 
+
+
+--------------
+-- expressions
+--------------
+
+ConstExp.       ConstExp    ::= Exp ;
+
+
+EIdent.   Exp13     ::= Ident ;
+EInt.     Exp13     ::= Integer ;
+-- EString.  Exp13     ::= String ;
+ETrue.          Exp13    ::= "true" ;
+EFalse.         Exp13    ::= "false" ;
+
+
+EArr.           Exp12   ::= Exp12 "[" Exp "]" ;
+EStruct.        Exp12   ::= Exp12 "." Exp13 ;
+
+-- this causes some shift-reduce conflicts
+EFunCall.       Exp12   ::= Ident "(" [FunArg] ")" ;
+
+-- binary operators, grouped by precedence, numbered as in the C
+-- operator precedence man page
+ENot.           Exp11   ::= "!" Exp12 ;
+-- this appears to cause a bunch of shift-reduce conflicts
+ENeg.           Exp11   ::= "-" Exp12 ;
+EBNot.          Exp11   ::= "~" Exp12 ;
+
+ETimes.         Exp10   ::= Exp10 "*" Exp11 ;
+EDiv.           Exp10   ::= Exp10 "/" Exp11 ;
+EMod.           Exp10   ::= Exp10 "%" Exp11 ;
+
+EPlus.          Exp9    ::= Exp9 "+" Exp10 ;
+EMinus.         Exp9    ::= Exp9 "-" Exp10 ;
+
+ESL.            Exp8    ::= Exp9 "<<" Exp9 ;
+ESR.            Exp8    ::= Exp9 ">>" Exp9 ;
+
+ELt.            Exp7    ::= Exp8 "<" Exp8 ;
+EGt.            Exp7    ::= Exp8 ">" Exp8 ;
+ELtEq.          Exp7    ::= Exp8 "<=" Exp8 ;
+EGtEq.          Exp7    ::= Exp8 ">=" Exp8 ;
+
+EEq.            Exp6    ::= Exp7 "==" Exp7 ;
+ENeq.           Exp6    ::= Exp7 "!=" Exp7 ;
+
+EBAnd.          Exp5    ::= Exp5 "&" Exp6 ;
+EBXor.          Exp4    ::= Exp4 "^" Exp5 ;
+EBOr.           Exp3    ::= Exp3 "|" Exp4 ;
+
+EAnd.           Exp2    ::= Exp2 "&&" Exp3 ;
+EOr.            Exp1    ::= Exp1 "||" Exp2 ;
+
+coercions Exp 13 ;
+
+
+-- no need for all these internal things, as we have a separate intermediate format
+-- anyway.
+
+-- a coercion expression! right now only for the bitsize of Int values.
+-- internal ECoerce.       Exp     ::= Integer Exp ;
+
+-- a Max expression, used by the typechecker to indicate the bitsize of
+-- added values (max of the args, + 1)
+-- internal EMax.          Exp     ::= "_max" "(" Exp "," Exp ")" ;
+
+-- a bit-access expression          int       bit index
+-- internal EGetBit.       Exp     ::= Exp  "["    Exp  "]";
+
+-- a log expression, added by typechecker to compute the size of a counter
+-- variable
+-- internal ELog2.         Exp     ::= "_log2" "(" Exp ")" ;
+
+
+
+-- function call arguments
+-- this causes some shift-reduce conflicts
+FunArg.         FunArg  ::= Exp ;
+separator FunArg "," ;
+
+
+
+-- pragmas
+
+-- type annotated expression. this node will only be added by the
+-- typechecker, but the pretty-printer will print it following this
+-- syntax
+internal ExpT. Exp ::= Typ "(" Exp ")" ;
+
+-- a Type constructor for a function type (which is not syntactically declared,
+-- nor added to the AST), to hold a function's type in the TypeTable
+--                          return type    param types
+-- internal FuncT. Typ     ::= Typ            [Typ] ;
+
+-------
+-- "reduced" types, which are described by simpler types than the originals
+-------
+-- IntT with just an interger size, not an Exp
+internal RedIntT.       Typ     ::= Integer ;
+-- ArrayT with an interger size
+internal RedArrayT.     Typ     ::= Typ Integer ;
+-- a reduced EnumT?
+
+
+-- these should really be internal, as they are not used by the concrete syntax,
+-- but internally by FuncT the typechecker. BNFC does not do internal list defs
+-- though
+-- results in 2 unused rules by Happy
+[].    [Typ]   ::= ;
+(:).   [Typ]   ::= Typ [Typ] ;
+
+
+comment "/*" "*/" ;
+comment "//" ;
+comment "#" ;
+
+-- Typ is an entry point just for debugging
+entrypoints Prog, Stm, Exp ;

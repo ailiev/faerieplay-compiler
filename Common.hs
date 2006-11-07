@@ -3,7 +3,6 @@
 module Common where
 
 import Control.Monad.Error (Error, noMsg, strMsg, throwError)
-import qualified Data.Map                       as Map
 
 import qualified Debug.Trace                    as Trace
 

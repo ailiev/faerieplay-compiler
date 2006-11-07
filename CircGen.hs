@@ -844,7 +844,7 @@ genStm circ stm =
                                    fromJustMsg ("Conditional var " << testVar
                                                 << " not found, within " << stm)
              -- add in the enable gates
-             (circ', t_en_node, f_en_node)  <- prepareCondNode circ testGate
+             (circ', t_en_node, f_en_node)  <- prepareCondNodes circ testGate
 
              -- do the recursive generation for both branches, and
              -- save the resulting var scopes
@@ -951,26 +951,35 @@ genStm circ stm =
 
 -- | Make a gates to be the two condition nodes for this conditional scope - the
 -- true-branch enable node is an AND of
--- the current condition, and the next higher cond node; the false-branch enable is just a
--- NOT of the true-enable.
+-- the current condition, and the next higher cond node; the false-branch enable is 
+-- (parent AND (NOT cond))
 -- returns the circuit with the enable gates added in, as well as the two gate addresses.
-prepareCondNode cct this_cond
+prepareCondNodes cct this_cond
                             = do parentNode     <- getCondNode
-                                 [tNode, fNode] <- replicateM 2 nextInt
+                                 [nCondNode, tNode, fNode]  <- replicateM 3 nextInt
                                  d              <- getDepth
-                                 let true_ctx   = mkCtx $ Gate tNode
+                                 let not_cond_ctx =
+                                                  mkCtx $ Gate nCondNode
+                                                               BoolT
+                                                               (Un Im.Not)
+                                                               [this_cond]
+                                                               d
+                                                               [] []
+                                     true_ctx   = mkCtx $ Gate tNode
                                                                BoolT
                                                                (Bin Im.And)
-                                                               [this_cond, parentNode]
+                                                               [parentNode, this_cond]
                                                                d
                                                                [] []
                                      false_ctx  = mkCtx $ Gate fNode
                                                                BoolT
-                                                               (Un Im.Not)
-                                                               [tNode]
+                                                               (Bin Im.And)
+                                                               [parentNode, nCondNode]
                                                                d
                                                                [] []
-                                 return (addCtxs cct [true_ctx, false_ctx], tNode, fNode)
+                                 return (addCtxs cct [not_cond_ctx, true_ctx, false_ctx],
+                                         tNode,
+                                         fNode)
 
 -- what flags to attach to a gate for this 'var'.
 -- if it is called "main" and is a function return variable, it needs an Output flag.

@@ -8,7 +8,9 @@ GHCFLAGS += -v0
 
 GHCFLAGS += -odir $(ODIR) -hidir $(ODIR) 
 
-GHCFLAGS += -static
+# GHCFLAGS += -static
+
+# GHCFLAGS += -Wall
 
 # GHC = /home/sasho/minime/ghc/ghc-6.4.2/bin/i386-unknown-linux/ghc
 GHC = $(HOME)/work/minime/ghc-6.6-RC2-sasho/bin/ghc
@@ -68,14 +70,15 @@ PACKS = -package fgl -package Cabal
 all: $(ODIR)/sfdlc
 
 # basename of our grammar (.cf) file
-CF_ROOT = SFDL
+CF_ROOT = SFDL_C
 
 BNFCROOTS=Abs Lex Print Test ErrM Par Skel
-bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(BNFCROOTS))
+bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(word 1,$(BNFCROOTS)))
 # bnfc produces a misnamed Makefile, hence specifying that name here.
 $(bnfc_files): $(CF_ROOT).cf
 	bnfc -haskell -m -d $<
-	make -C SFDL
+	ed $(CF_ROOT)/Abs.hs < add-bnfc-derives.ed
+	make -C $(CF_ROOT)
 
 bnfc: $(bnfc_files)
 
@@ -102,7 +105,7 @@ hat:
 	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
 
 clean:
-	HFLAGS="$(GHCFLAGS)" hmake -clean sfdlc
+	HFLAGS="$(GHCFLAGS)" hmake -d$(ODIR) -clean sfdlc
 
 install: $(ODIR)/sfdlc
 	install -p $(ODIR)/sfdlc ~/leeds_root/bin/

@@ -1,3 +1,21 @@
+2006-11-07  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* Fixed a few warnings from a "-Wall" run of ghc, nothing serious
+	though.
+
+	* CircGen.hs (prepareCondNodes): Fixed to generate the enable
+	nodes correctly.
+
+	* Initial checkin of the (slightly modified and quite simplified)
+	C++ front end. Already works with parsing and initial fixup to
+	match the SFDL AST as much as possible.
+
+	* add-bnfc-derives.ed: new.
+
+	* SFDL_C.cf: new.
+
+	* SFDL_C_Fixup.hs: new.
+
 2006-11-04  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* sfdlc.hs (doRunCct): Pass on the runtime flags to simulator.

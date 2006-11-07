@@ -237,3 +237,9 @@ annotated with that scope's location. Since the innermost scope annotation is
 done last, a variable reference (LHS or RHS of an assignment) ends up annotated
 with the innermost/deepest scope where it is defined. Hence, the standard
 lexical scoping semantics.
+
+
+<date>Sat Nov  4 17:38:31 2006</date>
+
+RESOURCE USAGE:
+LOGN=4; D=5:

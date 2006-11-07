@@ -1,0 +1,11 @@
+1i
+{-# OPTIONS_GHC -fglasgow-exts #-}
+-- edited by sasho's add-bnfc-derives.ed script,
+-- to add Data and Typeable derivations.
+.
+/module/a
+import Data.Typeable            (Typeable)
+import Data.Generics            (Data)
+.
+g/deriving/s/deriving (/deriving (Data,Typeable,/
+wq

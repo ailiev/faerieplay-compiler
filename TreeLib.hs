@@ -5,7 +5,7 @@ import qualified Data.Tree                      as Tree
 import Control.Monad.Identity (runIdentity)
 
 import Prelude hiding (mapM,map)
-import qualified Prelude
+import qualified Prelude                        (mapM,map)
 
 
 ----------------------
@@ -14,7 +14,7 @@ import qualified Prelude
 
 -- | map a monadic function on all the nodes of a 'Tree'.
 mapM :: (Monad m) => (a -> m b) -> Tree.Tree a -> m (Tree.Tree b)
-mapM f t@(Tree.Node l ts) = do l'  <- f l
+mapM f   (Tree.Node l ts) = do l'  <- f l
                                ts' <- Prelude.mapM (mapM f) ts -- works for ts == []
                                return $ Tree.Node l' ts'
 
@@ -38,4 +38,4 @@ prune d (Tree.Node r subs)
 -- | The leaves of a 'Tree.Tree' in left-to-right order
 leaves :: Tree.Tree a -> [a]
 leaves (Tree.Node x [])         = [x]
-leaves (Tree.Node x subtrees)   = concatMap leaves subtrees
+leaves (Tree.Node _ subtrees)   = concatMap leaves subtrees

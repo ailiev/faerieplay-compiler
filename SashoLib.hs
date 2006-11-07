@@ -115,13 +115,13 @@ module SashoLib (
 		)
     where
 
-import List (isPrefixOf, union, intersperse, mapAccumL, partition)
+import List (isPrefixOf, intersperse, mapAccumL, partition)
 import qualified List
 
-import Monad (MonadPlus, mzero, mplus, msum, liftM)
+import Monad (MonadPlus, mzero, mplus, liftM)
 
-import Control.Monad.Error (Error, noMsg, ErrorT, runErrorT, MonadError(..))
-import Control.Monad.Identity (runIdentity)
+import Control.Monad.Error (MonadError(..))
+-- import Control.Monad.Identity (runIdentity)
 
 import qualified    Text.PrettyPrint            as PP
 
@@ -129,12 +129,12 @@ import Control.Monad.Trans (MonadTrans, lift)
 
 import Numeric                      (showHex)
 
-import Data.Bits            ((.&.), (.|.))
+import Data.Bits            ((.&.))
 import qualified Data.Bits                      as Bits
 
 import qualified Data.Map                       as Map
 
-import qualified Debug.Trace                    as Trace
+-- import qualified Debug.Trace                    as Trace
 
 
 
@@ -266,7 +266,7 @@ dropWhileList p xs@(x:xs')
     | otherwise =  xs
 -}
 
-spanList p []            = ([],[])
+spanList _ []            = ([],[])
 spanList p xs@(x:xs') 
             | p xs      =  (x:ys,zs) 
             | otherwise =  ([],xs)

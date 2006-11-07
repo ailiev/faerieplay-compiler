@@ -10,10 +10,10 @@ import Text.PrettyPrint
 -- import Tree
 
 import List (intersperse)
-import Maybe (fromJust)
+import Maybe ()
 
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
-import Control.Monad.Error (Error, throwError, catchError, MonadError)
+import Control.Monad.Error (catchError, MonadError)
 import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
@@ -21,7 +21,7 @@ import qualified Data.Map as Map
 import SashoLib
 import qualified Container as Cont
 
-import Common (ErrMonad, MyError(..), MyErrorCtx, throwErrorCtx, trace)
+import Common (MyError(..), MyErrorCtx, throwErrorCtx, trace)
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -307,8 +307,8 @@ data BinOp =
 
 
 data UnOp =
-    Not
-  | BNot
+    Not                         -- ^ logical not
+  | BNot                        -- ^ binary not
   | Neg
 -- and internal:
   | Log2
@@ -824,8 +824,8 @@ docExp e = case e of
     (EArrayInit name elem_size len)  -> text "ArrayInit" <> text name <>
                                         parens (int elem_size <> comma <> integer len)
     -- throw away the expression type if not needed (ie. used above)
-    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
---    (ExpT t e)          -> docExp e
+--    (ExpT t e)          -> docTyp t <> (parens $ docExp e)
+    (ExpT t e)          -> docExp e
 
 
 -- print a Typ for human eyes
