@@ -18,7 +18,12 @@ import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
 
-import SashoLib
+import qualified SFDL_C.Abs                             as CAbs
+import qualified SFDL_C.Print                           as BNFCPrint
+
+import SashoLib                                         as SL
+
+
 import qualified Container as Cont
 
 import Common (MyError(..), MyErrorCtx, throwErrorCtx, trace)
@@ -139,6 +144,7 @@ data Stm =
    SBlock VarSet [Stm]
  | SAss Exp Exp
  | SPrint String [Exp]
+
  | SFor                         -- ^ A for-loop
    Var                          -- ^ The loop counter variable
    Exp                          -- ^ The start value; should be static
@@ -149,10 +155,29 @@ data Stm =
                                 -- single statement may be expanded to multiple ones
                                 -- during canonicalization, so have a
                                 -- list here. No need to carry a VarSet though.
+
+ | SFor_C                       -- ^ A for loop from the C front end
+   Var                          -- ^ The loop counter variable
+   Exp                          -- ^ Start value
+   Exp                          -- ^ stopping condition
+   AssStm                       -- ^ update assignment
+   [Stm]                        -- ^ loop body, list for same reason as above.
+
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
+
   deriving (Eq,Ord
            , Show, Read
            )
+
+
+-- an assignment
+data AssStm =
+   AssStm Exp AssOp Exp
+  deriving (Eq,Ord,Show,Read)
+
+-- the various assignment operators, like "+=" in C
+type AssOp = CAbs.AssOp
+
 
 
 -- an offset-length pair (in units of "primitive types", ie Int, Enum
@@ -504,6 +529,7 @@ strip_var = strip_vflags . stripScope
 
 -- here, the error class is fixed, but the associated monad is generic, so could be a
 -- State monad, or nothing
+-- FIXME: does not do binary operations which return a boolean.
 evalStatic :: (MonadError MyErrorCtx m) => Exp -> m Integer
 evalStatic e = case e of
                       (BinOp op e1 e2)  -> do [i1,i2] <- mapM evalStatic [e1,e2]
@@ -528,10 +554,10 @@ tryEvalStaticBin staticOp expOp x_e y_e = do [x, y] <- mapM evalStatic [x_e, y_e
                                                       else BinOp expOp x_e y_e
 
 -- a helper which just dies in case of error
-evalStaticOrDie e = either (\e -> error ("evalStaticOrDie on " ++ show e ++
-                                         "failed: " ++ show e))
-                           (id)
-                           (evalStatic e)
+evalStaticOrDie exp = either (\err -> error ("evalStaticOrDie on " ++ show exp ++
+                                             "failed: " ++ show err))
+                             (id)
+                             (evalStatic exp)
 
 
 evalLit (LInt i)  = return i
@@ -676,29 +702,14 @@ mapStmM f_s f_e s = do let (ss, es, scons) = stmChildren s
 mapStm :: (Stm -> Stm) -> (Exp -> Exp) -> Stm -> Stm
 mapStm f_s f_e s = runIdentity (mapStmM (myLiftM f_s) (myLiftM f_e) s)
 
-{-
--- generalize a bit to allow [Stm] to be produced
-mapStmLM :: (Monad m) => (Stm -> m [Stm]) -> (Exp -> m Exp) -> Stm -> m [Stm]
-mapStmLM f_s f_e s = do let (ss, es, scons) = stmChildren s
-                        new_es  <- mapM (mapExpM  f_e) es
-                        new_sss <- mapM (mapStmLM f_s f_e) ss
-                        let new_ss = map ((flip scons) new_es) new_sss
-                        mapM f_s new_ss
--}
 
-{-
--- even more general
-mapStmGenM :: (Monad m) => (Stm -> m a) -> (Exp -> m Exp) -> Stm -> m a
-mapStmGenM f_s f_e s = do let (ss, es, scons) = stmChildren s
-                          new_es <- mapM (mapExpM f_e) es
-                          new_ss <- mapM (mapStmGenM f_s f_e) ss
-                          f_s (scons (new_ss . conv) new_es)
--}
 
 
 
 instance Num Exp where
     -- some specific cases, which can be simplified
+    -- NOTE: in all the specific cases, we're using the bijection of (ELit . LInt) from
+    -- Integer to Exp. Can this be mechanized?
     (ELit (LInt i1)) + (ELit (LInt i2)) = (ELit $ LInt $ i1 + i2)
     e1 + e2 = BinOp Plus e1 e2
 
@@ -709,32 +720,27 @@ instance Num Exp where
     e1 - e2 = BinOp Minus e1 e2 
 
     negate (ELit (LInt i))              = (ELit $ LInt (-1))
+    negate (ELit (LBool _))             = error "Cannot negate a boolean"
     negate e                            = UnOp Neg e
 
-    abs      = id
-    signum   = id
-    fromInteger i = ELit $ LInt $ fromInteger i
+    abs (ELit (LInt i))                 = ELit $ LInt $ abs i
+    abs _                               = error "abs not implemented on non-constant Exp"
+
+    signum (ELit (LInt i))              = ELit $ LInt $ signum i
+    signum _                            = error "signum not implemented on non-constant Exp"
+
+    fromInteger i                       = ELit $ LInt $ fromInteger i
 
 {-
-  -- doesnt work, as <= has to return Bool and nothing else (like an expression which will
-  -- evaluate to some bool later
+
+  -- doesnt work in general, as <= has to return Bool and nothing else (like an expression
+  -- which will evaluate to some bool later
+
 instance Ord Exp where
     (ELit (LInt i1))    <=  (ELit (LInt i2))    = i1 <= i2
     e1                  <=  e2                  = BinOp $ LtEq e1 e2
 -}
 
-
-
-
----------------------------
--- Tree instances
----------------------------
-{-
-instance Tree Exp where
-    children e = [e]
-    nodeExtr e     = 1
-    nodeCons i es = 
--}
 
 
 ----------------------------
@@ -791,6 +797,12 @@ docStm (SPrint prompt xs)               = cat [text "print",
                                                              comma,
                                                              sep $ punctuate comma
                                                                              (map docExp xs)]]
+
+docAssStm (AssStm lval op rval)         = cat [docExp lval, SL.doc op, docExp rval]
+
+instance DocAble AssOp where
+    -- use the machinery in the BNFC-generated code.
+    doc op = text $ BNFCPrint.render $ BNFCPrint.prt 0 op
 
 
 docExp e = case e of
@@ -852,6 +864,7 @@ docTyp t =
                                 text " -> ",
                                 docTyp t]
       (RefT t)          -> docTyp t <+> text "&"
+
 
 -- print a Typ for the C++ runtime
 docTypMachine t = 
@@ -935,6 +948,11 @@ instance StreamShow Prog where
 instance StreamShow Stm where
     strShows = showsPrec 0 . docStm
 
+instance StreamShow AssStm where
+    strShows = showsPrec 0 . docAssStm
+
+instance StreamShow AssOp where
+    strShows = showsPrec 0 . SL.doc
 
 instance StreamShow Exp where
     strShows = showsPrec 0 . docExp

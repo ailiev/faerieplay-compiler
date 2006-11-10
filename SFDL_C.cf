@@ -24,7 +24,9 @@
 -----------
 
 -- program
-Prog.           Prog    ::= [Dec] ;
+-- NOTE: a bit contrived to allow a name for a program. a macro "program" should be
+-- defined for the C compiler.
+Prog.           Prog    ::= "program" "(" Ident ")" ";" [Dec] ;
 
 
 -- how are lists of Dec treated
@@ -42,15 +44,20 @@ separator nonempty Ident "," ;
 
 
 -- declarations
-ConstDecl.      Dec     ::= "const" Typ Ident "=" Exp                   ";" ;
-TypeDecl.       Dec     ::= "typedef"  Typ Ident                        ";" ;
+
+-- NOTE: type of constants if limited for now.
+ConstDecl.      Dec     ::= "const" "int" Ident "=" Exp                 ";" ;
+
+-- FIXUP: order is wrong, convert to TypeDecl
+TypeDecl_C.     Dec     ::= "typedef"  Typ Ident                        ";" ;
 
 -- FIXME: it seems difficult to distinguish the following declaration types without
--- keywords introducing them. Not sure if possible to work around this here, and leave it
--- to semantic analysis to distinguish the cases.
+-- keywords introducing them. Probably need to complicate the grammar to avoid this (see
+-- any of the published C grammars), just use the keywords for now.
 
+-- FIXME: put in ConstExp for the length, also need to touch TypeChecker.hs for that.
 -- FIXUP: convert to VarDecl with an ArrayT
-ArrVarDecl.     Dec     ::= "var" Typ Ident "[" ConstExp "]"            ";" ;
+ArrVarDecl.     Dec     ::= "var" Typ Ident "[" Exp "]"            ";" ;
 
 VarDecl.        Dec     ::= "var" Typ [Ident]                           ";" ;
 
@@ -58,6 +65,8 @@ VarDecl.        Dec     ::= "var" Typ [Ident]                           ";" ;
 FunDecl.        Dec     ::= "function" Typ Ident "(" [TypedName] ")"
                             "{" [Dec] [Stm] "}" ;
 
+
+internal TypeDecl. Dec  ::= "type" Ident "=" Typ                        ";" ;
 
 
 
@@ -70,11 +79,8 @@ FunDecl.        Dec     ::= "function" Typ Ident "(" [TypedName] ")"
 -- constant. TODO: May be better to define another subset of Exp for this purpose, ie. Int
 -- size and array length.
 
--- FIXME: the bitsize of an Int should be an expression (even if a
--- compile-time exp) and not just an Integer. This is not doable with
--- this parse arrangement though, unless the <> syntax is dropped, eg
--- have:
-IntT.          Typ      ::= "int" ;
+-- FIXUP: convert to 32-bit IntT
+IntT_C.         Typ     ::= "int" ;
 -- generic int, without a specified size. can only be used in a
 -- function signature I believe
 -- GenIntT.        Typ     ::= "Int" "<`>" ;
@@ -84,9 +90,13 @@ VoidT.          Typ     ::= "void" ;
 
 StructT.        Typ     ::= "struct" "{" [TypedName] "}"                ";" ;
 EnumT.          Typ     ::= "enum" "{" [Ident] "}"                      ";" ;
-ArrayT.         Typ     ::= Typ "[" ConstExp "]" ;
+-- FIXME: use ConstExp here.
+ArrayT.         Typ     ::= Typ "[" Exp "]" ;
 RefT.           Typ     ::= Typ "&" ;
 SimpleT.        Typ     ::= Ident ;
+
+-- FIXME: use ConstExp here.
+internal IntT.  Typ     ::= "int" "<" Exp ">" ;
 
 -- this is a declaration of a named typed variable, like in a function
 -- param list, or struct field
@@ -109,6 +119,7 @@ separator TypedName "," ;
 SBlock.     Stm     ::= "{" [Dec] [Stm] "}" ;
 
 -- assignment
+-- FIXUP: convert to SAss
 SAssC.      Stm     ::= AssStm                                          ";" ;
 
 SReturn.    Stm     ::= "return" Exp                                    ";" ;
@@ -121,8 +132,7 @@ separator Exp "," ;
 -- none of these statements need a trailing semicolon. so, only
 -- Assignment needs it (as specified above). NOTE: most likely the Stm's contained in the
 -- following generations are SBlock's.
--- FIXUP convert to SFor; but, this is very non-trivial, requires 
-SForC.      Stm     ::= "for" "("
+SFor_C.     Stm     ::= "for" "("
                       Ident "=" Exp ";" -- initialization
                       Exp           ";" -- stopping condiiton
                       AssStm ")"   -- update assignment
@@ -137,10 +147,11 @@ SIfElse.    Stm     ::= "if" "(" Exp ")" Stm "else" Stm ;
 -- assignment with an operator (maybe just "=")
 internal SAss.  Stm ::= LVal "=" Exp                                    ";" ;
 
--- FIXUP: convert all to SAss
+-- FIXUP: convert all to ASOpAss
 ASOpAss.    AssStm  ::= LVal AssOp Exp ;
 ASPostFix.  AssStm  ::= LVal PostFixOp ;
 ASPreFix.   AssStm  ::= PostFixOp LVal ;
+
 
 AssId.      AssOp       ::= "=" ;
 AssPlus.    AssOp       ::= "+=" ;

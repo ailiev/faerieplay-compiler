@@ -21,20 +21,28 @@ import Control.Monad.Trans (lift)
 import Common (MyError(..),MyErrorCtx, ErrCtxMonad, trace, logDebug)
 
 import SashoLib ((<<), ilog2,
-                 myLiftM, concatMapM, (>>==), mapTuple2,
+                 myLiftM, concatMapM, (>>==), mapTuple2, projSnd,
                  StreamShow(..)
                 )
 
-import Stack                            (Stack(..), maybeLookup)
+import Stack                           (Stack(..), maybeLookup,modify_first_map)
 
 import qualified Container as Cont
 
 import qualified ErrorWithContext                   as EWC
 
-
+--
 -- the abstract syntax tree description
-import qualified SFDL.Abs as T
-import qualified SFDL.Print as Print
+-- NOTE: this is where the syntax used is decided.
+--
+-- if using C 
+import qualified SFDL_C.Abs as T
+import qualified SFDL_C.Print as Print
+
+-- if using SFDL:
+-- import qualified SFDL.Abs as T
+-- import qualified SFDL.Print as Print
+
 
 import qualified Intermediate as Im
 
@@ -46,11 +54,6 @@ type TypeError = MyErrorCtx
 data BinOpType = Arith | Logical | Binary | Comparison | NotBin deriving (Eq,Show)
 
 
--- data EntType = Var | Func | Type | Const deriving (Eq,Show)
-
--- we'll have a stack of these, one per active scope, during
--- typechecking
--- type VarTable = Map.Map Im.EntName (Im.Typ,Im.Var)
 
 -- we go with integer consts for now
 type ConstTable = Map.Map Im.EntName Integer
@@ -59,7 +62,9 @@ type ConstTable = Map.Map Im.EntName Integer
 data TCState = TCS { vars   :: [Im.VarTable],
                      types  :: Im.TypeTable,
                      consts :: ConstTable,
-                     funcs  :: Im.FuncTable    }
+                     funcs  :: Im.FuncTable,
+                     func_stack :: [String] -- ^ Stack of function definitions.
+                   }
     deriving (Show,Eq,Ord)
 
 
@@ -87,7 +92,9 @@ typeCheck :: T.Prog -> ErrCtxMonad Im.Prog
 typeCheck p = let startState = TCS { vars   = [Map.empty],
                                      consts = Map.empty,
                                      funcs  = Map.empty,
-                                     types  = Map.empty  }
+                                     types  = Map.empty,
+                                     func_stack = Stack.empty
+                                   }
 --                  out = St.runStateT (checkProg p) startState
                   -- we do not need the end state.
                   (val_or_err,state') = St.runState (runErrorT $ checkProg p) startState
@@ -99,15 +106,16 @@ typeCheck p = let startState = TCS { vars   = [Map.empty],
 
 -- take a function which takes and returns the ConstTable, and project it onto
 -- the whole MyStateT, keeping the other fields fixed
--- projFromConst :: (ConstTable -> ConstTable) -> MyStateT -> MyStateT
-projFromConst  f ms@(TCS {consts = ct})   = ms { consts = f ct }
+-- projToConst :: (ConstTable -> ConstTable) -> MyStateT -> MyStateT
+projToConst  f ms@(TCS {consts = ct})   = ms { consts = f ct }
 
-projFromTypes f ms@(TCS {types = ts})    = ms { types = f ts }
+projToTypes f ms@(TCS {types = ts})    = ms { types = f ts }
 
-projFromFuncs f ms@(TCS {funcs = fs})    = ms { funcs = f fs }
+projToFuncs f ms@(TCS {funcs = fs})    = ms { funcs = f fs }
 
-projFromVars f ms@(TCS {vars = vs})    = ms { vars = f vs }
+projToVars f ms@(TCS {vars = vs})    = ms { vars = f vs }
 
+projToFuncStack f ms@(TCS {func_stack = x})    = ms { func_stack = f x }
 
 
 ------------
@@ -143,6 +151,8 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        -- now prepare the new scope for this function, by pushing a new empty
        -- Map to the top of the SymbolTable stack
        pushScope
+       -- push the name on to the func name stack
+       St.modify (projToFuncStack $ push name)
        -- check the formal args
        im_args <- mapM checkTypedName args
        -- add the formal argument variables to the scope
@@ -156,6 +166,7 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        addToVars im_t [Im.RetVar] name
        mapM checkDec decs
        im_stms <- mapM checkStm stms
+       St.modify (projToFuncStack pop)
        var_tab <- popScope
        -- add this function's type
        addToTypes name (Im.FuncT im_t (map snd im_args))
@@ -193,7 +204,7 @@ checkDec d@(T.ConstDecl (T.Ident name) val) =
     setContext d$
     do im_val   <- checkExp val
        int_val  <- Im.evalStatic im_val
-       St.modify $ projFromConst $ Map.insert name int_val
+       St.modify $ projToConst $ Map.insert name int_val
 
 {-
 checkDec (T.ConstDecl (T.Ident name) _)          =
@@ -244,7 +255,7 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
     do new_lo <- checkExp lo
        new_hi <- checkExp hi
        pushScope
-       checkLoopCounter s cnt_str
+       checkLoopCounter cnt_str
        -- add an Int to the scope symbol table for the loop counter
        -- give it a LoopCounter and Immutable flag
        let flags = [Im.LoopCounter, Im.Immutable]
@@ -255,7 +266,30 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
        popScope
        let counterVar = (Im.VFlagged flags (Im.VSimple cnt_str))
        return (Im.SFor counterVar new_lo new_hi [new_stm])
-                                   
+
+
+-- the for-loop coming from the C front end
+checkStm s@(T.SFor_C cnt@(T.Ident cnt_str)
+                     start_e
+                     stop_cond
+                     update_ass
+                     stm)                           =
+    setContext s $
+    do checkLoopCounter cnt_str
+       new_start_e      <- checkExp start_e
+       new_stop_cond    <- checkExp stop_cond
+       new_update_ass   <- checkAssStm update_ass
+       pushScope
+       -- the loop counter must already be in the symbol table, or the C compilation would
+       -- fail. but, now need to add flags to it.
+       let flags        = [Im.LoopCounter]
+       modVar cnt_str (Im.add_vflags flags)
+       new_stm          <- checkStm stm
+       popScope
+       let ctrvar       = (Im.VFlagged flags (Im.VSimple cnt_str))
+       return (Im.SFor_C ctrvar new_start_e new_stop_cond new_update_ass [new_stm])
+
+
 
 checkStm s@(T.SIf cond stm) =
     setContext s $
@@ -274,6 +308,33 @@ checkStm s@(T.SIfElse cond stm1 stm2) =
        let locals2 = extractLocals new_stm2
        return $ Im.SIfElse new_cond (locals1, new_stm1s)
                                     (locals2, [new_stm2])
+
+-- | replace 'return' with an assignment to a var with same name as enclosing function.
+checkStm s@(T.SReturn exp)              =
+    setContext s $
+    do new_exp      <- checkExp exp
+       -- find the enclosing function
+       func_stack   <- St.gets func_stack
+       fname        <- if Stack.isEmpty func_stack
+                       then throwErr 42 $ "return called while not inside a function definition"
+                       else return $ Stack.peek func_stack
+       -- ASSUME: the enclosing function def has added the return var to the var table.
+       -- FIXME: the lval could use an ExpT probably, not sure.
+       return $ Im.SAss (Im.EVar $ Im.add_vflags [Im.RetVar] $ Im.VSimple fname)
+                        new_exp
+
+
+
+
+
+
+
+-- there should be only simple ASOpAss left at this point, after the fixup.
+checkAssStm ass@(T.ASOpAss lval op rval) =
+    setContext ass $
+    do new_lval     <- checkLVal lval
+       new_rval     <- checkExp rval
+       return $ Im.AssStm new_lval op new_rval
 
 
 
@@ -325,7 +386,7 @@ checkTyp t@(T.IntT i)           = setContext t $
 
 -- FIXME: this should only occur in the context of function
 -- parameters, should check it:
-checkTyp (T.GenIntT)            = return Im.GenIntT
+-- checkTyp (T.GenIntT)            = return Im.GenIntT
 checkTyp T.BoolT                = return Im.BoolT
 checkTyp T.VoidT                = return Im.VoidT
 -- do a partial processing of EnumT, without sticking its name in
@@ -360,7 +421,7 @@ checkExp :: T.Exp -> StateWithErr Im.Exp
 -- for all these Exp's, want to figure out which are const and 
 checkExp e@(T.EIdent (T.Ident nm)) =
     setContext e $
-    do ent <- extractEnt e nm
+    do ent <- extractEnt nm
        case ent of
                 -- same as a literal int!
                 EntConst i         -> checkExp (T.EInt i)
@@ -554,7 +615,8 @@ checkLVal :: T.LVal -> StateWithErr Im.Exp
 -- an identifier needs special treatment: don't assign to consts etc; only
 -- assign to variables
 checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
-    do ent <- extractEnt lv name
+    setContext lv $
+    do ent <- extractEnt name
        case ent of
           (EntVar (t,v)) | not $ elem Im.Immutable (Im.vflags v) 
                   -> return (Im.ExpT t $ Im.EVar v)
@@ -587,12 +649,12 @@ foo i
 -}
 
 
-checkLoopCounter :: (StreamShow a) => a -> Im.Ident -> StateWithErr ()
-checkLoopCounter ctx name =
+checkLoopCounter :: Im.Ident -> StateWithErr ()
+checkLoopCounter name =
     -- if extractEnt returns an error, that's fine, we don't want to
     -- propagate it, hence we replace it with a dummy Entity value
     -- (EntConst 0)
-    do var <- extractEnt ctx name `catchError` (const $ return $ EntConst 0)
+    do var <- extractEnt name `catchError` (const $ return $ EntConst 0)
        case var of
          (EntVar (_,v))
              | elem Im.LoopCounter (Im.vflags v)  -> throwErr 42 $ "Loop counter " << name
@@ -702,8 +764,8 @@ data Entity = EntConst Integer
             | EntVar   (Im.Typ,Im.Var)
             | EntType  Im.Typ
 
-extractEnt :: (StreamShow a) => a -> Im.EntName -> StateWithErr Entity
-extractEnt ctx name = do TCS {types=ts,
+extractEnt :: Im.EntName -> StateWithErr Entity
+extractEnt     name = do TCS {types=ts,
                               consts=cs,
                               funcs=fs,
                               vars=vs} <- St.get
@@ -711,6 +773,8 @@ extractEnt ctx name = do TCS {types=ts,
                            (Just ent)   -> return ent
                            _            -> throwErr 42 $ "Identifier " << name
                                                            << " not in scope"
+
+
 
 -- the first one that succeeds will be the result (which is what msum
 -- does in the Maybe monad)
@@ -788,10 +852,10 @@ checkArith op e1 e2 =
                                                       << " has non-integer params"
 -}
 
--- the parameters must have the same type, and can be Bool, Int or Enum
+-- the parameters must have the same type, modulo RefT, and can be Bool, Int or Enum
 checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
-    do full_t1 <- checkExpExpand t1
-       full_t2 <- checkExpExpand t2
+    do full_t1 <- checkExpExpand t1 >>== Im.stripRefQual
+       full_t2 <- checkExpExpand t2 >>== Im.stripRefQual
        let answer = (Im.ExpT Im.BoolT (Im.BinOp op e1 e2))
        case (full_t1, full_t2) of
           (Im.BoolT,  Im.BoolT)                         -> return answer
@@ -800,7 +864,7 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
           _                      -> throwErr 42 $ "Args to comparison expression "
                                                   << answer
                                                   << " are of incompatible types "
-                                                  << full_t1 << " and " << full_t2
+                                                  << show (full_t1) << " and " << show(full_t2)
 
 -- a type expand function for the check expression functions above
 checkExpExpand = Im.expandType [Im.DoRefs, Im.DoTypeDefs]
@@ -816,7 +880,7 @@ mkVarSet = Cont.fromList . (map (snd . snd)) . Map.toAscList
 
 
 -- push and pop a SymbolTable scope
-pushScope = St.modify $ projFromVars $ (push Map.empty)
+pushScope = St.modify $ projToVars $ (push Map.empty)
 -- want to return the scope here
 popScope  = do ms@(TCS {vars = vs}) <- St.get
                let scope = peek vs
@@ -853,12 +917,12 @@ computeStaticExp e
 
 addToFuncs :: Im.EntName -> Im.Func -> StateWithErr ()
 addToFuncs name f = St.modify $
-                    projFromFuncs $
+                    projToFuncs $
                     Map.insert name f
 
 addToTypes :: Im.EntName -> Im.Typ -> StateWithErr ()
 addToTypes name typ = St.modify $
-                      projFromTypes $
+                      projToTypes $
                       Map.insert name typ
 
 
@@ -870,11 +934,23 @@ name2var flags name = let v' = (Im.VSimple name)
                         else (Im.VFlagged flags v')
 
 
--- take care of constructing a VFlagged if there are flags
+-- add a variable to the table.
+-- takes care of constructing a VFlagged if there are flags
 addToVars typ flags name = St.modify $
-                           projFromVars $
+                           projToVars $
                            modtop $
                            Map.insert name (typ, name2var flags name)
+
+-- | Modify the named variable with a function.
+-- Error if it does not exist in the var tables.
+modVar :: String -> (Im.Var -> Im.Var) -> StateWithErr ()
+modVar name f               = do varmaps   <- St.gets vars
+                                 -- if the update succeeds, insert the new varmaps,
+                                 -- otherwise report error.
+                                 maybe (throwErr 42 $ "Variable " << name << " not declared")
+                                       (\maps   -> St.modify $ projToVars $ const maps)
+                                       (modify_first_map name (projSnd f) varmaps)
+                                           
 
 
 lookupType :: String -> StateWithErr Im.Typ
@@ -971,6 +1047,7 @@ instance StreamShow T.Exp   where strShow  = Print.printTree
 instance StreamShow T.LVal  where strShow  = Print.printTree
 instance StreamShow T.Dec   where strShow  = Print.printTree
 instance StreamShow T.Typ   where strShow  = Print.printTree
+instance StreamShow T.AssStm   where strShow  = Print.printTree
 
 
 testDecs = [ T.ConstDecl (T.Ident "x") (T.EInt 10),

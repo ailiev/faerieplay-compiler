@@ -4,6 +4,8 @@ module Stack where
 import Monad                        (MonadPlus, msum)
 import qualified Data.Map           as Map
 
+import SashoLib                     (modifyFirst)
+
 
 -- | A class of types with Stack-like functionality. Not sure if anything other than a
 -- list will be used here.
@@ -18,6 +20,10 @@ class (Functor s) => Stack s where
     modtop :: (a -> a) -> s a -> s a
     -- | convert to a list, keeping the list order same as the stack order.
     toList :: s a -> [a]
+    -- | an empty stack
+    empty   :: s a
+    -- | is a stack empty?
+    isEmpty :: s a -> Bool
 
 
 instance Stack [] where
@@ -26,6 +32,8 @@ instance Stack [] where
     push x s = (x:s)
     modtop f (x:xs) = f x : xs
     toList  = id
+    empty   = []
+    isEmpty = null
 
 
 
@@ -41,3 +49,13 @@ findInStack f stack = msum $ toList $ fmap f stack
 -- FIXME: rename to lookupInStack
 maybeLookup :: Ord k => k -> [Map.Map k a] -> Maybe a
 maybeLookup key maps = findInStack (Map.lookup key) maps
+
+
+
+-- | Lookup a value in a stack of maps, and then modify that value with a function
+-- return Nothing if lookup fails, otherwise the new stack
+modify_first_map :: Ord k => k -> (a -> a) -> [Map.Map k a] -> Maybe [Map.Map k a]
+modify_first_map k f =  modifyFirst (-- in Maybe monad
+                                     \map -> do val     <- Map.lookup k map
+                                                return  $ Map.insert k (f val) map
+                                    )

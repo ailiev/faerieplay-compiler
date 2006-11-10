@@ -7,5 +7,5 @@
 import Data.Typeable            (Typeable)
 import Data.Generics            (Data)
 .
-g/deriving/s/deriving (/deriving (Data,Typeable,/
+g/deriving/s/deriving (/deriving (Data,Typeable,Read,/
 wq

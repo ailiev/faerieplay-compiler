@@ -31,22 +31,19 @@ module SashoLib (
          tr,
          trs,
 
---         mkList,
-
          maybeMapAdjust,
          fromJustMsg,
          maybeApply,
          MaybeT(..),
                     
         modifyListHead,
+        modifyFirst,
         mapOnTail,
         interleave,
 
         nubOrds,
 
         compareWith,
-
-        applyWithDefault,
 
         strictEval,
 
@@ -119,6 +116,8 @@ import List (isPrefixOf, intersperse, mapAccumL, partition)
 import qualified List
 
 import Monad (MonadPlus, mzero, mplus, liftM)
+
+import Maybe                                    (isNothing, fromJust)
 
 import Control.Monad.Error (MonadError(..))
 -- import Control.Monad.Identity (runIdentity)
@@ -343,7 +342,9 @@ mapAccumDupsBy eq f start xs = snd $ mapAccumL g [] xs
                               y -- new list element
                              )
 
-
+-- | extract one of a list's elements, which matches some predicate; and the rest of the
+-- list.
+extractOne :: (a -> Bool) -> [a] -> (Maybe a, [a])
 extractOne   p  xs = let (matches, rest) = partition p xs
                      in
                        case matches of
@@ -360,17 +361,14 @@ unfoldrM f x  = do maybe_res <- f x
                                                       return (y : rest)
                                   (Nothing)     -> return []
 
+-- actually available in Control.Monad library, but not the haskell 98 Monad library.
 replicateM :: (Monad m) => Int -> m a -> m [a]
-replicateM = sequence ... replicate
+replicateM i = sequence . replicate i
 
 -- | repeat a monadic action to infinity.
 repeatM :: (Monad m) => m a -> m [a]
 repeatM = sequence . repeat
 
-{-
-fooM :: (Monad m) => (a -> m b) -> [m a] -> m [b]
-fooM f xs = 
--}
 
 sumM ::  (Num a, Monad m) => [a] -> m a
 sumM = myLiftM sum
@@ -400,12 +398,6 @@ strictList :: [a] -> [a]
 strictList ls@(a : more) = seq a $ seq (strictList more) $ ls
 strictList ls = ls
 
-
--- apply f to (Maybe x), using def if x is Nothing
-applyWithDefault :: (a -> a) -> a -> Maybe a -> a
-applyWithDefault f def x = case x of
-                               Just x'  -> f x'
-                               Nothing  -> def
 
 
 -- | force a strict evaluation of a value, returning it
@@ -682,6 +674,18 @@ mapSplice f g (offset,len) l = let before = take offset l
 sublist off len = take len . drop off
 
 
+-- | modify a list at the first element where a Maybe function succeeds; leave all
+-- other elements the same.
+-- returns Nothing if f fails everywhere.
+modifyFirst :: (a -> Maybe a) -> [a] -> Maybe [a]
+modifyFirst f xs =  let xsys            = zip xs (map f xs)
+                        (part1,part2)   = span (isNothing . snd) xsys
+                    in  if null part2
+                        then Nothing
+                        else Just $ map fst part1 ++
+                                    [fromJust . snd . head $ part2] ++
+                                    map fst (tail part2)
+
 
 
 --
@@ -719,8 +723,9 @@ oneof3 f1 f2 f3 x = case x of Num1 x -> f1 x
 
 
 
--- just a reminder, apply3 takes a function f and 3 params, and
+-- | apply3 takes a function 'f' and 3 params, and
 -- applies f on the params
+apply3 :: (a -> b -> c -> d) -> a -> b -> c -> d
 apply3 = ((($).).)
 
 

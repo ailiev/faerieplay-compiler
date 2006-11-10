@@ -1,3 +1,11 @@
+2006-11-10  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+        * Retargeting to C front-end. Works up to TypeChecker now.
+	
+	* TypeChecker.hs (checkStm(SReturn)): added.
+	(checkDec(FunDecl)): added maitenance of a stack of function names
+	currently being defined.
+
 2006-11-07  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* Fixed a few warnings from a "-Wall" run of ghc, nothing serious

@@ -122,6 +122,7 @@ flatten s =
                                                                     lo_new
                                                                     hi_new
                                                                     (concat forss))]
+--      (SForC 
 
       (SIfElse t (locs1,s1s)
                  (locs2,s2s))  -> do (t_stms,t_new) <- extrStms t
