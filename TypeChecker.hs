@@ -21,7 +21,8 @@ import Control.Monad.Trans (lift)
 import Common (MyError(..),MyErrorCtx, ErrCtxMonad, trace, logDebug)
 
 import SashoLib ((<<), ilog2,
-                 myLiftM, concatMapM, (>>==), mapTuple2, projSnd,
+                 myLiftM, concatMapM, iterateWhileM,
+                 (>>==), mapTuple2, projSnd,
                  StreamShow(..)
                 )
 
@@ -61,7 +62,9 @@ data TCState = TCS { vars   :: [Im.VarTable],
                      types  :: Im.TypeTable,
                      consts :: ConstTable,
                      funcs  :: Im.FuncTable,
-                     func_stack :: [String] -- ^ Stack of function definitions.
+                     func_stack :: [(String,Im.Typ)] -- ^ Stack of function names being
+                                                  -- defined, and the
+                                                  -- function's return type
                    }
     deriving (Show,Eq)
 
@@ -150,7 +153,7 @@ checkDec dec@(T.FunDecl t id@(T.Ident name) args decs stms) =
        -- Map to the top of the SymbolTable stack
        pushScope
        -- push the name on to the func name stack
-       St.modify (projToFuncStack $ push name)
+       St.modify (projToFuncStack $ push (name,im_t))
        -- check the formal args
        im_args <- mapM checkTypedName args
        -- add the formal argument variables to the scope
@@ -204,12 +207,6 @@ checkDec d@(T.ConstDecl (T.Ident name) val) =
        int_val  <- Im.evalStatic im_val
        St.modify $ projToConst $ Map.insert name int_val
 
-{-
-checkDec (T.ConstDecl (T.Ident name) _)          =
-    throwErr 42 $ "Bad value for const " << name
--}
-
-
 
 -- :::::::::::::::::::::
 checkStm :: T.Stm -> StateWithErr Im.Stm
@@ -250,20 +247,24 @@ checkStm s@(T.SPrint prompt vals)
 
 checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
     setContext s $
-    do new_lo <- checkExp lo
-       new_hi <- checkExp hi
+    do begin    <- checkExp lo >>= Im.evalStatic
+       end      <- checkExp hi >>= Im.evalStatic
+       -- can have the loop count forwards and backwards by 1
+       let countVals
+               | begin <= end   = [begin..end]
+               | otherwise      = reverse [end..begin]
        pushScope
        checkLoopCounter cnt_str
        -- add an Int to the scope symbol table for the loop counter
        -- give it a LoopCounter and Immutable flag
        let flags = [Im.LoopCounter, Im.Immutable]
-       addToVars (Im.IntT (Im.UnOp Im.Bitsize (new_hi - new_lo)))
+       addToVars (Im.IntT (Im.UnOp Im.Bitsize (Im.lint $ toInteger $ length countVals)))
                  flags
                  cnt_str
        new_stm <- checkStm stm
        popScope
        let counterVar = (Im.VFlagged flags (Im.VSimple cnt_str))
-       return (Im.SFor counterVar new_lo new_hi [new_stm])
+       return (Im.SFor counterVar countVals [new_stm])
 
 
 -- the for-loop coming from the C front end
@@ -273,19 +274,51 @@ checkStm s@(T.SFor_C cnt@(T.Ident cnt_str)
                      update_ass
                      stm)                           =
     setContext s $
-    do checkLoopCounter cnt_str
+    do checkLoopCounter cnt_str -- checks if the counter entity is also a counter var in
+                                -- an enclosing loop - don't see when that would make
+                                -- sense.
        new_start_e      <- checkExp start_e
        new_stop_cond    <- checkExp stop_cond
        new_update_ass   <- checkAssStm update_ass
-       pushScope
-       -- the loop counter must already be in the symbol table, or the C compilation would
-       -- fail. but, now need to add flags to it.
+
        let flags        = [Im.LoopCounter]
+           ctrvar       = (Im.VFlagged flags (Im.VSimple cnt_str))
+       -- the loop counter must already be in the symbol table (already declared). but,
+       -- now need to add flags to it.
        modVar cnt_str (Im.add_vflags flags)
+
+       countVals        <- getCountVals ctrvar new_start_e new_stop_cond new_update_ass
+
+       pushScope
        new_stm          <- checkStm stm
        popScope
-       let ctrvar       = (Im.VFlagged flags (Im.VSimple cnt_str))
-       return (Im.SFor_C ctrvar new_start_e new_stop_cond new_update_ass [new_stm])
+
+       return (Im.SFor ctrvar countVals [new_stm])
+
+    where
+          getCountVals countVar begin_exp stop_cond update =
+              do begin      <- Im.evalStatic begin_exp
+                 -- FIXME: if the provided stop condition leads to infinite looping,
+                 -- this will loop too; should install a max count check 
+                 vals       <- iterateWhileM (keepgoing countVar stop_cond)
+                                             (nextVal countVar update)
+                                             begin
+                 return vals
+                 
+
+          nextVal countVar (Im.AssStm lval op rval) x =
+              do let rval'  = Im.substExp countVar (Im.lint x) rval
+                 -- FIXME: have to use 'op' here, not just a straight assignment
+                 lval'      <- Im.evalStatic rval'
+                 return lval'
+
+          keepgoing countVar stop_cond x           =
+              do let cond   = Im.substExp countVar (Im.lint x) stop_cond
+                 cond_val   <- Im.evalStatic cond
+                 return (toEnum $ fromIntegral cond_val)
+                            `logDebug`
+                            ("keepgoing (x=" << x << "): cond_val = " << cond_val)
+
 
 
 
@@ -313,12 +346,13 @@ checkStm s@(T.SReturn exp)              =
     do new_exp      <- checkExp exp
        -- find the enclosing function
        func_stack   <- St.gets func_stack
-       fname        <- if Stack.isEmpty func_stack
+       (fname,t)    <- if Stack.isEmpty func_stack
                        then throwErr 42 $ "return called while not inside a function definition"
                        else return $ Stack.peek func_stack
-       -- ASSUME: the enclosing function def has added the return var to the var table.
-       -- FIXME: the lval could use an ExpT probably, not sure.
-       return $ Im.SAss (Im.EVar $ Im.add_vflags [Im.RetVar] $ Im.VSimple fname)
+       -- FIXME: check the type compatibility somehow
+       -- ASSUME: the enclosing function def has added the return var to the var table; we
+       -- don't do it here.
+       return $ Im.SAss (Im.ExpT t (Im.EVar $ Im.add_vflags [Im.RetVar] $ Im.VSimple fname))
                         new_exp
 
 
@@ -542,7 +576,7 @@ checkExp e@(T.EStruct str _)
 -- TODO: not finished with the checking here! need to check that the
 -- actual args in the call have the correct types
 checkExp e@(T.EFunCall (T.Ident fcnName) args) =
-    do (Im.Func _ _ t form_args _)      <- extractFunc e fcnName
+    do (Im.Func _ _ t form_args _)      <- extractFunc fcnName
        im_args                          <- mapM (checkExp . extrExp) args
        form_types                       <- mapM (canonicalize . snd)          form_args
        act_types                        <- mapM (canonicalize . Im.getExpTyp) im_args
@@ -787,7 +821,7 @@ extractHelper (ts,cs,fs,vs) name = msum [(maybeLookup name vs >>=
                                              return (EntFunc res))]
 
 
-extractFunc ctx name = do TCS {funcs=fs} <- St.get
+extractFunc     name = do TCS {funcs=fs} <- St.get
                           let res = maybeLookup name [fs]
                           case res of (Just f) -> return f
                                       _        -> throwErr 42 $ name

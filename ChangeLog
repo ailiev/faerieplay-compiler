@@ -1,3 +1,21 @@
+2006-11-22  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
+
+	* CircGen.hs (extractInputs): main function is now "sfdlmain", held
+	in cMAINNAME.
+
+	* Unroll.hs (unroll (SFor)): now easier, as the list of counter
+	values is generated earlier.
+
+	* Intermediate.hs (Stm): removed the SFor_C for now, and modified
+	SFor so it carries around a full list of counter values. Will need
+	the previous SFor and SFor_C though, when implement circuit loops
+	and no longer do full unrolling.
+
+	* TypeChecker.hs (checkStm (SFor_C)): generate the counter list.
+
+	* SFDL_C_Fixup.hs (fixupAss): produce just a simple assignment
+	from all the assignment operators, prefix and postfix too.
+
 2006-11-10  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
         * Retargeting to C front-end. Works up to TypeChecker now.

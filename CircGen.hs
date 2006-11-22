@@ -941,7 +941,7 @@ genStm circ stm =
 
 
 
-      s -> error $ "Unknow genStm on " ++ (show s)
+      s -> error $ "CircGen: unrecognized statement: " ++ (show s)
 
     where addOutputFlag var =
               case getVarFlags var of
@@ -1210,7 +1210,8 @@ genCondExit testGate
           -- keep just LocTable entries with a Nothing annotation (ie. not arrays)
           -- WARNING: using the annotation details here is not good, it should be exposed
           -- just in 'getVarLocs' etc.
-          gates var scopes = let leaves = fst $ fromJust $ maybeLookup var scopes
+          gates var scopes = let leaves = fst $ fromJustMsg "genCondExit::gates" $
+                                          maybeLookup var scopes
                                  ns     = [ n | (n, Nothing) <- leaves ]
                              in  ns
                                    `logDump`
@@ -1291,7 +1292,7 @@ addCtxs circ ctxs = foldl (flip (&)) circ ctxs
 -- figure out the type of a Select gate, based on the type of its two
 -- inputs
 getSelType gr (node1, node2)
-    = do let gates = map (fromJust . Gr.lab gr) [node1, node2]
+    = do let gates = map (fromJustMsg "CircGen::getSelType" . Gr.lab gr) [node1, node2]
          -- expanding types into a canonical form
          types <- mapM (Im.expandType [DoTypeDefs]) $ map gate_typ gates
          case types
@@ -1557,7 +1558,8 @@ uAdj n = ((), n)
 
 -- extract the params of main() from a Prog
 extractInputs (Prog pname (ProgTables {funcs=fs})) =
-    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+    let (Func _ _ t form_args stms) = fromJustMsg "CircGen::extractInputs" $
+                                      Map.lookup Im.cMAINNAME fs
     in  form_args
 
 
@@ -1579,12 +1581,6 @@ data MyState = MyState { loctable   :: ([LocTable], -- ^ stack of tables for sca
                                                    -- stick it in here
                          flags      :: [RunFlag]   -- ^ The run-time configuration flags.
                        }
-{-
-instance St.MonadState Int (St.State MyState) where
-    get = getInt
-    put = tup3_get2 >>= St.put
--}
-
 
 
 getsLocs        f   = St.gets $ f . loctable

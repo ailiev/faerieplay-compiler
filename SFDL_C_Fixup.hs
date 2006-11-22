@@ -18,11 +18,11 @@ import SFDL_C.Abs     as CAbs
 
 
 fixupProg :: CAbs.Prog -> CAbs.Prog
-fixupProg = everywhere (mkT fixupDec .
-                        mkT fixupTyp .
-                        mkT fixupArr .
-                        mkT fixupStm .
-                        mkT fixupAss)
+fixupProg = everywhere (mkT fixupDec
+                        . mkT fixupTyp
+                        . mkT fixupArr
+                        . mkT fixupStm
+                        . mkT fixupAss)
 
 
 fixupDec :: CAbs.Dec -> CAbs.Dec
@@ -42,30 +42,35 @@ fixupArr dec                        = dec
 
 -- convert all the funky (SAssC AssStm ...) nodes to SAss
 -- The enclosed AssStm's should have been cleaned up by fixupAss by now, and be just
--- ASOpAss
+-- ASOpAss with AssId
 fixupStm :: CAbs.Stm -> CAbs.Stm
 fixupStm (SAssC ass)    =
     case ass of
-             (ASOpAss   lval@(LVal lval_e) assop rval)  -> SAss lval ((assOp2Op assop) lval_e rval)
-             _                                          -> error "Unexpected ASssC"
+             (ASOpAss   lval AssId rval)        -> SAss lval rval
+             _                                  -> error "Unexpected ASssC"
 fixupStm stm            = stm
 
 
--- convert AssStm's to be all ASOpAss
+-- convert AssStm's to be all ASOpAss (ie leave just "x `op`= y", and no post/pre-fix
+-- assignments)
+-- Also, use just the AssId assign-operator, and put any actual operator inside the RHS,
+-- eg "x += y" -> "x = x + y"
+-- At the end, we just have assignments of the form "x = x `op` y"
 fixupAss :: AssStm -> AssStm
 fixupAss ass =
     case ass of
-      (ASPostFix lval@(LVal lval_e) pfop)        -> let (op,arg) = pfOp2Op pfop
-                                                    in  ASOpAss lval op arg 
-      (ASPreFix  pfop lval@(LVal lval_e))        -> let (op,arg) = pfOp2Op pfop
-                                                    in  ASOpAss lval op arg
-      (ASOpAss _ _ _)                            -> ass
+      (ASPostFix lval@(LVal lval_e) pfop)        -> genAss lval pfop
+      (ASPreFix  pfop lval@(LVal lval_e))        -> genAss lval pfop
+      (ASOpAss lval@(LVal lval_e) op rval)       -> let rval'   = (assOp2Op op) lval_e rval
+                                                    in  ASOpAss lval AssId rval'
+
+    where genAss lval@(LVal lval_e) pfop = let (op,arg) = pfOp2Op pfop
+                                               rval     = (assOp2Op op) lval_e arg
+                                           in  ASOpAss lval AssId rval
     
 
 
--- SForC can't really be done at this point, should add it to the intermediate format,
--- handle it in TypeChecker.hs etc, and
--- use it in Unroll.hs
+-- SForC can't really be done at this point, handle it in TypeChecker.hs etc.
 
 
 -- get a binary operator corresponding to an assignment operator.

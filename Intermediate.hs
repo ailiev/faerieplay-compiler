@@ -36,6 +36,8 @@ import qualified Container as Cont
 import Common (MyError(..), MyErrorCtx, throwErrorCtx, trace, logDebug)
 
 
+-- the name of our main function.
+cMAINNAME = "sfdlmain"
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -159,22 +161,23 @@ data Stm =
 
  | SFor                         -- ^ A for-loop
    Var                          -- ^ The loop counter variable
-   Exp                          -- ^ The start value; should be static
-   Exp                          -- ^ The end value; should be static; can be smaller or
-                                -- bigger than the start, this determines loop direction
+   [Integer]                    -- ^ The counter values.
    [Stm]                        -- ^ The loop statements. From the concrete syntax, can
                                 -- only have one Stm here (SBlock if multiple), but that
                                 -- single statement may be expanded to multiple ones
                                 -- during canonicalization, so have a
-                                -- list here. No need to carry a VarSet though.
+                                -- list here. No need to carry a VarSet though, that's
+                                -- done by the SBlock.
 
+{- -- NOTE: this will be needed again if we implement loops in the circuit, and need to
+   give it the counter update functions and stop condition.
  | SFor_C                       -- ^ A for loop from the C front end
    Var                          -- ^ The loop counter variable
    Exp                          -- ^ Start value
    Exp                          -- ^ stopping condition
    AssStm                       -- ^ update assignment
    [Stm]                        -- ^ loop body, list for same reason as above.
-
+-}
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
 
   deriving (Eq
@@ -794,6 +797,19 @@ mapStm f_s f_e s = everywhere (mkT f_e `extT` f_s) s
 
 
 
+-- substitue a value for a var into an exp
+--          var      val    exp    result
+substExp :: Var -> Exp -> Exp -> Exp
+substExp var val exp = mapExp f exp   -- `trace` ("try substExp " << var << " for " <<  val)
+    where f (EVar var2)
+              | strip_vflags var2 ==
+                strip_vflags var        = val
+                                          `logDebug` ("substExp "
+                                                      << var2 << " -> " << val)
+          f e                           = e
+
+
+
 
 
 instance Num Exp where
@@ -870,19 +886,33 @@ docStm (SBlock vars stms)   = nest 4 (vcat (docVarSet vars :
                                             (map docStm stms)))
 docStm (SAss lval val)      = sep [docExp lval, text "=", docExp val, semi]
                                
-docStm (SFor counter lo hi stms) = sep [text "for",
+docStm (SFor counter ctrvals stms)=sep [text "for",
                                         parens $ sep [docVar counter, text "=",
-                                                      docExp lo, text "to", docExp hi
+                                                      docListSample ctrvals
                                                      ]] $$
                                    nest 4 (vcat (map docStm stms))
+    -- show a few start and end vals of a (presumably regular) list
+    where docListSample l = let (starts,ends) = (case l of (a:b:_:_)    -> ([a,b] , [last l])
+                                                           (a:b:_)      -> ([a]   , [b])
+                                                           (a:_)        -> ([a]   , [])
+                                                           _            -> ([]    , [])
+                                                )
+                            in  brackets (sep [docList comma $ map integer starts,
+                                               case ends of
+                                                 []  -> empty
+                                                 xs  -> text ".." <>
+                                                        (docList comma $ map integer xs)
+                                              ]
+                                         )
 
+{-
 docStm (SFor_C var lo stop update stms) =
     sep [text "for",
          parens $ sep [docVar var, text "=", docExp lo, semi,
                        docExp stop, semi,
                        doc update]] $$
     nest 4 (vcat (map docStm stms))
-         
+ -}       
 
 docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
                                               parens $ docExp test,
@@ -895,6 +925,8 @@ docStm (SPrint prompt xs)               = cat [text "print",
                                                              comma,
                                                              sep $ punctuate comma
                                                                              (map docExp xs)]]
+
+docList sepa xs = sep $ punctuate sepa xs
 
 
 instance DocAble AssStm where

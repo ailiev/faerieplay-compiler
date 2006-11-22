@@ -61,7 +61,6 @@ throwErr p msg = throwErrorCtx $ Err p msg
 logError line msg = tell [Err line msg]
 
 
-cMAINNAME = "sfdlmain"
 
 
 -- the full version, usign both State and Error
@@ -162,35 +161,29 @@ unroll s@(SBlock _ _) = genericUnroll unrollBlock s
               return $ map (scopeVars locals scope) stms
 
 
-unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
+unroll s@(SFor _ _ _) = genericUnroll unrollFor s
     where unrollFor :: Scope -> Stm -> StateWithErr [Stm]
-          unrollFor scope (SFor countVar begin_exp end_exp stms) =
-              do begin  <- evalStatic begin_exp
-                 end    <- evalStatic end_exp
-                 -- the only new local variable in a for-loop body is
+          unrollFor scope (SFor countVar countVals stms) =
+              do -- the only new local variable in a for-loop body is
                  -- the counter variable, so create a VarSet
                  -- containing just that
                  let stms' = map (scopeVars (Cont.singleton (stripScope countVar))
                                             scope)
                                  stms
-                     -- have +1 here as the loop includes both end values
-                     stmss = replicate (fromInteger (abs(begin-end) + 1)) stms'
+                     stmss = replicate (length countVals) stms'
                      --
                      -- and subst correct counter values into all the statements
                      --
                      -- References to the loop counter will have been scoped, so scope
                      -- countVar so it's the same.
                      countVar' = addScope scope countVar
-                     -- can have the loop count forwards and backwards by 1
-                     countVals | begin <= end   = [begin..end]
-                               | otherwise      = reverse [end..begin]
                      -- a version of subst for each unrolled block of stm's
                      substs = [subst countVar' (lint val) | val <- countVals]
                      -- each 'stms' list is mapped a subst with the correct counter value
                      stmss' = zipWith map substs stmss
                  return $ concat stmss'
 
-
+{-
 unroll s@(SFor_C _ _ _ _ _) = genericUnroll unrollFor_C s
     where unrollFor_C scope (SFor_C countVar
                                     begin_exp
@@ -223,7 +216,7 @@ unroll s@(SFor_C _ _ _ _ _) = genericUnroll unrollFor_C s
                  return (toEnum $ fromIntegral cond_val)
                             `logDebug`
                             ("keepgoing (x=" << x << "): cond_val = " << cond_val)
-              
+-}
 
 
 unroll s@(SIfElse test (locs1,stms1) (locs2,stms2)) =
@@ -272,9 +265,8 @@ scopeVars locals scope s = mapStm f_s f_e s
           f_e e                                 = e
 
           -- also set the scope of the counter variable inside its For loop
-          f_s (SFor counter lo hi stms)         = SFor (addScope scope counter)
-                                                       lo
-                                                       hi
+          f_s (SFor counter ctrvals stms)       = SFor (addScope scope counter)
+                                                       ctrvals
                                                        stms
           f_s s                                 = s
 
@@ -311,17 +303,6 @@ subst var val s = mapStm f_s f_e s
     where f_e   = substExp var val
           f_s   = id
 
-
--- substitue a value for a var into an exp
---          var      val    exp    result
-substExp :: Var -> Exp -> Exp -> Exp
-substExp var val exp = mapExp f exp   -- `trace` ("try substExp " << var << " for " <<  val)
-    where f (EVar var2)
-              | strip_vflags var2 ==
-                strip_vflags var        = val
-                                          `logDebug` ("substExp "
-                                                      << var2 << " -> " << val)
-          f e                           = e
 
 
 -- remove all RefT's in an Stm

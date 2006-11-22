@@ -115,13 +115,13 @@ flatten s =
                               varset <- popScope
                               return $ [SBlock (Cont.union varset vars)
                                                (concat stmss)]
-      (SFor id lo hi ss)-> do (stms_lo,lo_new) <- extrStms lo
-                              (stms_hi,hi_new) <- extrStms hi
-                              forss <- mapM flatten ss
-                              return $ stms_lo ++ stms_hi ++ [(SFor id
-                                                                    lo_new
-                                                                    hi_new
-                                                                    (concat forss))]
+
+      (SFor id ctrvals ss) ->
+                           do forss <- mapM flatten ss
+                              return $ [(SFor id
+                                              ctrvals
+                                              (concat forss))]
+{-
       (SFor_C id lo stop update@(AssStm lval op rval) ss) ->
                            do (stms_lo,lo_new)  <- extrStms lo
                               (stms_st,st_new)  <- extrStms stop
@@ -135,6 +135,7 @@ flatten s =
                                                st_new
                                                update
                                                (concat forss)]
+-}
 
       (SIfElse t (locs1,s1s)
                  (locs2,s2s))  -> do (t_stms,t_new) <- extrStms t
