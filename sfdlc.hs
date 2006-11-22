@@ -51,6 +51,7 @@ import qualified HoistStms      as Ho
 import qualified Unroll         as Ur
 import qualified CircGen        as CG
 import qualified Runtime        as Run
+import           GenHelper_C                (genHelper)
 import qualified GraphLib       as GrLib
 import           UDraw
 import           Common                     (trace,LogPrio(..),RunFlag(..))
@@ -290,6 +291,10 @@ doCompile v rtFlags parser filenameIn hOut strIn =
                                             Im.funcs=fs}))      ->
                    do -- hPrint stderr prog
                       logmsg PROGRESS "Typechecking done"
+
+                      templ <- openFile "GenHelper_C.templ.cc" ReadMode >>= hGetContents
+                      let helper = genHelper templ prog
+                      writeFile "helper.out.cc" helper
 
                       let prog_flat = Ho.flattenProg prog
                       logmsg PROGRESS "Flattened program"

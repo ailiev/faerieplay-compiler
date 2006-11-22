@@ -1557,9 +1557,8 @@ uAdj n = ((), n)
 
 
 -- extract the params of main() from a Prog
-extractInputs (Prog pname (ProgTables {funcs=fs})) =
-    let (Func _ _ t form_args stms) = fromJustMsg "CircGen::extractInputs" $
-                                      Map.lookup Im.cMAINNAME fs
+extractInputs prog =
+    let (Func _ _ t form_args stms) = Im.getMain prog
     in  form_args
 
 

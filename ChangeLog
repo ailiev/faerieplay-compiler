@@ -1,5 +1,11 @@
 2006-11-22  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
+	* sfdlc.hs (doCompile): invoke genHelper.
+
+	* GenHelper_C.hs: new.
+
+	* GenHelper_C.templ.cc: new.
+
 	* CircGen.hs (getVarFlags): purged "main" everywhere in favor of cMAINNAME.
 
 	* Runtime.hs (binOpFunc): The Mod operator also cannot take a '0'

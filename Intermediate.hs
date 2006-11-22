@@ -244,6 +244,10 @@ data Exp =
            )
 
 
+-- get the main function
+getMain (Prog _ (ProgTables {funcs=fs})) =
+    fromJustMsg "Intermediate::getMain" $
+    Map.lookup cMAINNAME fs
 
 
 --
@@ -977,8 +981,9 @@ docExp e = case e of
 docTyp :: Typ -> Doc
 docTyp t =
     case t of
-      (IntT size_e)     -> --let size = evalStaticOrDie size_e in
-                           cat [text "Int", braces (docExp size_e)]
+      -- NOTE: C-specific now
+      (IntT size_e)     -> text "int"--let size = evalStaticOrDie size_e in
+--                           cat [text "Int", braces (docExp size_e)]
       (GenIntT)         -> cat [text "Int"]
       (BoolT)           -> text "bool"
       (VoidT)           -> text "void"
@@ -1074,6 +1079,13 @@ docFieldLoc (FieldLoc { valloc  = (voff,vlen),
                         byteloc = (boff,blen) })    = parens $ hcat [int voff,
                                                                      comma,
                                                                      int vlen]
+
+instance DocAble TypedName  where doc = docTypedName
+instance DocAble Typ        where doc = docTyp
+
+
+
+
 
 instance StreamShow Prog where
     strShows = showsPrec 0 . docProg
