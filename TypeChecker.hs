@@ -51,8 +51,6 @@ type TypeError = MyErrorCtx
 
 
 
-data BinOpType = Arith | Logical | Binary | Comparison | NotBin deriving (Eq,Show)
-
 
 
 -- we go with integer consts for now
@@ -65,7 +63,7 @@ data TCState = TCS { vars   :: [Im.VarTable],
                      funcs  :: Im.FuncTable,
                      func_stack :: [String] -- ^ Stack of function definitions.
                    }
-    deriving (Show,Eq,Ord)
+    deriving (Show,Eq)
 
 
 
@@ -568,10 +566,10 @@ checkExp e
            do new_e1 <- checkExp e1
               new_e2 <- checkExp e2
               (Im.ExpT t new_e) <- case classifyBinExp e of
-                                      Arith      -> checkArith op new_e1 new_e2
-                                      Binary     -> checkBinary op new_e1 new_e2
-                                      Logical    -> checkLogical op new_e1 new_e2
-                                      Comparison -> checkComparison op new_e1 new_e2
+                                      Im.Arith      -> checkArith op new_e1 new_e2
+                                      Im.Binary     -> checkBinary op new_e1 new_e2
+                                      Im.Logical    -> checkLogical op new_e1 new_e2
+                                      Im.Comparison -> checkComparison op new_e1 new_e2
               -- propagate EStatic if both params are static.
               let static_e = case (all isStaticExp [new_e1, new_e2]) of
                                True  -> Im.ExpT t (Im.EStatic new_e)
@@ -981,28 +979,28 @@ annot t e = Im.ExpT t e
 analyzeSomeBinExps pred e = if pred e then analyzeBinExp e else Nothing
 
 analyzeBinExp e = case e of
-                     (T.EPlus e1 e2)      -> Just (Arith,Im.Plus,e1,e2)
-                     (T.EMinus e1 e2)     -> Just (Arith,Im.Minus,e1,e2)
+                     (T.EPlus e1 e2)      -> Just (Im.Arith,Im.Plus,e1,e2)
+                     (T.EMinus e1 e2)     -> Just (Im.Arith,Im.Minus,e1,e2)
 
-                     (T.ETimes e1 e2)     -> Just (Arith,Im.Times,e1,e2)
-                     (T.EDiv e1 e2)       -> Just (Arith,Im.Div,e1,e2)
-                     (T.EMod e1 e2)       -> Just (Arith,Im.Mod,e1,e2)
+                     (T.ETimes e1 e2)     -> Just (Im.Arith,Im.Times,e1,e2)
+                     (T.EDiv e1 e2)       -> Just (Im.Arith,Im.Div,e1,e2)
+                     (T.EMod e1 e2)       -> Just (Im.Arith,Im.Mod,e1,e2)
 
-                     (T.EEq e1 e2)      -> Just (Comparison,Im.Eq,e1,e2)
-                     (T.ENeq e1 e2)     -> Just (Comparison,Im.Neq,e1,e2)
-                     (T.ELt e1 e2)     -> Just (Comparison,Im.Lt,e1,e2)
-                     (T.EGt e1 e2)     -> Just (Comparison,Im.Gt,e1,e2)
-                     (T.EGtEq e1 e2)     -> Just (Comparison,Im.GtEq,e1,e2)
-                     (T.ELtEq e1 e2)     -> Just (Comparison,Im.LtEq,e1,e2)
+                     (T.EEq e1 e2)      -> Just (Im.Comparison,Im.Eq,e1,e2)
+                     (T.ENeq e1 e2)     -> Just (Im.Comparison,Im.Neq,e1,e2)
+                     (T.ELt e1 e2)     -> Just (Im.Comparison,Im.Lt,e1,e2)
+                     (T.EGt e1 e2)     -> Just (Im.Comparison,Im.Gt,e1,e2)
+                     (T.EGtEq e1 e2)     -> Just (Im.Comparison,Im.GtEq,e1,e2)
+                     (T.ELtEq e1 e2)     -> Just (Im.Comparison,Im.LtEq,e1,e2)
 
-                     (T.EAnd e1 e2)    -> Just (Logical,Im.And,e1,e2)
-                     (T.EOr e1 e2)     -> Just (Logical,Im.Or,e1,e2)
+                     (T.EAnd e1 e2)    -> Just (Im.Logical,Im.And,e1,e2)
+                     (T.EOr e1 e2)     -> Just (Im.Logical,Im.Or,e1,e2)
 
-                     (T.ESL e1 e2)   -> Just (Binary,Im.SL,e1,e2)
-                     (T.ESR e1 e2)   -> Just (Binary,Im.SR,e1,e2)
-                     (T.EBOr e1 e2)  -> Just (Binary,Im.BOr,e1,e2)
-                     (T.EBAnd e1 e2) -> Just (Binary,Im.BAnd,e1,e2)
-                     (T.EBXor e1 e2) -> Just (Binary,Im.BXor,e1,e2)
+                     (T.ESL e1 e2)   -> Just (Im.Binary,Im.SL,e1,e2)
+                     (T.ESR e1 e2)   -> Just (Im.Binary,Im.SR,e1,e2)
+                     (T.EBOr e1 e2)  -> Just (Im.Binary,Im.BOr,e1,e2)
+                     (T.EBAnd e1 e2) -> Just (Im.Binary,Im.BAnd,e1,e2)
+                     (T.EBXor e1 e2) -> Just (Im.Binary,Im.BXor,e1,e2)
 
                      _                  -> Nothing
 
@@ -1015,14 +1013,14 @@ analyzeUnaryOp e = case e of
 
 classifyBinExp e = case analyzeBinExp e of
                                         Just (kind,_,_,_) -> kind
-                                        _                 -> NotBin
+                                        _                 -> Im.NotBin
 
                      
 
 -- some predicates
-isArithOp = (== Arith) . classifyBinExp
-isCompOp = (== Comparison) . classifyBinExp
-isLogicOp = (== Logical) . classifyBinExp
+isArithOp = (== Im.Arith) . classifyBinExp
+isCompOp = (== Im.Comparison) . classifyBinExp
+isLogicOp = (== Im.Logical) . classifyBinExp
 
 
 

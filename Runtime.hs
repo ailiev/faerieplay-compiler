@@ -407,10 +407,11 @@ binOpFunc o x y
     | otherwise =
                   let opClass   = classifyBinOp o
                   in  Just $ case (opClass, x, y) of
-                               (Arith, ScInt i1, ScInt i2)     -> ScInt $ arithBinOp o i1 i2
-                               (Boolean, ScBool b1, ScBool b2) -> ScBool $ boolBinOp o b1 b2
-                               (Comp, ScBool b1, ScBool b2)    -> ScBool $ compBinOp o b1 b2
-                               (Comp, ScInt i1, ScInt i2)      -> ScBool $ compBinOp o i1 i2
+                               (Arith,  ScInt i1, ScInt i2)     -> ScInt $ arithBinOp o i1 i2
+                               (Binary, ScInt i1, ScInt i2)     -> ScInt $ arithBinOp o i1 i2
+                               (Logical, ScBool b1, ScBool b2) -> ScBool $ boolBinOp o b1 b2
+                               (Comparison, ScBool b1, ScBool b2)    -> ScBool $ compBinOp o b1 b2
+                               (Comparison, ScInt i1, ScInt i2)      -> ScBool $ compBinOp o i1 i2
 
 
 arithBinOp o = case o of
@@ -450,7 +451,7 @@ opUnOp o x = case o of
                Neg  -> let (ScInt i) = x in ScInt $ negate i
                Log2 -> let (ScInt i) = x in ScInt $ ilog2 i
              --                   Bitsize -> "bitsize"
-
+{-
 data BinOpClass = Arith | Boolean | Comp
 
 classifyBinOp o = case o of
@@ -473,7 +474,7 @@ classifyBinOp o = case o of
                     And   ->  Boolean
                     Or    -> Boolean
                     Max   -> Arith
-
+-}
 
 
 

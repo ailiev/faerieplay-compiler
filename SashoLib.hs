@@ -26,6 +26,9 @@ module SashoLib (
          divUp,
          subtr,
 
+         int2bool,
+         bool2int,
+
          hex,
 
          tr,
@@ -79,6 +82,9 @@ module SashoLib (
         scanM,
         unfoldrM,
         replicateM,
+        iterateM,
+        takeWhileM,
+        iterateWhileM,
         repeatM,
         sumM,
         concatMapM,
@@ -149,6 +155,12 @@ f .|| g = \x -> f x || g x
 enumAll :: (Enum a) => [a]
 enumAll = undefined
 
+
+bool2int :: (Integral b) => Bool -> b
+bool2int = fromIntegral . fromEnum
+
+int2bool :: (Integral a) => a -> Bool
+int2bool = toEnum . fromIntegral
 
 
 -- instance (Eq a) => Eq (a -> a) where
@@ -364,6 +376,32 @@ unfoldrM f x  = do maybe_res <- f x
 -- actually available in Control.Monad library, but not the haskell 98 Monad library.
 replicateM :: (Monad m) => Int -> m a -> m [a]
 replicateM i = sequence . replicate i
+
+-- | iterate a monadic function infinitely.
+-- not very useful as monadically produced lists seem to be usually not lazy.
+iterateM :: (Monad m) => (a -> m a) -> a -> m [a]
+iterateM f x = do y     <- f x
+                  zs    <- iterateM f y
+                  return (y:zs)
+
+-- | iterate a monadic function while a predicate holds
+iterateWhileM :: (Monad m) => (a -> m Bool) -> (a -> m a) -> a -> m [a]
+iterateWhileM p f x     = do p_val  <- p x
+                             if p_val
+                              then do y    <- f x
+                                      rest <- iterateWhileM p f y
+                                      return (y:rest)
+                              else return []
+
+-- | take the prefix of a list while elements satisfy a monadic predicate.
+takeWhileM :: (Monad m) => (a -> m Bool) -> [a] -> m [a]
+takeWhileM p (x:xs)     = do p_val  <- p x
+                             if p_val
+                              then do rest <- takeWhileM p xs
+                                      return (x:rest)
+                              else return []
+takeWhileM _ []         = return []
+
 
 -- | repeat a monadic action to infinity.
 repeatM :: (Monad m) => m a -> m [a]

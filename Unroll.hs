@@ -15,7 +15,8 @@ import List                             (unfoldr, partition)
 import qualified Data.Map               as Map
 
 import SashoLib                         ((<<), ilog2, unfoldrM,
-                                         mapTuple2)
+                                         mapTuple2, iterateWhileM,
+                                         fromJustMsg)
 import Stack                                    (Stack(..), maybeLookup)
 import qualified Container              as Cont
 
@@ -40,8 +41,8 @@ pushScope' = applyToScope pushScope
 incrScope' = applyToScope incrScope
 popScope'  = applyToScope popScope
 
-getsPT = fst
-getsScope = snd
+getPT = fst
+getScope = snd
 
 
 -- maximum function recursion depth
@@ -60,16 +61,19 @@ throwErr p msg = throwErrorCtx $ Err p msg
 logError line msg = tell [Err line msg]
 
 
-
+cMAINNAME = "sfdlmain"
 
 
 -- the full version, usign both State and Error
 unrollProg :: Prog -> ErrCtxMonad [Stm]
 unrollProg (Prog pname pt@(ProgTables {funcs=fs})) =
-    let (Func _ _ t form_args stms) = fromJust $ Map.lookup "main" fs
+    let (Func _ _ t form_args stms) = fromJustMsg ("failed to find \"" ++ cMAINNAME
+                                                   ++ "\" function") $
+                                      Map.lookup cMAINNAME fs
         startScope                  = pushScope []
         startState                  = (pt, startScope)
-        (val_or_err,state')         = St.runState (runErrorT $ mapM unroll stms) startState
+        (val_or_err,state')         = St.runState (runErrorT $ mapM unroll stms)
+                                                  startState
     in case val_or_err of
                 Left err        -> Left err
                 Right stmss     -> Right (concat stmss)
@@ -187,6 +191,41 @@ unroll s@(SFor _ _ _ _) = genericUnroll unrollFor s
                  return $ concat stmss'
 
 
+unroll s@(SFor_C _ _ _ _ _) = genericUnroll unrollFor_C s
+    where unrollFor_C scope (SFor_C countVar
+                                    begin_exp
+                                    stop_cond
+                                    update_ass
+                                    stms)           =
+              do countVals  <- getCountVals countVar begin_exp stop_cond update_ass
+                               `logDebug`
+                               ("unroll(SFor_C): stop_cond = " << show stop_cond
+                                << ", update_ass = " << show update_ass)
+                 error ("Got the vals: " ++ show countVals)
+
+          getCountVals countVar begin_exp stop_cond update =
+              do begin      <- evalStatic begin_exp
+                 vals       <- iterateWhileM (keepgoing countVar stop_cond)
+                                             (nextVal countVar update)
+                                             begin
+                 return vals
+                 
+
+          nextVal countVar (AssStm lval op rval) x =
+              do let rval'  = substExp countVar (lint x) rval
+                 -- FIXME: have to use 'op' here, not just a straight assignment
+                 lval'      <- evalStatic rval'
+                 return lval'
+
+          keepgoing countVar stop_cond x           =
+              do let cond   = substExp countVar (lint x) stop_cond
+                 cond_val   <- evalStatic cond
+                 return (toEnum $ fromIntegral cond_val)
+                            `logDebug`
+                            ("keepgoing (x=" << x << "): cond_val = " << cond_val)
+              
+
+
 unroll s@(SIfElse test (locs1,stms1) (locs2,stms2)) =
     do stmss1'  <- mapM unroll stms1
        stmss2'  <- mapM unroll stms2
@@ -200,7 +239,7 @@ unroll s            = return [s]
 
 genericUnroll :: (Scope -> Stm -> StateWithErr [Stm]) -> Stm -> StateWithErr [Stm]
 genericUnroll f stm = do St.modify incrScope'
-                         scope <- St.gets getsScope
+                         scope <- St.gets getScope
                          checkScopeDepth scope
                          -- do the "real work"
                          stms <- f scope stm
@@ -251,7 +290,7 @@ scopeVars locals scope s = mapStm f_s f_e s
 fcnRetVar fname scope = EVar (VScoped scope (VFlagged [RetVar] (VSimple fname)))
 
 
-extractFunc name = do ProgTables {funcs=fs} <- St.gets getsPT
+extractFunc name = do ProgTables {funcs=fs} <- St.gets getPT
                       case maybeLookup name [fs] of
                             (Just f)    -> return f
                             _           -> throwErr 42 $ "Unroll.extractFunc "
@@ -277,7 +316,11 @@ subst var val s = mapStm f_s f_e s
 --          var      val    exp    result
 substExp :: Var -> Exp -> Exp -> Exp
 substExp var val exp = mapExp f exp   -- `trace` ("try substExp " << var << " for " <<  val)
-    where f (EVar var2) | var2 == var   = val    -- `trace` ("substExp " << var2 << " -> " << val)
+    where f (EVar var2)
+              | strip_vflags var2 ==
+                strip_vflags var        = val
+                                          `logDebug` ("substExp "
+                                                      << var2 << " -> " << val)
           f e                           = e
 
 

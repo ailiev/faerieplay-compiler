@@ -122,7 +122,19 @@ flatten s =
                                                                     lo_new
                                                                     hi_new
                                                                     (concat forss))]
---      (SForC 
+      (SFor_C id lo stop update@(AssStm lval op rval) ss) ->
+                           do (stms_lo,lo_new)  <- extrStms lo
+                              (stms_st,st_new)  <- extrStms stop
+                              -- FIXME: the rval here is actually quite limited, and
+                              -- should not need extrStms
+                              -- (stms_rval,rval_new)  <- extrStms lval
+                              forss <- mapM flatten ss
+                              return $ stms_lo ++ stms_st ++
+                                       [SFor_C id
+                                               lo_new
+                                               st_new
+                                               update
+                                               (concat forss)]
 
       (SIfElse t (locs1,s1s)
                  (locs2,s2s))  -> do (t_stms,t_new) <- extrStms t

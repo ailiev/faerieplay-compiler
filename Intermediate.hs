@@ -18,6 +18,13 @@ import Control.Monad.Identity (runIdentity)
 
 import qualified Data.Map as Map
 
+-- import Data.Generics.Aliases    (mkM)
+import Data.Typeable            (Typeable)
+import Data.Generics            (Data,
+                                 mkM, extM, everywhereM,
+                                 mkT, extT, everywhere
+                                )
+
 import qualified SFDL_C.Abs                             as CAbs
 import qualified SFDL_C.Print                           as BNFCPrint
 
@@ -26,7 +33,9 @@ import SashoLib                                         as SL
 
 import qualified Container as Cont
 
-import Common (MyError(..), MyErrorCtx, throwErrorCtx, trace)
+import Common (MyError(..), MyErrorCtx, throwErrorCtx, trace, logDebug)
+
+
 
 
 data EntType = Type | Var deriving (Eq,Ord,Show)
@@ -52,7 +61,7 @@ data Func = Func Ident          -- func name
                  Typ            -- return type
                  [TypedName]    -- arguments
                  [Stm]          -- and the function body
-            deriving (Eq,Ord
+            deriving (Eq
                      , Show, Read
                      )
 
@@ -69,6 +78,7 @@ data VarFlag =
                                 -- representing its enclosing function
    deriving (Ord,Eq
             , Show, Read
+            , Typeable, Data
             )
 
 
@@ -89,7 +99,7 @@ type VarTable = Map.Map EntName (Typ,Var)
 -- NOTE: Data.Map does not export a Read instance :(
 data ProgTables = ProgTables { types  :: TypeTable,
                                funcs  :: FuncTable }
-    deriving (Eq,Ord
+    deriving (Eq
              , Show
              )
 
@@ -101,7 +111,7 @@ type Ident = String
 
 data Prog =
    Prog Ident ProgTables
-  deriving (Eq,Ord
+  deriving (Eq
            , Show
            )
 
@@ -126,8 +136,10 @@ data Typ =
  | RedArrayT Typ Int            -- similar
 
  | RefT Typ                     -- a reference type
-  deriving (Eq,Ord
+  deriving (Eq
+           , Ord                -- needed by Exp
            ,Show,Read
+           , Typeable, Data
            )
 
 {-
@@ -165,15 +177,21 @@ data Stm =
 
  | SIfElse Exp (VarSet, [Stm]) (VarSet, [Stm])
 
-  deriving (Eq,Ord
+  deriving (Eq
+           , Ord                -- needed by Exp
            , Show, Read
+           , Typeable, Data
            )
 
 
 -- an assignment
+-- FIXME: do not need the assignment op, this is normalized before the typechecker!
 data AssStm =
    AssStm Exp AssOp Exp
-  deriving (Eq,Ord,Show,Read)
+  deriving (Eq, Ord             -- Ord needed by Stm
+           , Show, Read
+           , Typeable, Data
+           )
 
 -- the various assignment operators, like "+=" in C
 type AssOp = CAbs.AssOp
@@ -186,6 +204,7 @@ data FieldLoc = FieldLoc { byteloc :: (Int,Int), -- offset and length
                            valloc  :: (Int,Int) }
                 deriving (Eq,Ord
                          , Show, Read
+                         , Typeable, Data
                          )
 
 data FieldLocRecord = Byteloc | Valloc
@@ -214,8 +233,11 @@ data Exp =
               Integer           -- array length
  | EStructInit Int              -- prepare a struct with that many primitive (Int) fields
                                 -- and subfields
-  deriving (Eq,Ord
+  deriving (Eq
+           , Ord                -- need Ord in CircGen, where Exp is a key in the array
+                                -- location table.
            , Show, Read
+           , Typeable, Data
            )
 
 
@@ -290,8 +312,10 @@ data Var =
   | VScoped Scope Var           -- during unrolling, everything ends
                                 -- up in one scope; thus add a
                                 -- list of the pre-unroll scope id's
-    deriving (Eq,Ord
+    deriving (Eq
+             , Ord              -- needed in CircGen, for the LocTable
              , Show, Read
+             , Typeable, Data
              )
 
 -- | literals
@@ -300,6 +324,7 @@ data Lit =
   | LBool Bool
    deriving (Eq,Ord
             , Show, Read
+            , Typeable, Data
             )
              
 -- some helpers
@@ -312,23 +337,33 @@ data BinOp =
   | Div 
   | Mod
   | Plus 
-  | Minus 
-  | SL 
-  | SR 
+  | Minus
+ 
   | Lt 
   | Gt 
   | LtEq 
   | GtEq 
   | Eq 
   | Neq 
+
   | BAnd 
   | BXor 
   | BOr
+  | SL 
+  | SR 
+
   | And
   | Or
 --  and internal ones
   | Max
-   deriving (Eq,Ord,Show,Read)
+   deriving (Eq
+            , Ord               -- needed by Exp
+            , Show, Read
+            , Typeable, Data)
+
+
+data BinOpType = Arith | Logical | Binary | Comparison | NotBin deriving (Eq,Show)
+
 
 
 data UnOp =
@@ -338,7 +373,9 @@ data UnOp =
 -- and internal:
   | Log2
   | Bitsize
-   deriving (Eq,Ord,Show,Read)
+   deriving (Eq, Ord            -- Ord needed by Exp
+            , Show, Read
+            , Typeable, Data)
 
 
 
@@ -533,7 +570,11 @@ strip_var = strip_vflags . stripScope
 evalStatic :: (MonadError MyErrorCtx m) => Exp -> m Integer
 evalStatic e = case e of
                       (BinOp op e1 e2)  -> do [i1,i2] <- mapM evalStatic [e1,e2]
-                                              let realop = transIntOp op
+                                              let realop = case classifyBinOp op of
+                                                             Arith      -> transIntOp op
+                                                             Binary     -> transIntOp op
+                                                             Logical    -> transBoolOp op
+                                                             Comparison -> transCompOp op
                                               return $ i1 `realop` i2
 
                       (UnOp  op e1)     -> do i1 <- evalStatic e1
@@ -584,6 +625,30 @@ evalStatic = mapExpM f
 
 -}
 
+classifyBinOp op = case op of
+                     Plus  -> Arith
+                     Minus -> Arith
+                     Times -> Arith
+                     Div   -> Arith
+                     Mod   -> Arith
+                     BAnd  -> Binary
+                     BXor  -> Binary
+                     BOr   -> Binary
+                     SL    -> Binary
+                     SR    -> Binary
+
+                     Lt    -> Comparison
+                     Gt    -> Comparison
+                     LtEq  -> Comparison
+                     GtEq  -> Comparison
+                     Eq    -> Comparison
+                     Neq   -> Comparison
+                     And   -> Logical
+                     Or    -> Logical
+
+
+                                
+
 transIntOp op = case op of
                         Plus    -> (+)
                         Minus   -> (-)
@@ -591,19 +656,31 @@ transIntOp op = case op of
                         Div     -> div
                         BAnd    -> (.&.)
                         BOr     -> (.|.)
+                        -- shifts want Int as the shift amount.
                         SL      -> \x s -> shiftL x (fromInteger s)
                         SR      -> \x s -> shiftR x (fromInteger s)
                         Max     -> max
 
--- FIXME: this is confused - these operators do return Bool, but not
--- all of them take only Bool
-transBoolOp op = case op of
-                         Or     -> (||)
-                         And    -> (&&)
-                         Eq     -> (==)
-                         Gt     -> (>)
-                         Lt     -> (<)
-                         GtEq   -> (>=)
+transCompOp op x y = let f = case op of 
+                               Eq   -> (==)
+                               Neq  -> (/=)
+                               Gt   -> (>)
+                               Lt   -> (<)
+                               GtEq -> (>=)
+                               LtEq -> (<=)
+                     in  bool2int $ x `f` y
+
+transBoolOp :: (Integral a, Integral b) => BinOp -> (a -> a -> b)
+transBoolOp op x y = let f = case op of
+                               Or   -> (||)
+                               And  -> (&&)
+                             `logDebug`
+                             ("transBoolOp x=" ++ show x ++ ", y=" ++ show y)
+                     -- NOTE: this is rather not type-safe, but no time to introduce bool
+                     -- types into evalStatic now.
+                     in  (bool2int $ (int2bool x) `f` (int2bool y))
+
+
 
 transBoolUnOp op = case op of
                            Not  -> not
@@ -645,14 +722,16 @@ classifyExp e =
 
 -- returns the children statements and expressions of an Stm, and also
 -- a constructor to construct the Stm from (new) children
+{-
 stmChildren :: Stm -> ([Stm], [Exp], ([Stm] -> [Exp] -> Stm))
 stmChildren s =
     case s of
       (SBlock vars ss)          -> ( ss,     [],         (\ss []        -> (SBlock vars ss)) )
       (SAss lval val)           -> ( [],     [lval,val], (\[] [lval,val]-> (SAss lval val)) )
       (SFor nm lo hi fors)      -> ( fors,   [lo,hi],    (\ss  [lo,hi]  -> (SFor nm lo hi ss)) )
+      (SFor_C nm lo cond upd ss)-> ( ss,     [
       (SPrint prompt vals)      -> ( [],     vals,       (\[] vs_new   -> (SPrint prompt vs_new)) )
-
+-}
 
 -- some recursive structure for Stm's and Exp's. Make it monadic for
 -- generality
@@ -661,6 +740,7 @@ stmChildren s =
 -- 'f' is called without recursion if there are no children Exp's (eg.
 -- for EVar)
 mapExpM :: (Monad m) => (Exp -> m Exp) -> Exp -> m Exp
+{-
 mapExpM f e
     | P2 cons (e1,e2) <- eclass         = do e1_f <- mapExpM f e1
                                              e2_f <- mapExpM f e2
@@ -671,11 +751,13 @@ mapExpM f e
                                              f $ cons es_f
     | P0              <- eclass         = f e
    where eclass = classifyExp e
-
+-}
+mapExpM f e = everywhereM (mkM f) e
 
 -- use the Identity Monad to extract a non-monadic version of mapExpM
 mapExp :: (Exp -> Exp) -> Exp -> Exp
-mapExp f e = runIdentity (mapExpM (myLiftM f) e)
+mapExp f e = everywhere (mkT f) e
+-- runIdentity (mapExpM (myLiftM f) e)
 
 
 
@@ -686,6 +768,7 @@ mapStmM :: (Monad m) => (Stm -> m Stm) -> (Exp -> m Exp) -> Stm -> m Stm
 
 -- SIfElse does not fit well into the simple stmChildren scheme, as it has two separate lists
 -- of child statements
+{-
 mapStmM f_s f_e (SIfElse test (locs1,stms1)
                               (locs2,stms2)) =
     do new_stms1 <- mapM (mapStmM f_s f_e) stms1
@@ -698,9 +781,16 @@ mapStmM f_s f_e s = do let (ss, es, scons) = stmChildren s
                        new_ss <- mapM (mapStmM f_s f_e) ss
                        f_s (scons new_ss new_es)
 
+-}
+
+
+mapStmM f_s f_e s = everywhereM (mkM f_s `extM` f_e)
+                                s
+                                 
 
 mapStm :: (Stm -> Stm) -> (Exp -> Exp) -> Stm -> Stm
-mapStm f_s f_e s = runIdentity (mapStmM (myLiftM f_s) (myLiftM f_e) s)
+mapStm f_s f_e s = everywhere (mkT f_e `extT` f_s) s
+   --runIdentity (mapStmM (myLiftM f_s) (myLiftM f_e) s)
 
 
 
@@ -778,13 +868,21 @@ docStm :: Stm -> Doc
 docStm (SBlock vars stms)   = nest 4 (vcat (docVarSet vars :
                                             text "-----------" :
                                             (map docStm stms)))
-docStm (SAss lval val)      = sep [docExp lval, text "=", docExp val]
+docStm (SAss lval val)      = sep [docExp lval, text "=", docExp val, semi]
                                
 docStm (SFor counter lo hi stms) = sep [text "for",
                                         parens $ sep [docVar counter, text "=",
                                                       docExp lo, text "to", docExp hi
                                                      ]] $$
                                    nest 4 (vcat (map docStm stms))
+
+docStm (SFor_C var lo stop update stms) =
+    sep [text "for",
+         parens $ sep [docVar var, text "=", docExp lo, semi,
+                       docExp stop, semi,
+                       doc update]] $$
+    nest 4 (vcat (map docStm stms))
+         
 
 docStm (SIfElse test (_,s1s) (_,s2s)) = vcat [text "if",
                                               parens $ docExp test,
@@ -798,7 +896,10 @@ docStm (SPrint prompt xs)               = cat [text "print",
                                                              sep $ punctuate comma
                                                                              (map docExp xs)]]
 
-docAssStm (AssStm lval op rval)         = cat [docExp lval, SL.doc op, docExp rval]
+
+instance DocAble AssStm where
+    doc (AssStm lval op rval)           = cat [docExp lval, SL.doc op, docExp rval]
+
 
 instance DocAble AssOp where
     -- use the machinery in the BNFC-generated code.
@@ -949,7 +1050,7 @@ instance StreamShow Stm where
     strShows = showsPrec 0 . docStm
 
 instance StreamShow AssStm where
-    strShows = showsPrec 0 . docAssStm
+    strShows = showsPrec 0 . SL.doc
 
 instance StreamShow AssOp where
     strShows = showsPrec 0 . SL.doc
