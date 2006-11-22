@@ -243,3 +243,10 @@ lexical scoping semantics.
 
 RESOURCE USAGE:
 LOGN=4; D=5:
+
+
+<date>Wed Nov 22 15:59:02 2006</date>
+
+sfdlc: divide by zero
+
+brilliant!

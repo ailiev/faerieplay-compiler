@@ -984,8 +984,8 @@ prepareCondNodes cct this_cond
 -- what flags to attach to a gate for this 'var'.
 -- if it is called "main" and is a function return variable, it needs an Output flag.
 getVarFlags var = case (elem RetVar $ vflags var, varName var) of
-                    (True, "main")    -> [Output, Terminal]
-                    _                 -> []
+                    (True, cMAINNAME)   -> [Output, Terminal]
+                    _                   -> []
 
 
 -- do most of the work for a single expression in an SPrint
@@ -1076,7 +1076,7 @@ extractEArr'   e        = fail ""
 -- modified.
 checkOutputVars :: Circuit -> Var -> Maybe (Int,Int) -> OutMonad Circuit
 checkOutputVars c var mb_gate_loc
-    | strip_var var == VSimple "main" =
+    | strip_var var == VSimple cMAINNAME =
         -- remove the output flags there
         do mb_vgates    <- lookupVarLocs var
            case mb_vgates of

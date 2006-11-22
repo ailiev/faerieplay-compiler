@@ -401,9 +401,8 @@ gate2func Gate { gate_op = op,
                                   
 
 binOpFunc o x y
-    | (o == Div && let ScInt i2 = y -- pull the Integer out
-                   in  i2 == 0)
-                = Nothing       -- division by zero
+    | (let ScInt i2 = y in i2 == 0 && elem o [Div, Mod])
+                = Nothing       -- division or mod by zero
     | otherwise =
                   let opClass   = classifyBinOp o
                   in  Just $ case (opClass, x, y) of

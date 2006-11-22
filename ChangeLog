@@ -1,5 +1,10 @@
 2006-11-22  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
+	* CircGen.hs (getVarFlags): purged "main" everywhere in favor of cMAINNAME.
+
+	* Runtime.hs (binOpFunc): The Mod operator also cannot take a '0'
+	second param.
+
 	* CircGen.hs (extractInputs): main function is now "sfdlmain", held
 	in cMAINNAME.
 
