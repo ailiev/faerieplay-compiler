@@ -86,3 +86,10 @@ Should we add default initialization to declared vars (as is done now, in
 TypeChecker.mkVarInits)? Seems not, should have an error if var used
 uninitialized. But the error would only be caught in CircGen, where we're
 assuming no user errors remain.
+
+
+<date>Fri Apr  6 22:30:40 2007</date>
+
+Redo the gate numbering strategy so that the gates are contiguously numbered and
+in order at the end. Maybe as simple as sorting them by the originally assigned
+gate numbers?

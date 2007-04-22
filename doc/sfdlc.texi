@@ -1,0 +1,129 @@
+\input texinfo.tex
+@c %**start of header
+@setfilename sfdlc.info
+
+@include values.texi
+@include version.texi
+
+@settitle sfdlc @value{VERSION}
+@c %**end of header
+@setchapternewpage odd
+
+
+@dircategory Development
+@direntry
+* sfdlc: (sfdlc).                           Faerieplay circuit compiler.
+@end direntry
+
+@copying
+This manual is for sfdlc, version @value{VERSION}.
+
+Copyright @copyright{} 2005-2008 Alex Iliev.
+
+@quotation
+Permission is granted to ...
+@end quotation
+@end copying
+
+@titlepage
+@title sfdlc
+@subtitle Faerieplay circuit compiler.
+@subtitle Version @value{VERSION}
+
+@c Alex Iliev <sasho@cs.dartmouth.edu>
+@author Alex Iliev
+
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+
+@end titlepage
+
+
+@c So the toc is printed at the start.
+@contents
+
+@ifnottex
+@node Top
+@top sfdlc
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::        Getting started
+* Invoking sfdlc::      Invocation
+* File types produced:: The myriad files that sfdlc produces
+@end menu
+
+@node Introduction
+@chapter Introduction
+
+Kuku
+
+@node Invoking sfdlc
+@chapter Invoking
+
+The basic invocation syntax is:
+
+@example
+sfdlc [ options ] file.@value{SRCEXT}.
+@end example
+
+
+@code{sfdlc} understands the following options:
+
+@table @samp
+
+@item -h
+Print out the help text and exit.
+
+@item -o @var{FILE}
+@itemx --output=@var{file}
+
+Write output to @var{file}.
+
+
+@item -c
+@itemx --compile
+Compile. This is the default action.
+
+
+
+Write output to @var{file}.
+
+
+@end table
+
+
+@node File types produced
+@chapter File types that @command{sfdlc} produces.
+
+
+@command{sfdlc} produces the following kinds of files from its various actions.
+
+@section Executable circuit
+
+This is the file which is given to the circuit virtual machine for execution.
+Extension: @file{.runtime}.
+
+@section Circuit graph in internal format
+
+This is a dump of the circuit graph, before it is serialized. Extension: @file{.cct}.
+
+@section List of gates in internal format
+
+This is a dump of the circuit after it is serialized, but in the compiler's internal format. Extension: @file{.gates}.
+
+@section UDrawGraph file
+
+This is a representation of the circuit for the UDrawGraph program. Extension: @file{.udg}.
+
+@section A circuit simulation trace
+
+This is produced by the circuit simulation, and consists of the values generated
+for each gate, in the order they occur in the serialized circuit. Extension:
+@file{.run}.
+
+
+@bye

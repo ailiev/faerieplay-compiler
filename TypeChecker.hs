@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fallow-overlapping-instances -fglasgow-exts #-}
+{-# OPTIONS_GHC -fallow-overlapping-instances -fglasgow-exts -cpp #-}
 -- -fglasgow-exts for parallel list comprehension
 
 -- code to split the AST into several namespaces of global bindings:
@@ -36,13 +36,21 @@ import qualified ErrorWithContext                   as EWC
 -- the abstract syntax tree description
 -- NOTE: this is where the syntax used is decided.
 --
--- if using C 
+#if defined SYNTAX_C
+
 import qualified SFDL_C.Abs as T
 import qualified SFDL_C.Print as Print
 
--- if using SFDL:
--- import qualified SFDL.Abs as T
--- import qualified SFDL.Print as Print
+#elif defined SYNTAX_SFDL
+
+import qualified SFDL.Abs as T
+import qualified SFDL.Print as Print
+
+#else
+
+#error No syntax set via the SYNTAX preprocessor value
+
+#endif
 
 
 import qualified Intermediate as Im
@@ -267,6 +275,7 @@ checkStm s@(T.SFor cnt@(T.Ident cnt_str) lo hi stm) =
        return (Im.SFor counterVar countVals [new_stm])
 
 
+#ifdef SYNTAX_C
 -- the for-loop coming from the C front end
 checkStm s@(T.SFor_C cnt@(T.Ident cnt_str)
                      start_e
@@ -319,6 +328,9 @@ checkStm s@(T.SFor_C cnt@(T.Ident cnt_str)
                             `logDebug`
                             ("keepgoing (x=" << x << "): cond_val = " << cond_val)
 
+-- SYNTAX_C
+#endif
+
 
 
 
@@ -340,6 +352,7 @@ checkStm s@(T.SIfElse cond stm1 stm2) =
        return $ Im.SIfElse new_cond (locals1, new_stm1s)
                                     (locals2, [new_stm2])
 
+#ifdef SYNTAX_C
 -- | replace 'return' with an assignment to a var with same name as enclosing function.
 checkStm s@(T.SReturn exp)              =
     setContext s $
@@ -359,14 +372,16 @@ checkStm s@(T.SReturn exp)              =
 
 
 
-
-
 -- there should be only simple ASOpAss left at this point, after the fixup.
 checkAssStm ass@(T.ASOpAss lval op rval) =
     setContext ass $
     do new_lval     <- checkLVal lval
        new_rval     <- checkExp rval
        return $ Im.AssStm new_lval op new_rval
+
+-- SYNTAX_C
+#endif
+
 
 
 
@@ -470,7 +485,7 @@ checkExp e@(T.EIdent (T.Ident nm)) =
                                              else Im.EVar v
                 _                  ->
                     throwErr 42 $ "Identifier " << nm << " is invalid in this expression, \
-                                                          \expected a const or a variable"
+                                                          expected a const or a variable"
 
 
 
@@ -1079,8 +1094,9 @@ instance StreamShow T.Exp   where strShow  = Print.printTree
 instance StreamShow T.LVal  where strShow  = Print.printTree
 instance StreamShow T.Dec   where strShow  = Print.printTree
 instance StreamShow T.Typ   where strShow  = Print.printTree
+#ifdef SYNTAX_C
 instance StreamShow T.AssStm   where strShow  = Print.printTree
-
+#endif
 
 testDecs = [ T.ConstDecl (T.Ident "x") (T.EInt 10),
              T.TypeDecl  (T.Ident "y") T.BoolT ]

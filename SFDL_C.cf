@@ -45,7 +45,7 @@ separator nonempty Ident "," ;
 
 -- declarations
 
--- NOTE: type of constants if limited for now.
+-- FIXME: type of constants is limited for now.
 ConstDecl.      Dec     ::= "const" "int" Ident "=" Exp                 ";" ;
 
 -- FIXUP: order is wrong, convert to TypeDecl

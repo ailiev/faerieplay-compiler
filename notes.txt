@@ -250,3 +250,41 @@ LOGN=4; D=5:
 sfdlc: divide by zero
 
 brilliant!
+
+(it was actually a % operator, which was not being guarded in Runtime.hs)
+
+
+
+<date>Thu Dec  7 17:45:45 2006</date>
+
+Extensions to compiler and runtime for the power scheduling app:
+- floating point support,
+- multi-dim array support, with optimizations hopefully.
+- direct array access support
+- compact loops in circuit
+- initializing a vector with (copies of) a scalar.
+
+
+
+<date>Sat Mar 31 17:02:51 2007</date>
+
+* Why do we go with subset of C++ rather than of Java 5?
+
+- Java has no distinction between value and reference params.
+
+- The automatic memory mgmt in Java is more opaque than the manual mgmt in C++,
+which may reveal errors that show up in the CVM too.
+
+- Does Java 5 have template params which are integers? eg can we have type
+  Array<T, 10> for an array of (statically) 10 elements? Though it may suffice
+  to handle the length dynamically.
+
+
+
+Wed Apr 18 02:01:28 EDT 2007
+
+Debian packahes for GHC 6:
+libghc6-fgl-dev
+libghc6-mtl-dev
+ghc6
+

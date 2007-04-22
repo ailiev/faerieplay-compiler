@@ -253,6 +253,7 @@ genCircuit rtFlags type_table stms args =
         -- the main circuit generation step.
         (circ, st)      = St.runState (genCircuitM stms args)
                                       startState
+
         bad_ctxs        = checkCircuit circ
 {-
         _               =   if not $ null bad_ctxs
@@ -305,6 +306,10 @@ genCircuit rtFlags type_table stms args =
         -- expand all Typ fields in the gates, as it helps with printing out the types
         -- (using docTypMachine)
         gate_list'      = map (expandGateTyp type_table) gate_list
+
+        -- TODO: expand out the comments on some gates too, where the comments may be
+        -- shown to users, eg. for input and output gates.
+
     in (renum_circ, gate_list')
            `trace` ("The DFS forest: " -- << genDFSForest renum_circ
                     << "And the flat circuit:\n" << map strShow gate_list')
@@ -1578,7 +1583,7 @@ data MyState = MyState { loctable   :: ([LocTable], -- ^ stack of tables for sca
                          typetable  :: TypeTable,  -- ^ the type table is read-only, so
                                                    -- could be in a Reader, but easier to
                                                    -- stick it in here
-                         flags      :: [RunFlag]   -- ^ The run-time configuration flags.
+                         flags      :: [RunFlag]   -- ^ The run-time configuration flags, read-only
                        }
 
 
@@ -1971,7 +1976,8 @@ showCctGraph g =
                                                                       gate_doc g)
                                         _       -> ""),
                                      (if elem Output $ gate_flags g
-                                      then "\\nOutput"
+                                      then "\\nOutput: " ++ strShow (stripVarExp $ last $
+                                                                     gate_doc g)
                                       else "")
                                      ]
 
