@@ -14,8 +14,6 @@ import Data.Typeable            (Typeable)
 import Data.Generics            (Data)
 
 import SFDL_C.Abs     as CAbs
--- import qualified SFDL.Abs       as Abs
-
 
 fixupProg :: CAbs.Prog -> CAbs.Prog
 fixupProg = everywhere (mkT fixupDec

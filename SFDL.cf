@@ -60,11 +60,11 @@ TypedFunDecl.   Dec     ::= "function" Typ Ident "(" [TypedName] ")" ":" Typ
 -- constant. TODO: May be better to define another subset of Exp for this purpose, ie. Int
 -- size and array length.
 
--- FIXME: the bitsize of an Int should be an expression (even if a
--- compile-time exp) and not just an Integer. This is not doable with
--- this parse arrangement though, unless the <> syntax is dropped, eg
--- have:
-IntT.          Typ      ::= "Int" "<" Exp "`>" ;
+-- this will be the data value produced by the parser...
+IntTConcrete.    Typ      ::= "Int" "<" SizeExp ">" ;
+-- and we will fix it up to:
+internal IntT.  Typ     ::= "Int" "<" Exp ">" ;
+
 -- generic int, without a specified size. can only be used in a
 -- function signature I believe
 GenIntT.        Typ     ::= "Int" "<`>" ;
@@ -178,26 +178,43 @@ EOr.            Exp1    ::= Exp1 "||" Exp2 ;
 coercions Exp 13 ;
 
 
+--
+-- "size expressions" - much more limited than full expressions.
+--
+
+SEIdent.        SizeExp3     ::= Ident ;
+SEInt.          SizeExp3     ::= Integer ;
+
+
+-- may want to support functions like log() for these
+SEFunCall.      SizeExp3     ::= Ident "(" [SizeFunArg] ")" ;
+
+SETimes.        SizeExp2     ::= SizeExp2 "*" SizeExp3 ;
+
+SEPlus.         SizeExp1     ::= SizeExp1 "+" SizeExp2 ;
+SEMinus.        SizeExp1     ::= SizeExp1 "-" SizeExp2 ;
+
+coercions SizeExp 3 ;
+
+
 -- a coercion expression! right now only for the bitsize of Int values.
 internal ECoerce.       Exp     ::= Integer Exp ;
 
--- a Max expression, used by the typechecker to indicate the bitsize of
--- added values (max of the args, + 1)
-internal EMax.          Exp     ::= "_max" "(" Exp "," Exp ")" ;
 
 -- a bit-access expression          int       bit index
 internal EGetBit.       Exp     ::= Exp  "["    Exp  "]";
 
--- a log expression, added by typechecker to compute the size of a counter
--- variable
-internal ELog2.         Exp     ::= "_log2" "(" Exp ")" ;
 
 
-
--- function call arguments
+-- function call arguments.
+-- only have this as a separate type so we can define a list separator for it.
 -- this causes some shift-reduce conflicts
 FunArg.         FunArg  ::= Exp ;
 separator FunArg "," ;
+
+-- function call args for a size expression
+SizeFunArg.     SizeFunArg      ::= SizeExp ;
+separator SizeFunArg "," ;
 
 
 

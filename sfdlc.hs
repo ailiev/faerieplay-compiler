@@ -290,13 +290,7 @@ doCompile v rtFlags parser filenameIn hOut strIn =
                         putStrLn s
          Ok  prog@(Prog _ _) ->
            do logmsg INFO "Parse Successful!"
-              -- NOTE: fixupProg is C-front end specific, for now.
-              let fix_prog =
-#if defined SYNTAX_C
-                   fixupProg prog
-#elif defined SYNTAX_SFDL
-                   prog
-#endif
+              let fix_prog = fixupProg prog
               case typeCheck fix_prog of
                 (Left err)        -> do hPutStrLn stderr $ "Type Error! " ++ showErrs err
                                         exitFailure

@@ -72,7 +72,7 @@ PACKS = -package fgl -package Cabal
 all: $(ODIR)/sfdlc
 
 # basename of our grammar (.cf) file
-CF_ROOT = SFDL_C
+CF_ROOT = SFDL
 
 BNFCROOTS=Abs Lex Print Test ErrM Par Skel
 bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(word 1,$(BNFCROOTS)))
