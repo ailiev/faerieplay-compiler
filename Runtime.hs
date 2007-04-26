@@ -185,13 +185,14 @@ addRoot vals ins (i, (gate,_)) =
                                                         arr  = listArray (0,size-1)
                                                                          (map (Just . vint) vs)
                                                     in  (Just $ VArr arr)
-                                                            `trace` ("Input array is " << show arr)
+                                                            {- `trace` ("Input array is "
+                                                               << show arr) -}
                              _                   -> let [i] = vs -- should be just one integer
                                                     in  Just $ vint i )
                          -- BUG: from the compiler I think - if this statement is not
                          -- here, the previous writeArray is not evaluated!
                          val <- MArr.readArray vals g_i
-                         return ins' `trace` ("vals after input added: " << show val)
+                         return ins' `trace` ("vals after input added: " << showsValHuman 0 val "")
                                                                               
          _     -> return ins
 
@@ -526,7 +527,10 @@ showsValHuman p (Just gv) =
                       Blank     -> str "Blank"
                       VScalar s -> rec s
                       VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
-                      VList l   -> str "vl " . showList l
+                      VList l   -> str "vl " .
+                                   str "[" .
+                                           (punctuate (str ",") $ map (showsValHuman p) l) .
+                                  str "]"
         where rec x = showsPrec p x -- not a recursion, but anyway.
               str   = (++)
 
@@ -549,8 +553,8 @@ showsInt_bytes p i = let bytes = map (i `extrByte`) [0..(bitSize i) `div` 8 - 1]
 
 
 -- make Show instances for GateVal and Scalar, for use with trace, logDebug, etc.
-instance (Show (Maybe GateVal)) where
-    showsPrec = showsValHuman
+-- instance (Show (Maybe GateVal)) where
+--    showsPrec = showsValHuman
 
 instance (Show Scalar) where
     showsPrec = showsScalarHuman
@@ -567,7 +571,7 @@ punctuate :: ShowS -> [ShowS] -> ShowS
 punctuate sep l = showsList $ intersperse sep $ l
 
 
-
+-- concat a bunch of ShowS into a single one, without separators
 showsList :: [ShowS] -> ShowS
 showsList shows = foldl (.) id shows
 

@@ -13,8 +13,8 @@ GHCFLAGS += -odir $(ODIR) -hidir $(ODIR)
 # GHCFLAGS += -Wall
 
 # GHC = /home/sasho/minime/ghc/ghc-6.4.2/bin/i386-unknown-linux/ghc
-GHC = $(HOME)/work/minime/ghc-6.6-RC2-sasho/bin/ghc
-# GHC = ghc6
+# GHC = $(HOME)/work/minime/ghc-6.6-RC2-sasho/bin/ghc
+GHC = ghc
 
 ODIR = build
 
@@ -107,7 +107,7 @@ hat:
 	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
 
 clean:
-	HFLAGS="$(GHCFLAGS)" hmake -d$(ODIR) -clean sfdlc
+	HFLAGS="$(GHCFLAGS)" hmake -package fgl -d$(ODIR) -clean sfdlc
 
 install: $(ODIR)/sfdlc
 	install -p $(ODIR)/sfdlc ~/leeds_root/bin/
