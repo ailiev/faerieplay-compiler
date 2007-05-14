@@ -1,3 +1,7 @@
+#source_lang = sfdl
+source_lang = fcpp
+
+
 GHCFLAGS =  -fglasgow-exts
 GHCFLAGS += -fallow-overlapping-instances
 
@@ -22,8 +26,10 @@ ODIR = build
 include ../sfdl/shared.make
 SFDLCFLAGS += +RTS -xc -RTS
 
+ifeq ($(source_lang),sfdl)
+	GHCFLAGS += -DSYNTAX_SFDL
+endif
 
-GHCFLAGS += -DSYNTAX_SFDL
 
 #
 # which build?
@@ -69,10 +75,22 @@ endif
 
 PACKS = -package fgl -package Cabal
 
-all: $(ODIR)/sfdlc
 
 # basename of our grammar (.cf) file
-CF_ROOT = SFDL
+ifeq ($(source_lang),sfdl)
+	CF_ROOT := SFDL
+else ifeq ($(source_lang),fcpp)
+CF_ROOT := SFDL_C
+$(info source is FC++)
+else
+$(error No source language set)
+endif
+
+
+all: $(ODIR)/sfdlc
+
+
+
 
 BNFCROOTS=Abs Lex Print Test ErrM Par Skel
 bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(word 1,$(BNFCROOTS)))

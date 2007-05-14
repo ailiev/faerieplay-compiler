@@ -1,6 +1,13 @@
-all: sfdlc.info
+all: sfdlc.info syntax
 
-%.info: %.texi
+syntax: SFDL/Doc.pdf SFDL_C/Doc.pdf
+
+vpath %.tex ../
+
+%.pdf: %.tex
+	rubber --into $(shell dirname $@) --pdf $<
+
+sfdlc.info: sfdlc.texi values.texi version.texi
 	makeinfo $<
 
 %.pdf: %.texi

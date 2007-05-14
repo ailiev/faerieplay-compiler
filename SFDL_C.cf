@@ -75,15 +75,12 @@ internal TypeDecl. Dec  ::= "type" Ident "=" Typ                        ";" ;
 -- types
 -----------
 
--- NOTE: semantically, the size Exp for Int and arrays has to be a compile-time integer
--- constant. TODO: May be better to define another subset of Exp for this purpose, ie. Int
--- size and array length.
-
 -- FIXUP: convert to 32-bit IntT
 IntT_C.         Typ     ::= "int" ;
--- generic int, without a specified size. can only be used in a
--- function signature I believe
--- GenIntT.        Typ     ::= "Int" "<`>" ;
+
+-- an integer with a specified bit-size, as a template parameter.
+IntTConcrete.    Typ      ::= "Integer" "<" SizeExp ">" ;
+
 
 BoolT.          Typ     ::= "bool" ;
 VoidT.          Typ     ::= "void" ;
@@ -229,6 +226,30 @@ EAnd.           Exp2    ::= Exp2 "&&" Exp3 ;
 EOr.            Exp1    ::= Exp1 "||" Exp2 ;
 
 coercions Exp 13 ;
+
+
+--
+-- "size expressions" - much more limited than full expressions.
+--
+
+SEIdent.        SizeExp3     ::= Ident ;
+SEInt.          SizeExp3     ::= Integer ;
+
+
+-- may want to support functions like log() for these
+SEFunCall.      SizeExp3     ::= Ident "(" [SizeFunArg] ")" ;
+
+SETimes.        SizeExp2     ::= SizeExp2 "*" SizeExp3 ;
+
+SEPlus.         SizeExp1     ::= SizeExp1 "+" SizeExp2 ;
+SEMinus.        SizeExp1     ::= SizeExp1 "-" SizeExp2 ;
+
+coercions SizeExp 3 ;
+
+-- function call args for a size expression
+SizeFunArg.     SizeFunArg      ::= SizeExp ;
+separator SizeFunArg "," ;
+
 
 
 -- no need for all these internal things, as we have a separate intermediate format

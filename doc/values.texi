@@ -1,1 +1,7 @@
 @set SRCEXT sfdl
+
+@set SyntaxFile Doc.pdf
+
+@macro sfdlc
+@file{sfdlc}
+@end macro

@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -fglasgow-exts #-}
+-- -fglasgow-exts for the type constraint of inScope
+
 module Unroll where
 
 

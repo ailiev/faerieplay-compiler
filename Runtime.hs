@@ -1,5 +1,6 @@
-{-# OPTIONS_GHC -cpp #-}
--- cpp because of the MArr.getBounds change from GHC 6.4.2 to 6.5
+{-# OPTIONS_GHC -cpp -fglasgow-exts #-}
+-- evalGate needed in the type constrain of evalGate apparently
+-- cpp to allow the different styles of MArr.getBounds in GHC 6.4.2 to 6.6
 
 module Runtime where
 
