@@ -1,5 +1,5 @@
-#source_lang = sfdl
-source_lang = fcpp
+source_lang = sfdl
+#source_lang = fcpp
 
 
 GHCFLAGS =  -fglasgow-exts
