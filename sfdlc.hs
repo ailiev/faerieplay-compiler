@@ -75,6 +75,10 @@ import TypeChecker
 
 import SashoLib
 
+
+cC_HELPER_TEMPLATE = "GenHelper_C.templ.cc"
+
+
 -- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
 -- section at the end.
 -- g_timestamp = "2006-11-08 13:24:07 sasho"
@@ -302,12 +306,10 @@ doCompile v rtFlags parser filenameIn hOut strIn =
 
 #ifdef SYNTAX_C
        -- FIXME: the helper file generation shouldbe controlled by some options probably.
-       
--- FIXME: template name hardwired.
-                      templ <- openFile "GenHelper_C.templ.cc" ReadMode >>= hGetContents
-                      let helper = genHelper templ prog
-                      -- FIXME: should not have this file name hardwired in here.
-                      writeFile "helper.out.cc" helper
+                      templ <- openFile cC_HELPER_TEMPLATE ReadMode >>= hGetContents
+                      let helper         = genHelper templ prog
+                          helperFileName = modFileExt filenameIn "helper.cc"
+                      writeFile helperFileName helper
 #endif
 
                       let prog_flat = Ho.flattenProg prog
@@ -384,9 +386,11 @@ doRunCct rtFlags gates_fh hOut =
        vals     <- Run.formatRun rtFlags gates ins
        mapM_ (hPutStrLn hOut) vals
 
-       
-modFileExt file newext = let name = takeWhile (/= '.') file
-                         in  name ++ "." ++ newext
+
+-- | change a filename's extension (part after the last dot)
+modFileExt file newext = let components = split '.' file
+                         in (joinLists "." (init components)) ++ "." ++ newext
+
 
 --                                   mapM_ print cct
 

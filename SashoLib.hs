@@ -55,6 +55,8 @@ module SashoLib (
         runSumFrom0,
         filterList,
         breakList,
+        split,
+        joinLists,
         spanList,
         updateSome,
         mapSplice,
@@ -723,6 +725,18 @@ modifyFirst f xs =  let xsys            = zip xs (map f xs)
                         else Just $ map fst part1 ++
                                     [fromJust . snd . head $ part2] ++
                                     map fst (tail part2)
+
+-- | Split a list at some separator element. like a parametrized 'lines'.
+split :: (Eq a) => a -> [a] -> [[a]]
+split sep s = let (l, s') = break (== sep) s
+              in  l : case s' of
+                        []      -> []
+                        (_:s'') -> split sep s''
+
+-- | join a list of lists with some separator
+joinLists :: [a] -> [[a]] -> [a]
+joinLists sep xs = concat $ intersperse sep xs
+
 
 
 

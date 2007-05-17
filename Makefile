@@ -28,6 +28,10 @@ SFDLCFLAGS += +RTS -xc -RTS
 
 ifeq ($(source_lang),sfdl)
 	GHCFLAGS += -DSYNTAX_SFDL
+else ifeq ($(source_lang),fcpp)
+	GHCFLAGS += -DSYNTAX_C
+else
+$(error No source language defined in make variable 'source_lang')
 endif
 
 
@@ -82,8 +86,6 @@ ifeq ($(source_lang),sfdl)
 else ifeq ($(source_lang),fcpp)
 CF_ROOT := SFDL_C
 $(info source is FC++)
-else
-$(error No source language set)
 endif
 
 

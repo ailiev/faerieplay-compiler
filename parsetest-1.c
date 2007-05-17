@@ -1,4 +1,6 @@
-int sfdlmain (int j) {
+program (kuku);
 
-    return x;
+function int sfdlmain (int j)
+{
+    return j;
 }
