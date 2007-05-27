@@ -4,7 +4,12 @@
 -- code to split the AST into several namespaces of global bindings:
 -- constants, types, variables and functions
 
-module TypeChecker where
+module TypeChecker
+    (
+     typeCheck,
+     name2var
+    )
+    where
 
 import Monad    (foldM, msum, liftM, zipWithM)
 import List     (find, findIndex)
@@ -38,13 +43,13 @@ import qualified ErrorWithContext                   as EWC
 --
 #if defined SYNTAX_C
 
-import qualified SFDL_C.Abs as T
-import qualified SFDL_C.Print as Print
+import qualified SFDL_C.BNFC.Abs as T
+import qualified SFDL_C.BNFC.Print as Print
 
 #elif defined SYNTAX_SFDL
 
-import qualified SFDL.Abs as T
-import qualified SFDL.Print as Print
+import qualified SFDL.BNFC.Abs as T
+import qualified SFDL.BNFC.Print as Print
 
 #else
 
