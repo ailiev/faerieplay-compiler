@@ -1,5 +1,8 @@
-source_lang = sfdl
-#source_lang = fcpp
+# these need to start with an upper case, as they are used as haskell package
+# names at some stage.
+
+source_lang = Sfdl
+#source_lang = Fcpp
 
 
 GHCFLAGS =  -fglasgow-exts
@@ -26,9 +29,9 @@ ODIR = build
 include ../sfdl/shared.make
 SFDLCFLAGS += +RTS -xc -RTS
 
-ifeq ($(source_lang),sfdl)
+ifeq ($(source_lang),Sfdl)
 	GHCFLAGS += -DSYNTAX_SFDL
-else ifeq ($(source_lang),fcpp)
+else ifeq ($(source_lang),Fcpp)
 	GHCFLAGS += -DSYNTAX_C
 else
 $(error No source language defined in make variable 'source_lang')
@@ -81,16 +84,10 @@ PACKS = -package fgl -package Cabal
 
 
 # basename of our grammar (.cf) file
-ifeq ($(source_lang),sfdl)
-	CF_ROOT := SFDL
-else ifeq ($(source_lang),fcpp)
-CF_ROOT := SFDL_C
-$(info source is FC++)
-endif
+CF_ROOT = $(source_lang)/Bnfc
 
 
 all: $(ODIR)/sfdlc
-
 
 
 
@@ -98,7 +95,7 @@ BNFCROOTS=Abs Lex Print Test ErrM Par Skel
 bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(word 1,$(BNFCROOTS)))
 # bnfc produces a misnamed Makefile, hence specifying that name here.
 $(bnfc_files): $(CF_ROOT).cf
-	bnfc -haskell -m -d $<
+	bnfc -haskell -p sfdl/Bnfc $<
 	ed $(CF_ROOT)/Abs.hs < add-bnfc-derives.ed
 	make -C $(CF_ROOT)
 
