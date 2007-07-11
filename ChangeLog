@@ -1,3 +1,20 @@
+2007-06-03  Sasho  <sasho@pipe.cs.dartmouth.edu>
+
+	* Faerieplay/Version.hs: added.
+
+	* Faerieplay/SashoLib.hs: Added compilerAssert and throwCompilerErr.
+
+	* Faerieplay/TypeChecker.hs(checkAssStm): reconciled with
+	simplifed Im.AssStm type. Added assertion checks.
+
+	* Reorganizing the structure of the BNFC artifacts. Now using BNFC
+	2.3b features, though only for artifact layout.
+
+	* Moved all my code into Haskell package Faerieplay.
+
+	* Added the BNFC artifacts to SVN, for redundancy in case BNFC
+	goes away.
+
 2006-11-22  Alex Iliev  <sasho@pipe.cs.dartmouth.edu>
 
 	* sfdlc.hs (doCompile): invoke genHelper.

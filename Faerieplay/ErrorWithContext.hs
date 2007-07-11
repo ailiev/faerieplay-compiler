@@ -6,23 +6,27 @@
 -- an extended Error monad, with support for gathering context information as it "unwinds"
 -- the call stack.
 
-module ErrorWithContext where
+module Faerieplay.ErrorWithContext where
 
 
 import Control.Monad.Error                  (Error(..),ErrorT(..))
 
--- | class of types suitable for an error context
+-- | class of types suitable for an error context. It's just a marker class, with no
+-- operations defined.
 class (Show c) => ErrorContext c
 
+-- | A string is a good simple context.
 instance ErrorContext String
 
--- | an Error with Context, which is just a list of ErrorContext's
+
+-- | an Error with Context, which is just a list of ErrorContext instances.
 -- was too complicated to make a class out of this.
 newtype (Error e, ErrorContext c) =>
     ErrorWithContext e c = EWC (e, [c])
     deriving (Show)
 
 
+-- | An ErrorWithContext is an Error.
 instance (Error e, ErrorContext c) => Error (ErrorWithContext e c) where
     noMsg       = EWC (noMsg, [])
     strMsg m    = EWC ((strMsg m), [])

@@ -2,14 +2,13 @@
 -- evalGate needed in the type constrain of evalGate apparently
 -- cpp to allow the different styles of MArr.getBounds in GHC 6.4.2 to 6.6
 
-module Runtime where
+module Faerieplay.Runtime where
 
 import Maybe
 import Monad
 import Ix
 import List
 import IO               (hFlush, stdout)
-import Common (trace, RunFlag(..))
 
 import Array
 
@@ -33,10 +32,13 @@ import Text.Printf      (printf)
 import qualified Text.PrettyPrint               as PP
 import Text.PrettyPrint                         (($$))
 
-import SashoLib
 
-import           CircGen                        as CG
-import Intermediate                             as Im
+import Faerieplay.SashoLib
+
+import Faerieplay.Common (trace, RunFlag(..))
+
+import Faerieplay.CircGen                       as CG
+import Faerieplay.Intermediate                  as Im
 
 
 

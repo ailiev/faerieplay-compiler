@@ -1,14 +1,14 @@
 {-# OPTIONS_GHC -cpp #-}
 
-module Common where
+module Faerieplay.Common where
 
 import Control.Monad.Error (Error, noMsg, strMsg, throwError)
 
 import qualified Debug.Trace                    as Trace
 
-import SashoLib                                 (StreamShow (..))
+import Faerieplay.SashoLib                                 (StreamShow (..))
 
-import ErrorWithContext
+import Faerieplay.ErrorWithContext
 
 
 -- This is the type of our type error representation.

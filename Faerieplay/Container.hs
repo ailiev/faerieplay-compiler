@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 -- -fglasgow-exts: for multi-param type classes
 
-module Container where
+module Faerieplay.Container where
 
 
 import List (union)

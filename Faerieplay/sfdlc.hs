@@ -30,24 +30,24 @@ import qualified Text.PrettyPrint           as PP
 
 #if defined SYNTAX_SFDL
 
-import qualified SFDL.Abs       as SrcAbs                -- the abstract syntax types from BNFC
-import qualified SFDL.Par       as SrcPar           -- the Happy parser 
-import qualified SFDL.ErrM      as SrcErrM
+import qualified Faerieplay.Bnfc.Sfdl.Abs   as SrcAbs -- the abstract syntax types from BNFC
+import qualified Faerieplay.Bnfc.Sfdl.Par   as SrcPar -- the Happy parser 
+import qualified Faerieplay.Bnfc.Sfdl.ErrM  as SrcErrM
 
-import qualified SFDL_Fixup     as SrcFixup         (fixupProg)
+import qualified Faerieplay.SFDL_Fixup      as SrcFixup         (fixupProg)
 
-import qualified GenHelper_SFDL as SrcGenHelper     (genHelper)
+import qualified Faerieplay.GenHelper_SFDL  as SrcGenHelper     (genHelper)
 
 #elif defined SYNTAX_C
 
 -- for C:
-import qualified SFDL_C.Abs     as SrcAbs              -- the abstract syntax types from BNFC
-import qualified SFDL_C.Par     as SrcPar              -- the Happy parser 
-import qualified SFDL_C.ErrM    as SrcErrM
+import qualified Faerieplay.Bnfc.Fcpp.Abs       as SrcAbs -- the abstract syntax types from BNFC
+import qualified Faerieplay.Bnfc.Fcpp.Par       as SrcPar -- the Happy parser 
+import qualified Faerieplay.Bnfc.Fcpp.ErrM      as SrcErrM
 
-import qualified SFDL_C_Fixup   as SrcFixup         (fixupProg)
+import qualified Faerieplay.SFDL_C_Fixup        as SrcFixup      (fixupProg)
 
-import qualified GenHelper_C    as SrcGenHelper     (genHelper)
+import qualified Faerieplay.GenHelper_C         as SrcGenHelper     (genHelper)
 
 #else
 
@@ -56,70 +56,77 @@ import qualified GenHelper_C    as SrcGenHelper     (genHelper)
 #endif
 
 
-
 import qualified Data.Map as Map
 
-import qualified Intermediate   as Im
-import qualified HoistStms      as Ho
-import qualified Unroll         as Ur
-import qualified CircGen        as CG
-import qualified Runtime        as Run
-import qualified GraphLib       as GrLib
-import           UDraw
-import           Common                     (trace,LogPrio(..),RunFlag(..))
-import ErrorWithContext                     (ErrorWithContext(..))
+import qualified Faerieplay.Version         as Vers
 
-import TypeChecker
 
-import SashoLib
+import qualified Faerieplay.Intermediate   as Im
+import qualified Faerieplay.HoistStms      as Ho
+import qualified Faerieplay.Unroll         as Ur
+import qualified Faerieplay.CircGen        as CG
+import qualified Faerieplay.Runtime        as Run
+import qualified Faerieplay.GraphLib       as GrLib
+import           Faerieplay.UDraw
+import           Faerieplay.Common          (trace,cMINPRIO,LogPrio(..),RunFlag(..))
+import Faerieplay.ErrorWithContext          (ErrorWithContext(..))
+
+import Faerieplay.TypeChecker
+
+import Faerieplay.SashoLib
 
 
 cC_HELPER_TEMPLATE = "GenHelper_C.templ.cc"
 
 
--- NOTE: this is updated by emacs function time-stamp; see emacs "Local Variables:"
--- section at the end.
--- g_timestamp = "2006-11-08 13:24:07 sasho"
 
--- these two updated by subversion, with property "svn:keywords" set to at least
--- "Date Revision"
-g_svn_id = "subversion  $Revision$"
-g_svn_date = " $Date$"
-
-g_version = trs [(" $",     ""),
-                 ("$",      ""),
-                 ("Revision:", "revision"),
-                 ("Date: ", "")]
-            $ g_svn_id ++ "; last modified on " ++ g_svn_date
-
-
-logmsg prio msg = hPutStrLn stderr $ "main log " ++ show prio ++ ": " ++ msg
+logmsg prio msg = do if prio >= cMINPRIO
+                      then hPutStrLn stderr $ "Main log " ++ show prio ++ ": " ++ msg
+                      else return ()
 
 
 main = do argv          <- getArgs
           name          <- getProgName
-          let o@(unsorted_opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
+          let o@(given_opts,args,errs) = Opt.getOpt Opt.Permute optionControl argv
 --          hPrint stderr o
+
+          -- check for an error during option parsing.
           if (not $ null errs) then do hPutStrLn stderr "Command line errors:"
                                        mapM_ (hPutStrLn stderr) errs
                                        hPutStrLn stderr $ usage name
                                        exitWith ExitSuccess
                                else return ()
 
+          -- if no options - default is to compile
+          let unsorted_opts = if (null given_opts)
+                                then [Compile]
+                                else given_opts
+
           -- bring the action to the front by sorting
           let (action:opts) = sort $ unsorted_opts
 
-              mb_infile     = listToMaybe args
-              infile        = fromMaybe "-" mb_infile
+          -- check for trivial actions, which do not need I/O file names
+          case action of               
+            Version         -> do putStrLn $ name ++ " " ++ Vers.getVersion
+                                  exitWith ExitSuccess
+            Help            -> do hPutStrLn stderr $ usage name
+                                  exitWith ExitSuccess
+            _               -> return ()
+            
+
+          -- need an input file
+          infile    <- maybe (do hPutStrLn stderr $
+                                        name ++ ": no input files.\nUse -h for help"
+                                 exitFailure)
+                             (return)
+                             (listToMaybe args)
 
           -- get the input handle, a file or stdin
           hIn               <- openFH ReadMode infile
 
           -- get an output file name if an input was provided
           -- Maybe monad
-          let mb_outfile    = do infile <- mb_infile
-                                 return $
-                                   modFileExt infile $
+          let outfile   = modFileExt infile $
                                    case action of
                                      Compile    -> "runtime"
                                      Run        -> "run"
@@ -128,10 +135,10 @@ main = do argv          <- getArgs
                                      _        -> fail "" -- no output file in this case
 
           -- output handle:
-          -- in order try: an '-o' option, input file with changed suffix, stdout
-          let fOut      = fromJust $ listToMaybe $ [f | Output f <- unsorted_opts] ++
-                                                     (maybeToList mb_outfile) ++
-                                                     ["-"]
+          -- in order try: an '-o' option, input file with changed suffix.
+          let fOut      = fromJust $ listToMaybe $ [f | Output f <- unsorted_opts]
+                                                    ++ [outfile]
+                                                     
           hOut          <- openFH WriteMode fOut
 
           case action of
@@ -140,12 +147,6 @@ main = do argv          <- getArgs
             Run             -> driveRunFile (getRTFlags opts) hIn hOut
             MakeGraph       -> driveGraph   hIn hOut
             PruneGraph s d  -> doPruneGraph s d hIn hOut
-
-            Version         -> putStrLn $ name ++ " " ++ g_version
-            Help            -> hPutStrLn stderr $ usage name
-
-            -- by default, compile
-            _               -> driveCompile infile hIn hOut opts
 
           mapM_ hClose [hIn, hOut]
 

@@ -1,4 +1,4 @@
-module TestReads where
+module Faerieplay.TestReads where
 
 data D = D Int Char
        deriving (Show)

@@ -2,10 +2,10 @@
 -- -fglasgow-exts for Typeable
 
 --
--- code to fix up the AST coming from the SFDL-C BNFC compiler.
+-- code to fix up the AST coming from the Fcpp BNFC compiler.
 --
 
-module SFDL_C_Fixup where
+module Faerieplay.SFDL_C_Fixup where
 
 
 import Data.Generics.Schemes    (everywhere, everything)
@@ -13,7 +13,9 @@ import Data.Generics.Aliases    (mkT, mkQ, extT)
 import Data.Typeable            (Typeable)
 import Data.Generics            (Data)
 
-import SFDL_C.Abs     as CAbs
+import Faerieplay.Bnfc.Fcpp.Abs     as CAbs
+
+
 
 fixupProg :: CAbs.Prog -> CAbs.Prog
 fixupProg = everywhere (mkT fixupDec

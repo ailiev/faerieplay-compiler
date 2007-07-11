@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 -- -fglasgow-exts: for multi-param type classes
 
-module Mapping where
+module Faerieplay.Mapping where
 
 
 import qualified Data.Map               as Map

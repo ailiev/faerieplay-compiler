@@ -1,4 +1,4 @@
-module Main where
+module Faerieplay.Main where
 
 import Control.Monad.State
 import Control.Monad.Writer

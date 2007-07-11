@@ -24,19 +24,19 @@
 -- convert SIf into an SIfElse with an empty else-clause
 
 
-module HoistStms (flattenProg,
+module Faerieplay.HoistStms (flattenProg,
                   flattenFunc   -- for testing in sfdlc.hs apparently.
                  ) where
 
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import SashoLib (mapTuple2, (>>==), replicateM)
-import qualified Container                      as Cont
-import Stack                                    (Stack(..))
+import Faerieplay.SashoLib (mapTuple2, (>>==), replicateM)
+import qualified Faerieplay.Container           as Cont
+import Faerieplay.Stack                         (Stack(..))
 
 
-import Intermediate
+import Faerieplay.Intermediate
 
 
 -- the state for these computations:

@@ -20,7 +20,7 @@ How is struct initialization dealt with?
     literal.
 -}
 
-module CircGen (
+module Faerieplay.CircGen (
                 Circuit,
                 Gate (..),
                 Op (..),
@@ -63,21 +63,22 @@ import qualified Data.Tree                      as Tree
 
 import qualified Control.Monad.State            as St
 
-import SashoLib                                 as Lib
-import UDraw
+import Faerieplay.SashoLib                      as Lib
+import Faerieplay.UDraw                         as UDraw
 -- import Sasho.XDR
 
-import qualified    TreeLib
-import qualified    Container                   as Cont
-import              Mapping
+import qualified    Faerieplay.TreeLib          as TreeLib
+import qualified    Faerieplay.Container        as Cont
+import              Faerieplay.Mapping          as Mapping
 
-import Stack                                    (Stack(..), maybeLookup)
+import Faerieplay.Stack                         as Stack   (Stack(..), maybeLookup)
 
-import qualified    GraphLib                    as GrLib
+import qualified    Faerieplay.GraphLib         as GrLib
 
-import Common (trace,LogPrio(..),logmsg,logProgress,logDebug,logDump,RunFlag(..))
+import Faerieplay.Common                        (trace,LogPrio(..),logmsg,logProgress,
+                                                 logDebug,logDump,RunFlag(..))
 
-import Intermediate as Im
+import Faerieplay.Intermediate as Im
 
 
 

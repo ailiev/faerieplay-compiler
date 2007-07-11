@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
 
-module SashoLib (
+module Faerieplay.SashoLib (
 		 (.&&),
                  (.||),
 		 (.*),
@@ -11,6 +11,8 @@ module SashoLib (
 
                  (>>==),
 
+                 compilerAssert,
+                 throwCompilerErr,
 
         comp2_1,
 
@@ -127,7 +129,7 @@ import Monad (MonadPlus, mzero, mplus, liftM)
 
 import Maybe                                    (isNothing, fromJust)
 
-import Control.Monad.Error (MonadError(..))
+import Control.Monad.Error (MonadError(..),Error(strMsg),throwError)
 -- import Control.Monad.Identity (runIdentity)
 
 import qualified    Text.PrettyPrint            as PP
@@ -142,6 +144,20 @@ import qualified Data.Bits                      as Bits
 import qualified Data.Map                       as Map
 
 -- import qualified Debug.Trace                    as Trace
+
+
+
+-- | assertion at the compiler level, ie. a failure indicates a compiler bug.
+-- in an arbitary Error monad
+compilerAssert :: (Error e, MonadError e m) => Bool -> String -> m ()
+compilerAssert pred msg
+    | pred      = return ()
+    | otherwise = throwCompilerErr msg
+
+
+-- | Raise a compiler exception within the current Error monad.
+throwCompilerErr :: (Error e, MonadError e m) => String -> m a
+throwCompilerErr msg = throwError $ strMsg ("Compiler internal bug: " ++ msg)
 
 
 

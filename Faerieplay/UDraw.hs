@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
 -- -fglasgow-exts: for parallel list comprehension
 
-module UDraw (
+module Faerieplay.UDraw (
               Term
              , makeTerm
              , TermId
@@ -10,9 +10,9 @@ module UDraw (
     where
 
 
-import              SashoLib
-import              Common                          (trace)
-import qualified    GraphLib                        as GrLib
+import              Faerieplay.SashoLib
+import              Faerieplay.Common               (trace)
+import qualified    Faerieplay.GraphLib             as GrLib
 
 
 import              Maybe                           (maybeToList, fromJust, isJust)

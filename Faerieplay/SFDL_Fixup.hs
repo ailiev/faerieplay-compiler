@@ -6,7 +6,7 @@
 -- Need to get rid of SizeExp nodes, and convert them to normal Exp.
 --
 
-module SFDL_Fixup where
+module Faerieplay.SFDL_Fixup where
 
 import Data.Generics.Schemes    (everywhere)
 import Data.Generics.Aliases    (mkT)
@@ -15,7 +15,7 @@ import Data.Generics.Aliases    (mkT)
 --import Data.Generics            (Data)
 
 
-import SFDL.Abs                 -- as Abs
+import Faerieplay.Bnfc.Sfdl.Abs                 -- as Abs
 
 fixupProg :: Prog -> Prog
 fixupProg = everywhere (mkT fixupIntT)

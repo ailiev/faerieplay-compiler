@@ -1,4 +1,4 @@
-module Main where
+module Faerieplay.Main where
 
 
 -- repeat this many times

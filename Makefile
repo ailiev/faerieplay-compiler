@@ -19,8 +19,6 @@ GHCFLAGS += -odir $(ODIR) -hidir $(ODIR)
 
 # GHCFLAGS += -Wall
 
-# GHC = /home/sasho/minime/ghc/ghc-6.4.2/bin/i386-unknown-linux/ghc
-# GHC = $(HOME)/work/minime/ghc-6.6-RC2-sasho/bin/ghc
 GHC = ghc
 
 ODIR = build
@@ -83,23 +81,57 @@ endif
 PACKS = -package fgl -package Cabal
 
 
-# basename of our grammar (.cf) file
-CF_ROOT = $(source_lang)/Bnfc
+# package  where BNFC-generated files go.
+BNFC_PACKAGE_ROOT = Faerieplay.Bnfc
+
+BNFC_LANG_PACKAGE_ROOT = $(BNFC_PACKAGE_ROOT).$(source_lang)
+
+BNFC_LANG_DIR = $(subst .,/,$(BNFC_LANG_PACKAGE_ROOT))
+
+EXE = $(ODIR)/sfdlc
+
+all: $(VERSFILE) $(EXE)
+#	@echo srcs = $(SRCS)
+#	@echo vers file = $(VERSFILE)
+
+$(EXE):
+#	HFLAGS="$(GHCFLAGS)" hmake -d$(ODIR) -ghc $(PACKS) sfdlc
+	$(GHC) --make $(GHCFLAGS) -o $@ Faerieplay/sfdlc.hs
 
 
-all: $(ODIR)/sfdlc
+SRCS = $(shell find $(CURDIR)/Faerieplay -name '*.hs' -o -name '*.cf') 
 
 
 
+##################
+## version management
+##################
+versions: $(VERSFILE)
+
+.PHONY: versions
+
+VERSFILE = $(CURDIR)/Faerieplay/Version.hs
+
+$(VERSFILE): $(VERSFILE).tok $(SRCS)
+#	echo srcs = $^
+	$(CURDIR)/update-versions.pl < $(VERSFILE).tok > $(VERSFILE) $^
+
+
+
+
+# Now using BNFC 2.3b features, though only for artifact layout.
 BNFCROOTS=Abs Lex Print Test ErrM Par Skel
-bnfc_files=$(patsubst %,$(CF_ROOT)/%.hs,$(word 1,$(BNFCROOTS)))
-# bnfc produces a misnamed Makefile, hence specifying that name here.
-$(bnfc_files): $(CF_ROOT).cf
-	bnfc -haskell -p sfdl/Bnfc $<
-	ed $(CF_ROOT)/Abs.hs < add-bnfc-derives.ed
-	make -C $(CF_ROOT)
+bnfc_files=$(patsubst %,$(BNFC_LANG_DIR)/%.hs,$(word 1,$(BNFCROOTS)))
+$(bnfc_files): $(source_lang).cf
+	bnfc -haskell -d -p $(BNFC_PACKAGE_ROOT) $<
+	happy -gca $(BNFC_LANG_DIR)/Par.y
+	alex -g $(BNFC_LANG_DIR)/Lex.x
+#	(cd $(BNFC_LANG_DIR); latex Doc.tex; dvips Doc.dvi -o Doc.ps)
+	ed $(BNFC_LANG_DIR)/Abs.hs < add-bnfc-derives.ed
+#	ghc --make $(BNFC_LANG_DIR)/Test.hs -o Faerieplay/Bnfc/Sfdl/Test
 
 bnfc: $(bnfc_files)
+
 
 
 %.o: %.hs
@@ -113,12 +145,9 @@ $(ODIR)/%.o: %.hs
 %.hi: %.hs
 	$(GHC) -E -ddump-minimal-imports $(GHCFLAGS) $< > $@
 
-$(ODIR)/sfdlc:
-#	HFLAGS="$(GHCFLAGS)" hmake -d$(ODIR) -ghc $(PACKS) sfdlc
-	$(GHC) --make $(GHCFLAGS) -o $@ sfdlc.hs
 
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.
-.PHONY: $(ODIR)/sfdlc bnfc
+.PHONY: $(EXE) bnfc
 
 hat:
 	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
@@ -131,7 +160,7 @@ install: $(ODIR)/sfdlc
 
 tags: TAGS
 
-TAGS: $(wildcard *.hs) $(wildcard SFDL/*.hs)
+TAGS: $(SRCS)
 	hasktags6 --etags $^
 
 # to make postscript of a circuit (or any) gviz file:

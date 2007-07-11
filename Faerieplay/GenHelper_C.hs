@@ -2,12 +2,12 @@
 -- generate a helper C++ file for the main C++ file, which mainly parses the parameters and
 -- prints out the results.
 
-module GenHelper_C where
+module Faerieplay.GenHelper_C where
 
 
-import qualified Intermediate                   as Im
+import qualified Faerieplay.Intermediate        as Im
 
-import SashoLib                                 (DocAble(..))
+import Faerieplay.SashoLib                      (DocAble(..))
 
 import Control.Exception                        (assert)
 import Text.Printf                              (printf)

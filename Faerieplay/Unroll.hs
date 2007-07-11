@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 -- -fglasgow-exts for the type constraint of inScope
 
-module Unroll where
+module Faerieplay.Unroll where
 
 
 -- import Debug.Trace
@@ -17,17 +17,17 @@ import Maybe                            (fromJust)
 import List                             (unfoldr, partition)
 import qualified Data.Map               as Map
 
-import SashoLib                         ((<<), ilog2, unfoldrM,
+import Faerieplay.SashoLib              ((<<), ilog2, unfoldrM,
                                          mapTuple2, iterateWhileM,
                                          fromJustMsg)
-import Stack                                    (Stack(..), maybeLookup)
-import qualified Container              as Cont
+import Faerieplay.Stack                 (Stack(..), maybeLookup)
+import qualified Faerieplay.Container   as Cont
 
-import Common
-import Intermediate
-import HoistStms
+import Faerieplay.Common
+import Faerieplay.Intermediate
+import Faerieplay.HoistStms
 
-import qualified TypeChecker            as Tc
+import qualified Faerieplay.TypeChecker as Tc
 
 
 

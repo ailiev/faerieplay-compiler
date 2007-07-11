@@ -1,4 +1,4 @@
-module TreeLib where
+module Faerieplay.TreeLib where
 
 import qualified Data.Tree                      as Tree
 

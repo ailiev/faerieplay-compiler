@@ -1,10 +1,10 @@
-module Stack where
+module Faerieplay.Stack where
 
 
 import Monad                        (MonadPlus, msum)
 import qualified Data.Map           as Map
 
-import SashoLib                     (modifyFirst)
+import Faerieplay.SashoLib          (modifyFirst)
 
 
 -- | A class of types with Stack-like functionality. Not sure if anything other than a

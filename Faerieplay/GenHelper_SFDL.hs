@@ -1,6 +1,6 @@
-module GenHelper_SFDL where
+module Faerieplay.GenHelper_SFDL where
 
-import qualified Intermediate                   as Im
+import qualified Faerieplay.Intermediate        as Im
 
 -- do not need a helper for SFDL
 genHelper :: String -> Im.Prog -> String

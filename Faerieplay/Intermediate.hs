@@ -2,7 +2,7 @@
 -- -fglasgow-exts: for "Non-type variables, or repeated type variables",
 -- in evalStatic
 
-module Intermediate where
+module Faerieplay.Intermediate where
 
 
 import Text.PrettyPrint
@@ -25,15 +25,15 @@ import Data.Generics            (Data,
                                  mkT, extT, everywhere
                                 )
 
-import qualified SFDL_C.Abs                             as CAbs
-import qualified SFDL_C.Print                           as BNFCPrint
+import qualified Faerieplay.Bnfc.Sfdl.Abs       as CAbs
+import qualified Faerieplay.Bnfc.Sfdl.Print     as BNFCPrint
 
-import SashoLib                                         as SL
+import Faerieplay.SashoLib                      as SL
 
 
-import qualified Container as Cont
+import qualified Faerieplay.Container as Cont
 
-import Common (MyError(..), MyErrorCtx, throwErrorCtx, trace, logDebug)
+import Faerieplay.Common (MyError(..), MyErrorCtx, throwErrorCtx, trace, logDebug)
 
 
 -- the name of our main function.
@@ -151,13 +151,16 @@ data TypedName =
 -}
 
 
--- I would ideally not have an SBlock here, but it conveys variable scoping
--- information, so we'll keep the blocks until scoping of variables (VScoped) is
--- done during unrolling, then SBlock will be done away with
+-- | Statement
 data Stm =
-   SBlock VarSet [Stm]
- | SAss Exp Exp
- | SPrint String [Exp]
+         -- I would ideally not have an SBlock here, but it conveys variable scoping
+         -- information, so we'll keep the blocks until scoping of variables (VScoped) is
+         -- done during unrolling, then SBlock will be done away with.
+   SBlock                       -- ^ A block of statements.
+     VarSet                     -- ^ The variables declared in this block.
+     [Stm]          
+ | SAss Exp Exp                 -- ^ An assignment statement.
+ | SPrint String [Exp]          -- ^ Print values for a list of expressions.
 
  | SFor                         -- ^ A for-loop
    Var                          -- ^ The loop counter variable
@@ -187,17 +190,15 @@ data Stm =
            )
 
 
--- an assignment
--- FIXME: do not need the assignment op, this is normalized before the typechecker!
+-- | An assignment.
 data AssStm =
-   AssStm Exp AssOp Exp
+    AssStm
+      Exp                       -- ^ The Lval
+      Exp                       -- ^ The Rval
   deriving (Eq, Ord             -- Ord needed by Stm
            , Show, Read
            , Typeable, Data
            )
-
--- the various assignment operators, like "+=" in C
-type AssOp = CAbs.AssOp
 
 
 
@@ -217,27 +218,27 @@ data Exp =
    EVar Var
    -- Structure and field number (look up other infos in the StructT)
  | EStruct Exp Int
- | EArr Exp Exp                 -- array
- | ELit Lit                     -- literal
+ | EArr Exp Exp                 -- ^ array
+ | ELit Lit                     -- ^ literal
  | EFunCall Ident [Exp]
  | UnOp UnOp Exp
  | BinOp BinOp Exp Exp
- | EGetBit Exp Exp              -- EGetBit i exp = i-th bit of exp
+ | EGetBit Exp Exp              -- ^ EGetBit i exp = i-th bit of exp
  | EStatic Exp                  -- a static expression, computable at
                                 -- compile time. use to mark all
                                 -- static expressions
  | ExpT Typ Exp                 -- a type annotation
  | ESeq [Stm] Exp               -- several assignment statements,
                                 -- followed by an expression.
-   -- Indicate to the circuit generator (and runtime) that an
+   -- | Indicate to the circuit generator (and runtime) that an
    -- array should be prepared
- | EArrayInit String            -- array name
-              Int               -- element size
-              Integer           -- array length
- | EStructInit Int              -- prepare a struct with that many primitive (Int) fields
+ | EArrayInit String            -- ^ array name
+              Int               -- ^ element size
+              Integer           -- ^ array length
+ | EStructInit Int              -- ^ prepare a struct with that many primitive (Int) fields
                                 -- and subfields
   deriving (Eq
-           , Ord                -- need Ord in CircGen, where Exp is a key in the array
+           , Ord                -- ^ need Ord in CircGen, where Exp is a key in the array
                                 -- location table.
            , Show, Read
            , Typeable, Data
@@ -934,12 +935,14 @@ docList sepa xs = sep $ punctuate sepa xs
 
 
 instance DocAble AssStm where
-    doc (AssStm lval op rval)           = cat [docExp lval, SL.doc op, docExp rval]
+    doc (AssStm lval rval)           = cat [docExp lval, text "=", docExp rval]
 
 
+{--
 instance DocAble AssOp where
     -- use the machinery in the BNFC-generated code.
     doc op = text $ BNFCPrint.render $ BNFCPrint.prt 0 op
+--}
 
 
 docExp e = case e of
@@ -954,7 +957,7 @@ docExp e = case e of
                                         -> let fld_name = getFieldName t fld_idx
                                            in  text fld_name
                                  _      -> int fld_idx
-                           in  cat [docExp str_e, text ".", field_doc]
+                           in  docExp str_e <> text "." <> field_doc
 
     (EArr arr idx)      -> cat [docExp arr, text "[Arr:", docExp idx, text "]"]
     (ELit l)            -> docLit l
@@ -981,9 +984,9 @@ docExp e = case e of
 docTyp :: Typ -> Doc
 docTyp t =
     case t of
-      -- NOTE: C-specific now
-      (IntT size_e)     -> text "int"--let size = evalStaticOrDie size_e in
---                           cat [text "Int", braces (docExp size_e)]
+      (IntT size_e)     -> let size = evalStaticOrDie size_e in
+                               -- not using size_e right now.
+                               cat [text "Int", char '<', docExp size_e, char '>']
       (GenIntT)         -> cat [text "Int"]
       (BoolT)           -> text "bool"
       (VoidT)           -> text "void"
@@ -1096,8 +1099,10 @@ instance StreamShow Stm where
 instance StreamShow AssStm where
     strShows = showsPrec 0 . SL.doc
 
+{--
 instance StreamShow AssOp where
     strShows = showsPrec 0 . SL.doc
+--}
 
 instance StreamShow Exp where
     strShows = showsPrec 0 . docExp

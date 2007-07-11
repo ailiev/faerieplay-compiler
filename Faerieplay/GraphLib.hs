@@ -2,7 +2,7 @@
 -- -fglasgow-exts: for parallel list comprehension
 
 
-module GraphLib
+module Faerieplay.GraphLib
 (
  contexts,
  start_ctxs,
@@ -31,11 +31,12 @@ import qualified Data.Graph.Inductive.Tree      as TreeGr
 import qualified Data.Graph.Inductive.Query.DFS as GrDFS
 import qualified Data.Graph.Inductive.Query.BFS as GrBFS
 
-import SashoLib                                 (comp2_1,expand,proj_tup2,(<<),
+import Faerieplay.SashoLib                      (comp2_1,expand,proj_tup2,(<<),
                                                 StreamShow(..), strictEval)
-import qualified TreeLib
 
-import Common                                   (trace)
+import qualified Faerieplay.TreeLib             as TreeLib
+
+import Faerieplay.Common                        (trace)
 
 
 

@@ -1,7 +1,7 @@
 -- a tree class
 -- awaiting understanding of universal quantification for types...
 
-module Tree where
+module Faerieplay.Tree where
 
 
 -- needed functions:

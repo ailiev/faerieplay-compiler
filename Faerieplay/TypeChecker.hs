@@ -4,7 +4,7 @@
 -- code to split the AST into several namespaces of global bindings:
 -- constants, types, variables and functions
 
-module TypeChecker
+module Faerieplay.TypeChecker
     (
      typeCheck,
      name2var
@@ -19,23 +19,25 @@ import Maybe    (fromJust)
 
 import qualified Data.Map as Map
 import qualified Control.Monad.State as St --- (MonadState, State, StateT, modify, runStateT)
-import Control.Monad.Writer (Writer, runWriter, tell)
-import Control.Monad.Error (Error, throwError, catchError, noMsg, strMsg,ErrorT(..))
+import Control.Monad.Writer         (Writer, runWriter, tell)
+import Control.Monad.Error          (Error, MonadError,
+                                     throwError, catchError, noMsg, strMsg,ErrorT(..))
 import Control.Monad.Trans (lift)
 
-import Common (MyError(..),MyErrorCtx, ErrCtxMonad, trace, logDebug)
+import Faerieplay.Common (MyError(..),MyErrorCtx, ErrCtxMonad, trace, logDebug)
 
-import SashoLib ((<<), ilog2,
+import Faerieplay.SashoLib ((<<), ilog2,
                  myLiftM, concatMapM, iterateWhileM,
                  (>>==), mapTuple2, projSnd,
-                 StreamShow(..)
+                 StreamShow(..),
+                 compilerAssert, throwCompilerErr
                 )
 
-import Stack                           (Stack(..), maybeLookup,modify_first_map)
+import Faerieplay.Stack               as Stack (Stack(..), maybeLookup,modify_first_map)
 
-import qualified Container as Cont
+import qualified Faerieplay.Container as Cont
 
-import qualified ErrorWithContext                   as EWC
+import qualified Faerieplay.ErrorWithContext                   as EWC
 
 --
 -- the abstract syntax tree description
@@ -43,13 +45,13 @@ import qualified ErrorWithContext                   as EWC
 --
 #if defined SYNTAX_C
 
-import qualified SFDL_C.BNFC.Abs as T
-import qualified SFDL_C.BNFC.Print as Print
+import qualified Faerieplay.Bnfc.Fcpp.Abs as T
+import qualified Faerieplay.Bnfc.Fcpp.Print as Print
 
 #elif defined SYNTAX_SFDL
 
-import qualified SFDL.BNFC.Abs as T
-import qualified SFDL.BNFC.Print as Print
+import qualified Faerieplay.Bnfc.Sfdl.Abs as T
+import qualified Faerieplay.Bnfc.Sfdl.Print as Print
 
 #else
 
@@ -58,7 +60,7 @@ import qualified SFDL.BNFC.Print as Print
 #endif
 
 
-import qualified Intermediate as Im
+import qualified Faerieplay.Intermediate as Im
 
 
 type TypeError = MyErrorCtx
@@ -320,9 +322,8 @@ checkStm s@(T.SFor_C cnt@(T.Ident cnt_str)
                  return vals
                  
 
-          nextVal countVar (Im.AssStm lval op rval) x =
+          nextVal countVar (Im.AssStm lval rval) x =
               do let rval'  = Im.substExp countVar (Im.lint x) rval
-                 -- FIXME: have to use 'op' here, not just a straight assignment
                  lval'      <- Im.evalStatic rval'
                  return lval'
 
@@ -377,16 +378,23 @@ checkStm s@(T.SReturn exp)              =
 
 
 
--- there should be only simple ASOpAss left at this point, after the fixup.
+-- there should be only simple ASOpAss left at this point, after the fixup. Also, they
+-- should only have assignment op AssID ('=' and not '+=' etc.)
+checkAssStm :: T.AssStm -> StateWithErr Im.AssStm
 checkAssStm ass@(T.ASOpAss lval op rval) =
     setContext ass $
-    do new_lval     <- checkLVal lval
+    do compilerAssert (op /= T.AssId)
+                      "Only expect identity assignment operator during type check, not += etc"
+       new_lval     <- checkLVal lval
        new_rval     <- checkExp rval
-       return $ Im.AssStm new_lval op new_rval
+       return $ Im.AssStm new_lval new_rval
+
+
+checkAssStm s =     throwCompilerErr
+                     "Only expect simple assignment type during type check, not x++, ++x, etc"
 
 -- SYNTAX_C
 #endif
-
 
 
 
@@ -1086,7 +1094,7 @@ doOp (T.ETimes _ _) = (*)
 
 
 -- give quick StreamShow instances to the concrete syntax types which need it here, via
--- their provided Show instances
+-- their Bnfc-provided Show instances
 {-
 instance StreamShow T.Stm   where strShows  = showsPrec 0
 instance StreamShow T.Exp   where strShows  = showsPrec 0
