@@ -1,0 +1,33 @@
+program TestArray
+{
+
+    const WordSize = 32;
+    const N = 63;
+    const M = 190;
+    
+    type Word = Int<WordSize>;
+
+    type S = struct { Word a,
+		      Word b,
+		      Word c,
+		      Word d,
+		      Word e };
+
+    
+    type AliceT = struct { Word[N] input };
+
+
+    function Word sfdlmain (AliceT alice)
+    {
+	var Word out;
+
+	out = 0;
+	
+	for (i = 0 to M-1) {
+	    out = out + alice.input[i % N];
+	}
+
+	sfdlmain = out;
+    }
+		
+}

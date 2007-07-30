@@ -1,0 +1,40 @@
+// -*- c -*-
+
+// correct answer, from a shell command (adjust x as needed)
+/*
+echo "x=3; (0 + 4*(2*x)) * (x^2)" | bc
+*/
+
+program TestLexicalScope {
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    
+    // correct result: (0 + 4*(2*x)) * (x^2)
+    // likely incorrect result: (0 + 4*x) * (x^2)
+    function Word sfdlmain (Word x) {
+	var Word y, z;
+
+	y = 0;
+	z = x * 2;
+	
+	for (i = 0 to 1) {
+	  var Word x;
+	  x = z;
+	  
+	  for (j = 0 to 1) {
+	    // here we use the inner x
+	    y = y + x;
+	  }
+	}
+
+	for (i = 0 to 1) {
+	  // here use the outer x (param to main)
+	  y = y * x;
+	}
+
+	sfdlmain = y;
+    }
+		
+}

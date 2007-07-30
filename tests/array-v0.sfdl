@@ -1,0 +1,33 @@
+// -*- c -*-
+
+// test scalar addition by summing numbers 0 to N-1
+program Sum {
+
+    const N = 64;
+    
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    function Word sum (Word [N] ins) {
+	var Word res;
+	res = 0;
+	
+	for (i = 0 to N-1) {
+	    res = res + ins[i];
+	}
+
+	sum = res;
+    }
+
+
+    function Word sfdlmain () {
+	var Word[N] xs;
+	for (i = 0 to N-1) {
+	    xs[i] = i;
+	}
+
+	sfdlmain = sum (xs);
+    }
+		
+
+}

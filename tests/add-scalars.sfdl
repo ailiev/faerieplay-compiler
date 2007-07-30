@@ -1,0 +1,26 @@
+// -*- c -*-
+
+// do a bunch of scalar additions
+
+program ScalarAddition
+{
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    const REPEAT = 8;
+    
+    // computes alice + R*bob + sum[0..R-1]
+    // haskell one-liner (run in 'hugs' or such):
+    // let alice=10; bob=12; r=8 in alice + r*bob + sum[0..r-1]
+    function Word sfdlmain (Word alice, Word bob) {
+	
+	for (i = 0 to REPEAT-1) {
+	    alice = alice + bob + i;
+	}
+
+	sfdlmain = alice;
+    }
+		
+
+}

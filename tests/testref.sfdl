@@ -1,0 +1,32 @@
+// -*- c -*-
+
+program TestRef
+{
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    const REPEAT = 10;
+
+    function Word accumulate (Word & accum, Word x) {
+	accum = accum + x;
+	accumulate = 0;
+    }
+
+    // result should be:
+    // a + REPEAT*b
+    // important point is that it's done via a reference parameter.
+    function Word sfdlmain (Word a, Word b) {
+	var Word accum;
+
+	accum = a;
+	
+	for (i = 1 to REPEAT) {
+	    var Word dummy;
+	    dummy = accumulate (accum, b);
+	}
+
+	sfdlmain = accum;
+    }
+    
+}

@@ -1,0 +1,22 @@
+program TestPrint
+{
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    type AliceT = struct { Word input };
+    type BobT   = struct { Word input };
+
+    function Word add (Word x, Word y) {
+	print ("Adding x and y: ", x, y);
+	add = x + y;
+    }
+
+
+    function Word sfdlmain (AliceT alice, BobT bob)
+    {
+      sfdlmain = add (alice.input, bob.input);
+    }
+		
+
+}

@@ -1,0 +1,39 @@
+program NestedLoops
+{
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    const N = 10;
+
+    const X=9;
+    const Y=7;
+    
+    // use addition and loops to achieve exponentiation: return X^Y.
+    // note that we cannot have X and Y be (input) variables, as they delimit
+    // the loops below, and so need to be static/constant.
+    function Word sfdlmain () {
+
+      var Word x;
+
+      x = 1;
+
+      for (i = 1 to Y) {
+
+	//want:
+	// x = x*X;
+	// but do in a loop
+	var Word x_1;
+	x_1 = x;
+	x = 0;
+	for (j = 1 to X) {
+	  x = x + x_1;
+	}
+
+      }
+
+      sfdlmain = x;
+	
+    }
+
+}

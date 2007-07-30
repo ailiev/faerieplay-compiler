@@ -1,0 +1,28 @@
+program Testscalar
+{
+
+    const WordSize = 32;
+    const G = 2000;
+
+    type Word = Int<WordSize>;
+
+    
+    type AliceT = struct { Word input };
+
+    function Word sfdlmain (AliceT alice)
+    {
+	var Word out;
+
+	out = 0;
+	
+	for (i = 0 to G-1) {
+	    out = out + (G*alice.input);
+	    if (out > 10000) {
+		out = out - (G/10);
+	    }
+	}
+
+	sfdlmain = out;
+    }
+		
+}

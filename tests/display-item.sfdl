@@ -1,0 +1,20 @@
+program Model {
+  type Word = Int<32>;
+  /* to keep the circuit small */
+  const N = 1;
+
+  function Word
+  sfdlmain (Word x, Word i,
+	    Word[N] A)
+  {
+    if (x != 0) {
+      sfdlmain = A[i];
+    }
+    else {
+      print ("x = ", x);
+      A[i] = x;
+      sfdlmain = x + i;
+    }
+  } /* end main */
+
+}

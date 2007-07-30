@@ -1,0 +1,36 @@
+program ReadArr
+{
+    // Alice has two arrays of integers;
+    // Bob has a selector - which array to read, and an index
+    // Bob gets the specified index of his chosen array.
+    
+    const   WordSize = 32;
+    const   N 	     = 64;
+
+    type    Word     = Int<WordSize>;
+
+    type    AliceInT = struct { Word [N] As,
+				Word [N] Bs
+				};
+    
+    type    BobInT   = struct { Boolean readA,
+				Word idx
+				};
+
+    type    Output   = struct { Word bob };
+
+    function Output sfdlmain (AliceInT alice, BobInT bob)
+    {
+	var Word result;
+	
+	if (bob.readA) {
+	    result = alice.As[bob.idx];
+	}
+	else {
+	    result = alice.Bs[bob.idx];
+	}
+
+	sfdlmain.bob = result;
+    }
+
+}

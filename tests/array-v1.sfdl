@@ -1,0 +1,86 @@
+// -*- c -*-
+
+// introduce some conditional accesses to arrays.
+
+// to test, an equivalent GNU bc program:
+/*
+  n=64;
+    define condsum (ins[]) {
+	res = 0;
+	
+	for (i = 0; i<=n-1; i++) {
+	    # this will produce the sum of the first half of the list and twice
+	    # the sum of the second half.
+	    if (i < n/2) {
+		res = res + ins[i];
+	    }
+	    if (! (i < n/2)) {
+		res = res + 2*ins[i];
+	    }
+	}
+
+	return res;
+    }
+
+
+    define sfdlmain () {
+
+	# fill in xs, with each even index i having i, and each odd index i
+	# having 2i
+	for (i = 0; i < n; i++) {
+	    if (i % 2 == 0)
+		xs[i] = i;
+	    if (i % 2 != 0)
+		xs[i] = 2*i;
+	}
+
+	return condsum (xs[]);
+    }
+
+    sfdlmain();
+*/
+program CondSum {
+
+    const N = 64;
+    
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    function Word condsum (Word [N] ins) {
+	var Word res;
+	res = 0;
+	
+	for (i = 0 to N-1) {
+	    // this will produce the sum of the first half of the list and twice
+	    // the sum of the second half.
+	    if (i < N/2) {
+		res = res + ins[i];
+	    }
+	    else {
+		res = res + 2*ins[i];
+	    }
+	}
+
+	condsum = res;
+    }
+
+
+    function Word sfdlmain () {
+	var Word[N] xs;
+
+	// fill in xs, with each even index i having i, and each odd index i
+	// having 2i
+	for (i = 0 to N-1) {
+	    if (i % 2 == 0) {
+		xs[i] = i;
+	    }
+	    else {
+		xs[i] = 2*i;
+	    }
+	}
+
+	sfdlmain = condsum (xs);
+    }
+		
+
+}

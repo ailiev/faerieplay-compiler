@@ -1,0 +1,25 @@
+program ScopesTest
+{
+
+    const WordSize = 8;
+    type Word = Int<WordSize>;
+
+    function Word sfdlmain (Word a, Word b)
+    {
+
+	var Word [32] A;
+	
+	if (a > b) {
+	    A[12] = 30;
+	}
+/* 	else { */
+/* 	    A[12] = 31; */
+/* 	} */
+	A[12] = 32;
+	
+	sfdlmain = A[0] * A[1];
+	
+    }
+		
+
+}

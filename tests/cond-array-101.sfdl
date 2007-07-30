@@ -1,0 +1,18 @@
+program SimplestArrayCond
+{
+    const N = 10;
+    type Word = Int<32>;
+
+    function Word sfdlmain (Word [N] A, Word i, Word x)
+    {
+      if (i > 5) {
+	A[i] = x;
+      }
+      else {
+	A[6] = x;
+      }
+
+      sfdlmain = A[i];
+    }
+
+}

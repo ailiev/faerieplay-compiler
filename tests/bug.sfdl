@@ -1,0 +1,33 @@
+// -*- c -*-
+
+program ReadArrBug
+{
+
+    // Alice has two arrays of integers;
+    // Bob has a selector - which array to read, and an index
+    // Bob gets the specified index of his chosen array.
+    
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    const N = 4;
+
+    type    AliceInT = struct { Word [N] As,
+				    Word [N] Bs };
+
+    type    BobInT   = struct { Boolean readA,
+				    Word idx };
+
+    function Word sfdlmain (AliceInT alice, BobInT bob) {
+
+	// BUG: compiler (svn trunk 563 or so) does not generate a Select gate
+	// for this!
+	if (bob.readA) {
+	    sfdlmain = alice.As[bob.idx];
+	}
+	else {
+	    sfdlmain = alice.Bs[bob.idx];
+	}
+    }
+
+}
