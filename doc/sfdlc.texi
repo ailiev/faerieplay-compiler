@@ -218,6 +218,40 @@ are specified as in boost: @code{array<array<T,N1>, N2>}.
 @node Prerequisites
 @chapter Prerequisites
 
+@section Build prerequisites
+
+Building @sfdlc requires the following libraries and toolkits.
+
+@itemize @bullet
+
+@item @file{bnfc}
+parser generator from @indicateurl{http://www.cs.chalmers.se/~markus/BNFC/}.
+The current build needs version 2.3b or later. Version 2.3b has more
+flexible support than 2.2 for placing the bnfc artifacts (lexer and
+parser files, as well as tartet language code).
+
+@item @file{ghc} version 6.4 or 6.6 to compile @sfdlc{}. Later versions may work, but
+major @file{ghc} revisions may not be source-compatible with older
+versions. Also needs several Haskell packages which are not in the base library:
+@itemize @minus
+@item The functional graph library (fgl) (package @file{Data.Graph.Inductive})
+@item The monad template library (mtl)
+@item The ``ditch your boilerplate'' generic programming library (package @file{Data.Generics}).
+@end itemize
+All these should be available with ghc, but may need to be installed separately.
+
+@end itemize
+
+@section Runtime prerequisites
+
+@itemize @bullet
+
+@item @file{uDrawGraph}, from @indicateurl{http://www.informatik.uni-bremen.de/uDrawGraph/en/uDrawGraph/}. This is optional, but useful to visualize the circuits produced.
+
+@end itemize
+
+
+
 @section Boost array library
 
 FC++ represents arrays as the Boost array class
@@ -232,31 +266,73 @@ compile FC++ code with a C++ compiler.
 The basic invocation syntax is:
 
 @example
-sfdlc [ options ] file.@value{SRCEXT}.
+@sfdlc [ actions and options ] file.@value{SRCEXT}
 @end example
 
 
-@code{sfdlc} understands the following options:
+@code{sfdlc} understands the following options. Please see @ref{File
+types produced} for file extensions associated with different input
+and output files.
 
+
+@section Actions
 
 @table @samp
-       
-@item -h
-Print out the help text and exit.
-
-@item -o @var{FILE}
-@itemx --output=@var{file}
-
-Write output to @var{file}.
-
 
 @item -c
 @itemx --compile
 Compile. This is the default action.
 
+@item -G
+@itemx --mkgraph
+Generate a UDrawGraph file. This must be run on a circuit dump (@file{.cct}).
+
+@item -r
+@itemx --run
+Run the circuit simulator on a gates dump (@file{.gates}).
 
 
+@item -V
+@itemx --version
+Print out the version number.
+
+@item -h
+@itemx --help
+Print out the help text and exit.
+
+@end table
+
+
+@section Options
+
+@table @samp
+       
+
+@item -o @var{FILE}
+@itemx --output=@var{file}
 Write output to @var{file}.
+
+@item --dgt
+@itemx --dump-gates
+In addition to compiling, dump the list of gates, in topological order, to a @file{.gates} file.
+
+@item --dgr
+@itemx --dump-graph
+In addition to compiling, dump the circuit to a @file{.cct} file.
+
+@item -p
+@itemx --gen-print
+Generate @code{print} gates, from @code{print} statements in
+the source. If not provided, @code{print} statements are ignored.
+
+@item -v
+@itemx --verbose
+Print more information during compilation.
+
+@item --bindump
+For the circuit simulator (invoked with `--run'). Produce a trace of
+the binary gate values, so that it can be compared with the same trace
+produced by the Circuit VM.
 
 
 @end table
@@ -273,17 +349,21 @@ Write output to @var{file}.
 This is the file which is given to the circuit virtual machine for execution.
 Extension: @file{.runtime}.
 
-@section Circuit graph in internal format
+@section Circuit dump
 
-This is a dump of the circuit graph, before it is serialized. Extension: @file{.cct}.
+This is a dump of the circuit in an internal format. @sfdlc can read
+this format as well as write it, and thus use it for other actions,
+like simulating the circuit. Extension: @file{.cct}.
 
 @section List of gates in internal format
 
-This is a dump of the circuit after it is serialized, but in the compiler's internal format. Extension: @file{.gates}.
+This is a dump of the circuit gates in topoloical order, in the
+compiler's internal format. Extension: @file{.gates}.
 
 @section UDrawGraph file
 
-This is a representation of the circuit for the UDrawGraph program. Extension: @file{.udg}.
+This is a representation of the circuit for the UDrawGraph program.
+Extension: @file{.udg}.
 
 @section A circuit simulation trace
 

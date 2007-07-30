@@ -617,7 +617,7 @@ genComplexInit (lval, t) size =
 -- new gates to the circuit, and add e_doc as the last annotation of
 -- that gate
 -- returns the new circuit, and the gates where 'e' is
--- also have the gates pass through a hook which may update them, eg. add
+-- also have the gates pass through an optional hook which may update them, eg. add
 -- flags
 genExpWithDoc :: Circuit ->
                  Maybe (Gate -> Gate) -> -- ^ A hook to apply to a gate generated for the
@@ -950,9 +950,12 @@ genStm circ stm =
       s -> error $ "CircGen: unrecognized statement: " ++ (show s)
 
     where addOutputFlag var =
-              case getVarFlags var of
-                []      -> Nothing
+              case genVarFlags var of
+                []      -> Nothing -- no flags needed for this var.
                 flags   -> Just (gateProjFlags (\fs -> fs `union` flags))
+                                   `logDebug`
+                                   ("addOutputFlag adding flags " << (show flags)
+                                    << " to var " << var)
                            
 
 -- | Make a gates to be the two condition nodes for this conditional scope - the
@@ -989,9 +992,9 @@ prepareCondNodes cct this_cond
 
 -- what flags to attach to a gate for this 'var'.
 -- if it is called "main" and is a function return variable, it needs an Output flag.
-getVarFlags var = case (elem RetVar $ vflags var, varName var) of
-                    (True, cMAINNAME)   -> [Output, Terminal]
-                    _                   -> []
+genVarFlags var = if (elem RetVar $ vflags var) && (Im.varName var == Im.cMAINNAME)
+                  then [Output, Terminal]
+                  else []
 
 
 -- do most of the work for a single expression in an SPrint
@@ -1099,8 +1102,13 @@ checkOutputVars c var mb_gate_loc
                         -- FIXME: we get non-existant node numbers passed (with number
                         -- -12345678), for non-initialized struct fields. The filter is a
                         -- HACK around this
-                        c' = rmOutputFlag c (filter (/= -12345678) vgates')
+                        vgates''    = filter (/= -12345678) vgates'
+                        c'          = rmOutputFlag c vgates''
                     return c'
+                          `logDebug` ("checkOutputVars removed Output flag from var "
+                                      << var << " at gates " << vgates''
+                                      << "; gates now="
+                                      << map (fromJust . Gr.lab c') vgates')
     | otherwise =
         return c `logDebug` ("checkOutputVars non-matching var: " << var)
 
@@ -1267,7 +1275,7 @@ genCondExit testGate
           mkCtx' var i t (true_gate,false_gate) =
               let src_gates = [testGate, true_gate, false_gate]
                   depth     = (length parentScope) - 1
-                  flags     = getVarFlags var
+                  flags     = genVarFlags var
                   doc       = EVar var -- annotate gate with the variable name
               in  mkCtx (Gate i t Select src_gates depth flags [doc])
 
@@ -1817,7 +1825,7 @@ instance StreamShow (Maybe LocAnnot) where strShows = showsPrec 0
 -- StreamShow instances
 
 instance StreamShow Gate where
-    strShows = cctShowsGate " :: " " ** "
+    strShows = shows --cctShowsGate " :: " " ** "
 
 instance StreamShow Op where
     strShows = cctShowsOp

@@ -1,15 +1,13 @@
+GHC = ghc
+
+
 # these need to start with an upper case, as they are used as haskell package
 # names at some stage.
-
 source_lang = Sfdl
 #source_lang = Fcpp
 
-
 GHCFLAGS =  -fglasgow-exts
 GHCFLAGS += -fallow-overlapping-instances
-
-# GHCFLAGS += -I$(HOME)/code/haskell
-# GHCFLAGS += -I$(HOME)/work/code/lib/haskell
 
 GHCFLAGS += -v0
 
@@ -18,8 +16,6 @@ GHCFLAGS += -odir $(ODIR) -hidir $(ODIR)
 # GHCFLAGS += -static
 
 # GHCFLAGS += -Wall
-
-GHC = ghc
 
 ODIR = build
 
@@ -42,9 +38,9 @@ endif
 
 # BUMMER: the multiple-else syntax does not appear to work with make version
 # 3.80 which is in all Fedora's now (Sept 2006)
-ifdef OPT
-	ODIR := $(ODIR)/opt
-	GHCFLAGS += -O2
+
+ifdef NOOPT	    # non-optimized, fast build.
+	ODIR := $(ODIR)/default
 else ifdef PROF
 	ODIR := $(ODIR)/prof
 	GHCFLAGS += -prof -auto-all -O
@@ -71,8 +67,9 @@ else ifdef DBG
 # -? to see a list).
 #	GHCFLAGS += -debug
 
-else		    # non-optimized, non-debug, non-profiled, quickest to compile
-	ODIR := $(ODIR)/default
+else		    # by default, optimized build. quite slow to compile.
+	ODIR := $(ODIR)/opt
+	GHCFLAGS += -O2
 endif
 
 
@@ -103,9 +100,9 @@ SRCS = $(shell find $(CURDIR)/Faerieplay -name '*.hs' -o -name '*.cf')
 
 
 
-##################
+##############################
 ## version management
-##################
+##############################
 versions: $(VERSFILE)
 
 .PHONY: versions
@@ -113,8 +110,9 @@ versions: $(VERSFILE)
 VERSFILE = $(CURDIR)/Faerieplay/Version.hs
 
 $(VERSFILE): $(VERSFILE).tok $(SRCS)
-#	echo srcs = $^
 	$(CURDIR)/update-versions.pl < $(VERSFILE).tok > $(VERSFILE) $^
+
+
 
 
 

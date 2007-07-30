@@ -1,0 +1,2 @@
+g/module [^ ]*/s/module \([^ ]*\)/module Faerieplay.\1/
+wq

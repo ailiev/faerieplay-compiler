@@ -224,11 +224,13 @@ optionControl = [
 
     , Opt.Option [  ]       []          (Opt.NoArg Help)                "Flags:"
 
-                -- flags
+                -- ############ flags
+
+                -- here, internal form is using the standard (derived) Haskell Read/Show instances.
     , Opt.Option [  ]       ["dump-gates",
-                             "dgt"]     (Opt.NoArg (RunFlag DumpGates)) "dump the list of gates in Read/Show form; -> .gates"
+                             "dgt"]     (Opt.NoArg (RunFlag DumpGates)) "dump the list of gates in internal form; -> .gates"
     , Opt.Option [  ]       ["dump-graph",
-                             "dgr"]     (Opt.NoArg (RunFlag DumpGraph)) "dump the graph in Read/Show form; -> .cct"
+                             "dgr"]     (Opt.NoArg (RunFlag DumpGraph)) "dump the graph in internal form; -> .cct"
     , Opt.Option ['p']      ["gen-print"
                             ]           (Opt.NoArg (RunFlag DoPrint))   "Generate Print gates from print() statements.\nIf not set, print statements are ignored."
     , Opt.Option ['v']      ["verbose"] (Opt.NoArg (RunFlag Verbose))   "Chatty output on stderr"

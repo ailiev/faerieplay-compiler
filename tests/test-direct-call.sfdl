@@ -1,0 +1,23 @@
+// Version svn-668 of sfdlc had a bug with assigning Output flags to gates if
+// main() called another function directly - the Output flags on gates
+// representing the result of the called function were not removed.
+
+// This sample checks that case: compile and ensure there is only one gate with
+// an Output flag.
+
+program MainDirectCall
+{
+
+  const B=32;
+  type Word = Int<B>;
+
+  function Word f (Word x) {
+    f = x * 3;
+  }
+
+  function Word sfdlmain (Word x) {
+    sfdlmain = f(x);
+  }
+
+}
+

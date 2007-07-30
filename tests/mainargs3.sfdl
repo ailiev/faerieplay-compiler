@@ -1,0 +1,25 @@
+// -*- c -*-
+
+program Args3
+{
+
+  type Word = Int<32>;
+  
+  const N = 5;
+
+  type Complex = struct { Word x, Word y };
+
+  type S = struct { Complex [N] cs };
+
+  
+  function Word sfdlmain (S s, Complex c)
+  {
+    sfdlmain = c.x * c.y;
+
+    for (i = 0 to N-1) {
+      sfdlmain = sfdlmain + s.cs[i].x + s.cs[i].y ;
+    }
+  }
+
+
+}

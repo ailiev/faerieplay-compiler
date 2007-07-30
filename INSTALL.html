@@ -1,0 +1,87 @@
+<html>
+<head>
+<link href="../shared/style.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body>
+<h1>Installing the Faerieplay compiler</h1>
+
+<h2>Prerequisites</h2>
+
+<ul>
+  <li><code>ghc</code> (TODO url) version 6.4 or 6.6. Later versions may work, but major
+ghc revisions may
+  not be source-compatible with older versions. Also needs several Haskell
+  packages which are not in the base library, but are released with ghc, or are easily available as optional packages (eg. in current Debian):
+  <ul>
+    <li> The functional graph library (fgl) (package <code>Data.Graph.Inductive</code>).
+    <li> The Monad template library - mtl (package <code>Control.Monad</code>).
+    <li> The "ditch your boilerplate" generic programming library (package
+      <code>Data.Generics</code>).
+</ul>  All these should be available with ghc, but may need to be installed
+  separately.
+
+<li> <code>bnfc</code> parser generator from <a
+href="http://www.cs.chalmers.se/~markus/BNFC/">http://www.cs.chalmers.se/~markus/BNFC/</a>.
+Sfdlc requires bnfc version 2.3b or later. Version 2.3b has more flexible
+  support than 2.2 for placing the bnfc artifacts (lexer and parser files, as
+  well as tartet language code).
+
+<li> <code>happy</code>, the parser-generator (TODO url)
+
+<li> <code>alex</code>, the lexer generator (TODO url)
+
+<li> <code>ed</code>, the standard line-editor
+
+</ul>
+
+<h3>Optional prerequisites</h3>
+
+Without these, some of the Makefile targets will not work
+
+<ul>
+  <li>hasktags
+  <li>hmake
+</ul>
+
+
+
+<h2>Building</h2>
+<pre>
+$ make bnfc
+$ make
+$ make install
+</pre>
+
+<p>
+The default is to build an optimized <code>sfdlc</code>.
+<p>
+
+Some makefile options:
+<table>
+  <tr>
+    <td><pre>make NOOPT=1</pre></td>
+    <td>builds non-optimized. Building is much faster, but the resulting
+      compiler is quite slower, a factor of 2-3 times.
+    </td>
+  </tr>
+  <tr>
+    <td><pre>make PROF=1</pre></td>
+    <td>build a profiling executable. This can be used to gather time
+      and heap profiling statistics.
+    </td>
+  </tr>
+  <tr>
+    <td><pre>make DBG=1</pre></td>
+    <td>build a debug version. This sfdlc can be run with
+      "+RTS -xc -RTS" on the command line, which will produce a stack
+      trace of sorts if an unexpected runtime error occurs.
+    </td>
+  </tr>
+</table>
+
+NOTE: the desired make flag needs to be provided to the "install" make target
+too, or it will not install the desired executable but the default one.
+
+  </body>
+  </html>

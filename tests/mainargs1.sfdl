@@ -1,0 +1,15 @@
+// -*- c -*-
+
+program Args1
+{
+
+  type Word = Int<32>;
+  
+  type Complex = struct { Word x, Word y };
+
+  function Word sfdlmain (Word a, Complex c)
+  {
+    sfdlmain = a + c.x * c.y;
+  }
+
+}

@@ -1,0 +1,11 @@
+program ArrayOutOfBound
+{
+  const WordSize = 32;
+  type Word = Int<WordSize>;
+
+  const N=10;
+  
+  function Word sfdlmain (Word[N] xs, Word i) {
+    sfdlmain = xs[i];
+  }
+}

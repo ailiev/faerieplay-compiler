@@ -1,3 +1,10 @@
+2007-07-17  Sasho  <sasho@pipe.cs.dartmouth.edu>
+
+	* Faerieplay/CircGen.hs(genVarFlags): Changed the condition
+	formulation. Fixed bug of too many gates ending up with Output
+	flags.
+	(): Added several trace messages around Output flag handling.
+
 2007-06-03  Sasho  <sasho@pipe.cs.dartmouth.edu>
 
 	* Faerieplay/Version.hs: added.
