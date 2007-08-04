@@ -9,39 +9,41 @@
 <h2>Prerequisites</h2>
 
 <ul>
-  <li><code>ghc</code> (TODO url) version 6.4 or 6.6. Later versions may work, but major
+  <li><code><a href="http://www.haskell.org/ghc/" >ghc</a></code> version 6.4 or 6.6. Later versions may work, but major
 ghc revisions may
   not be source-compatible with older versions. Also needs several Haskell
   packages which are not in the base library, but are released with ghc, or are easily available as optional packages (eg. in current Debian):
   <ul>
-    <li> The functional graph library (fgl) (package <code>Data.Graph.Inductive</code>).
-    <li> The Monad template library - mtl (package <code>Control.Monad</code>).
+    <li> The functional graph library (<code>fgl</code>) (package <code>Data.Graph.Inductive</code>).
+    <li> The Monad template library - <code>mtl</code> (package <code>Control.Monad</code>).
     <li> The "ditch your boilerplate" generic programming library (package
       <code>Data.Generics</code>).
 </ul>  All these should be available with ghc, but may need to be installed
   separately.
 
-<li> <code>bnfc</code> parser generator from <a
+<li> <code>bnfc</code> <em>labelled BNF</em> grammar processor from <a
 href="http://www.cs.chalmers.se/~markus/BNFC/">http://www.cs.chalmers.se/~markus/BNFC/</a>.
 Sfdlc requires bnfc version 2.3b or later. Version 2.3b has more flexible
   support than 2.2 for placing the bnfc artifacts (lexer and parser files, as
   well as tartet language code).
 
-<li> <code>happy</code>, the parser-generator (TODO url)
+<li> <code><a href="http://www.haskell.org/happy/" >happy</a></code>, the
+parser-generator for Haskell.
 
-<li> <code>alex</code>, the lexer generator (TODO url)
+<li> <code><a href="http://www.haskell.org/alex/" >alex</a></code>, the lexer
+generator for Haskell.
 
-<li> <code>ed</code>, the standard line-editor
+<li> <code>ed</code>, the standard line-editor.
 
 </ul>
 
 <h3>Optional prerequisites</h3>
 
-Without these, some of the Makefile targets will not work
+Without these, some of the Makefile targets will not work:
 
 <ul>
-  <li>hasktags
-  <li>hmake
+  <li>hasktags, which usually comes with ghc.
+  <li><a href="http://www.haskell.org/hmake/" >hmake</a>.
 </ul>
 
 
