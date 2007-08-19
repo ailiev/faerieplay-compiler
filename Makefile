@@ -1,10 +1,4 @@
-GHC = ghc
-
-
-# these need to start with an upper case, as they are used as haskell package
-# names at some stage.
-source_lang = Sfdl
-#source_lang = Fcpp
+include config.make
 
 GHCFLAGS =  -fglasgow-exts
 GHCFLAGS += -fallow-overlapping-instances
@@ -19,7 +13,8 @@ GHCFLAGS += -odir $(ODIR) -hidir $(ODIR)
 
 ODIR = build
 
-
+# for actually running the Faerieplay compiler, if a user of this makefile wants
+# to do that.
 include ../sfdl/shared.make
 SFDLCFLAGS += +RTS -xc -RTS
 
@@ -28,7 +23,7 @@ ifeq ($(source_lang),Sfdl)
 else ifeq ($(source_lang),Fcpp)
 	GHCFLAGS += -DSYNTAX_C
 else
-$(error No source language defined in make variable 'source_lang')
+$(error No recognized source language defined in make variable 'source_lang')
 endif
 
 
@@ -68,6 +63,8 @@ else ifdef DBG
 #	GHCFLAGS += -debug
 
 else		    # by default, optimized build. quite slow to compile.
+$(info Running an optimized build, will be quite slow. Use NOOPT=1 for a non-optimized but much faster build)
+
 	ODIR := $(ODIR)/opt
 	GHCFLAGS += -O2
 endif
@@ -147,14 +144,11 @@ $(ODIR)/%.o: %.hs
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.
 .PHONY: $(EXE) bnfc
 
-hat:
-	PATH=$(PATH):$(HOME)/minime/hat/bin hmake -ghc -hat $(GHCFLAGS) $(PACKS) Generate
-
 clean:
 	HFLAGS="$(GHCFLAGS)" hmake -package fgl -d$(ODIR) -clean sfdlc
 
 install: $(ODIR)/sfdlc
-	install -p $(ODIR)/sfdlc ~/leeds_root/bin/
+	install -p $(ODIR)/sfdlc $(DIST_ROOT)/bin/
 
 tags: TAGS
 
