@@ -110,20 +110,22 @@ $(VERSFILE): $(VERSFILE).tok $(SRCS)
 	$(CURDIR)/update-versions.pl < $(VERSFILE).tok > $(VERSFILE) $^
 
 
+ifdef TOOLS_DIR
+HAPPYFLAGS += --template=$(TOOLS_DIR)/usr/share/happy-1.16
+endif
 
-
-
+BNFCDIR = $(BNFC_LANG_DIR)
 
 # Now using BNFC 2.3b features, though only for artifact layout.
 BNFCROOTS=Abs Lex Print Test ErrM Par Skel
 bnfc_files=$(patsubst %,$(BNFC_LANG_DIR)/%.hs,$(word 1,$(BNFCROOTS)))
 $(bnfc_files): $(source_lang).cf
 	bnfc -haskell -d -p $(BNFC_PACKAGE_ROOT) $<
-	happy -gca $(BNFC_LANG_DIR)/Par.y
-	alex -g $(BNFC_LANG_DIR)/Lex.x
-#	(cd $(BNFC_LANG_DIR); latex Doc.tex; dvips Doc.dvi -o Doc.ps)
-	ed $(BNFC_LANG_DIR)/Abs.hs < add-bnfc-derives.ed
-#	ghc --make $(BNFC_LANG_DIR)/Test.hs -o Faerieplay/Bnfc/Sfdl/Test
+	happy $(HAPPYFLAGS) -gca $(BNFCDIR)/Par.y
+	alex -g $(BNFCDIR)/Lex.x
+#	(cd $(BNFCDIR); latex Doc.tex; dvips Doc.dvi -o Doc.ps)
+	ed $(BNFCDIR)/Abs.hs < add-bnfc-derives.ed
+#	ghc --make $(BNFCDIR)/Test.hs -o Faerieplay/Bnfc/Sfdl/Test
 
 bnfc: $(bnfc_files)
 
