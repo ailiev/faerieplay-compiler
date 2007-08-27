@@ -111,6 +111,8 @@ $(VERSFILE): $(VERSFILE).tok $(SRCS)
 
 
 ifdef TOOLS_DIR
+# FIXME: these are pretty brittle, with version numbers embedded.
+ALEXFLAGS += --template=$(TOOLS_DIR)/usr/share/alex-2.1.0
 HAPPYFLAGS += --template=$(TOOLS_DIR)/usr/share/happy-1.16
 endif
 
@@ -122,7 +124,7 @@ bnfc_files=$(patsubst %,$(BNFC_LANG_DIR)/%.hs,$(word 1,$(BNFCROOTS)))
 $(bnfc_files): $(source_lang).cf
 	bnfc -haskell -d -p $(BNFC_PACKAGE_ROOT) $<
 	happy $(HAPPYFLAGS) -gca $(BNFCDIR)/Par.y
-	alex -g $(BNFCDIR)/Lex.x
+	alex $(ALEXFLAGS) -g $(BNFCDIR)/Lex.x
 #	(cd $(BNFCDIR); latex Doc.tex; dvips Doc.dvi -o Doc.ps)
 	ed $(BNFCDIR)/Abs.hs < add-bnfc-derives.ed
 #	ghc --make $(BNFCDIR)/Test.hs -o Faerieplay/Bnfc/Sfdl/Test
