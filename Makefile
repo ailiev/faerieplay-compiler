@@ -146,7 +146,7 @@ $(ODIR)/%.o: %.hs
 
 
 # this make shouldnt look at the sfdlc file, hmake or ghc do that.
-.PHONY: $(EXE) bnfc
+.PHONY: $(EXE) bnfc dep
 
 clean:
 	HFLAGS="$(GHCFLAGS)" hmake -package fgl -d$(ODIR) -clean sfdlc
@@ -158,6 +158,9 @@ tags: TAGS
 
 TAGS: $(SRCS)
 	hasktags6 --etags $^
+
+# have this here, as a standard target, even if empty.
+dep:
 
 # to make postscript of a circuit (or any) gviz file:
 #  dot -Tps cct.gviz -o cct.ps
