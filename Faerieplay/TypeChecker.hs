@@ -1,6 +1,20 @@
 {-# OPTIONS_GHC -fallow-overlapping-instances -fglasgow-exts -cpp #-}
 -- -fglasgow-exts for parallel list comprehension
 
+--
+-- Circuit compiler for the Faerieplay hardware-assisted secure
+-- computation project at Dartmouth College.
+--
+-- Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
+-- Sean W. Smith <sws@cs.dartmouth.edu>
+--
+-- All rights reserved.
+--
+-- This code is released under a BSD license.
+-- Please see LICENSE.txt for the full license and disclaimers.
+--
+
+
 -- code to split the AST into several namespaces of global bindings:
 -- constants, types, variables and functions
 

@@ -1,4 +1,16 @@
 {-# OPTIONS_GHC -fallow-overlapping-instances  -fglasgow-exts #-}
+--
+-- Circuit compiler for the Faerieplay hardware-assisted secure
+-- computation project at Dartmouth College.
+--
+-- Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
+-- Sean W. Smith <sws@cs.dartmouth.edu>
+--
+-- All rights reserved.
+--
+-- This code is released under a BSD license.
+-- Please see LICENSE.txt for the full license and disclaimers.
+--
 
 -- code to generate a circuit from an unrolled list of statements,
 -- consisiting only of SAss, and SIfElse.

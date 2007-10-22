@@ -1,3 +1,18 @@
+/*
+ * Circuit compiler for the Faerieplay hardware-assisted secure
+ * computation project at Dartmouth College.
+ *
+ * Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
+ * Sean W. Smith <sws@cs.dartmouth.edu>
+ *
+ * All rights reserved.
+ *
+ * This code is released under a BSD license.
+ * Please see LICENSE.txt for the full license and disclaimers.
+ *
+ */
+
+
 // Version svn-668 of sfdlc had a bug with assigning Output flags to gates if
 // main() called another function directly - the Output flags on gates
 // representing the result of the called function were not removed.

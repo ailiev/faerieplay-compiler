@@ -2,6 +2,20 @@
 -- evalGate needed in the type constrain of evalGate apparently
 -- cpp to allow the different styles of MArr.getBounds in GHC 6.4.2 to 6.6
 
+--
+-- Circuit compiler for the Faerieplay hardware-assisted secure
+-- computation project at Dartmouth College.
+--
+-- Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
+-- Sean W. Smith <sws@cs.dartmouth.edu>
+--
+-- All rights reserved.
+--
+-- This code is released under a BSD license.
+-- Please see LICENSE.txt for the full license and disclaimers.
+--
+
+
 module Faerieplay.Runtime where
 
 import Maybe

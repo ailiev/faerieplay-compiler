@@ -1,10 +1,20 @@
 -- -*- haskell -*-
--- Javalette Light: a simple subset of C, covering
--- programs with a single zero-argument function.
--- example: koe.jll
+--
+-- Circuit compiler for the Faerieplay hardware-assisted secure
+-- computation project at Dartmouth College.
+--
+-- Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
+-- Sean W. Smith <sws@cs.dartmouth.edu>
+--
+-- All rights reserved.
+--
+-- This code is released under a BSD license.
+-- Please see LICENSE.txt for the full license and disclaimers.
+--
 
--- modified by sasho starting May 2005
--- to cover SFDL
+-- Grammar for Faerieplay secure function definition langugae (sfdl). Similar to but
+-- extended from the original Fairplay SFDL.
+
 
 -- NOTES:
 --

@@ -1,6 +1,20 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 -- -fglasgow-exts: for multi-param type classes
 
+--
+-- Circuit compiler for the Faerieplay hardware-assisted secure
+-- computation project at Dartmouth College.
+--
+-- Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
+-- Sean W. Smith <sws@cs.dartmouth.edu>
+--
+-- All rights reserved.
+--
+-- This code is released under a BSD license.
+-- Please see LICENSE.txt for the full license and disclaimers.
+--
+
+
 module Faerieplay.Container where
 
 
