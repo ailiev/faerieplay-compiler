@@ -12,3 +12,6 @@ sfdlc.info: sfdlc.texi values.texi version.texi
 
 %.pdf: %.texi
 	texi2dvi --pdf $<
+
+%.html: %.texi
+	texi2html $<
