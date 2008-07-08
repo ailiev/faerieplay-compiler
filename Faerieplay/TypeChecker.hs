@@ -108,6 +108,10 @@ type StateWithErr = ErrorT MyErrorCtx (St.State MyStateT)
 throwErr :: Int -> String -> StateWithErr a
 throwErr p msg = throwError $ EWC.EWC (Err p msg, [])
 
+-- TODO: implement real line number reporting. In the meantime, use a clearly nonsensical
+-- line number everywhere.
+cL = -42
+
 
 instance Im.TypeTableMonad StateWithErr where
     getTypeTable = St.gets types
@@ -258,8 +262,8 @@ checkStm s@(T.SAss lval val)   = setContext s $
                                     [lv', v'] <- mapM (canonicalize . Im.getExpTyp) [lval_new, val_new]
                                     if lv' == v'
                                        then return $ Im.SAss lval_new val_new
-                                       else throwErr 42 ("Type mismatch in assignment; types are "
-                                                         << lv' << " and " << v')
+                                       else throwErr cL ("Type mismatch in assignment; types are "
+                                                         << lv' << "(lvalue) and " << v' << "(rvalue)")
 
 
 checkStm s@(T.SPrint prompt vals)
@@ -268,7 +272,7 @@ checkStm s@(T.SPrint prompt vals)
                                      (mapM checkLVal $ map T.LVal vals)
                                         `catchError`
                                         (\e -> throwErr
-                                               42
+                                               cL
                                                "Arguments to print() must be legal lval's")
                                      return $ Im.SPrint prompt vals_new
 
@@ -359,7 +363,7 @@ checkStm s@(T.SIf cond stm) =
     do new_cond@(Im.ExpT t _) <- checkExp cond
        case t of
               (Im.BoolT) -> return ()
-              _          -> throwErr 42 $ "Condition \"" << cond << "\" is not a boolean"
+              _          -> throwErr cL $ "Condition \"" << cond << "\" is not a boolean"
        new_stm <- checkStm stm
        return $ Im.SIfElse new_cond (extractLocals new_stm, [new_stm]) (Cont.empty, [])
 
@@ -380,7 +384,7 @@ checkStm s@(T.SReturn exp)              =
        -- find the enclosing function
        func_stack   <- St.gets func_stack
        (fname,t)    <- if Stack.isEmpty func_stack
-                       then throwErr 42 $ "return called while not inside a function definition"
+                       then throwErr cL $ "return called while not inside a function definition"
                        else return $ Stack.peek func_stack
        -- FIXME: check the type compatibility somehow
        -- ASSUME: the enclosing function def has added the return var to the var table; we
@@ -504,14 +508,14 @@ checkExp e@(T.EIdent (T.Ident nm)) =
 {-
 -- this causes a problem when checkExp is called in an lval context                    
                     | elem Im.RetVar (Im.vflags v) ->
-                        throwErr 42 $ "Cannot take value of return variable " << v
+                        throwErr cL $ "Cannot take value of return variable " << v
 -}
                     | otherwise ->
                         return $ annot typ $ if elem Im.LoopCounter $ Im.vflags v
                                              then Im.EStatic $ Im.EVar v
                                              else Im.EVar v
                 _                  ->
-                    throwErr 42 $ "Identifier " << nm << " is invalid in this expression, \
+                    throwErr cL $ "Identifier " << nm << " is invalid in this expression, \
                                                           expected a const or a variable"
 
 
@@ -543,7 +547,7 @@ checkExp e@(T.EArr arr idx)    = setContext e $
                  case (Im.stripRefQual arr_t_full) of
                    (Im.ArrayT typ _)  -> return ( typ,       (Im.EArr arr idx')    )
                    (Im.IntT   _)      -> return ( (Im.IntT 1), (Im.EGetBit arr idx') )
-                   t                  -> throwErr 42 ("Supposed array " << arr
+                   t                  -> throwErr cL ("Supposed array " << arr
                                                       << " is not an array or int, it is of type "
                                                       << t)
           -- index type has to be int; annotate the index expression with EStatic if it is
@@ -563,7 +567,7 @@ checkExp e@(T.EArr arr idx)    = setContext e $
                                                                  << " is not static"))
                                 case idx_t_full of
                                     (Im.IntT _)  -> return idx'
-                                    _            -> throwErr 42 ("Array index is not an Int")
+                                    _            -> throwErr cL ("Array index is not an Int")
 
 
 checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
@@ -593,7 +597,7 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
           check (Im.GenIntT) new_str = let val = Im.EStatic $ Im.UnOp Im.Bitsize new_str
                                        in  return (Im.IntT (Im.UnOp Im.Bitsize val) , val)
 
-          check typ _              = throwErr 42 (str <<
+          check typ _              = throwErr cL (str <<
                                                   " is not a struct, it is of type " <<
                                                   typ)
 
@@ -605,11 +609,11 @@ checkExp e@(T.EStruct str field@(T.EIdent (T.Ident fieldname)))
                                                          findIndex ((== fieldname) . fst) $
                                                          fields
                                          return (t, Im.EStruct new_str field_idx)
-                          _        -> throwErr 42 $ ("struct has no field " << fieldname)
+                          _        -> throwErr cL $ ("struct has no field " << fieldname)
 
 
 checkExp e@(T.EStruct str _)
-    = throwErr 42 $ "struct field in " << e << " is not a simple name"
+    = throwErr cL $ "struct field in " << e << " is not a simple name"
 
 
 -- to check a function call:
@@ -626,7 +630,7 @@ checkExp e@(T.EFunCall (T.Ident fcnName) args) =
                                                     (zip form_types act_types)
        -- if a mismatch found above, report the error.
        maybe (return ())
-             (\i -> throwErr 42 ("function call " << e
+             (\i -> throwErr cL ("function call " << e
                                  << ": type error at param " << i
                                  << ", expected " << (form_types !! i)
                                  << ", got " << (act_types !! i)))
@@ -668,7 +672,7 @@ checkExp e
           getUnaryOpTyp Im.Not (Im.ExpT Im.BoolT _) = return $ Im.BoolT
           getUnaryOpTyp op     (Im.ExpT (Im.IntT i) _)
               | op /= Im.Not                        = return $ Im.IntT i
-          getUnaryOpTyp op      e                   = throwErr 42 ("Unary expression arg " << e
+          getUnaryOpTyp op      e                   = throwErr cL ("Unary expression arg " << e
                                                                    << " has invalid type")
 
 
@@ -695,7 +699,7 @@ checkLVal lv@(T.LVal (T.EIdent (T.Ident name))) =
           (EntVar (t,v)) | not $ elem Im.Immutable (Im.vflags v) 
                   -> return (Im.ExpT t $ Im.EVar v)
           _
-                  -> throwErr 42 $ "Assigning to immutable identifier " << name
+                  -> throwErr cL $ "Assigning to immutable identifier " << name
 
 checkLVal (T.LVal e) =
     setContext e $
@@ -708,7 +712,7 @@ checkLVal (T.LVal e) =
                                                checkExp e
                    e@(T.EArr e_arr _)    -> do checkLVal (T.LVal e_arr)
                                                checkExp e
-                   _                 -> throwErr 42 $ e << " is not a legal lvalue"
+                   _                 -> throwErr cL $ e << " is not a legal lvalue"
        return im_e
 
 
@@ -731,7 +735,7 @@ checkLoopCounter name =
     do var <- extractEnt name `catchError` (const $ return $ EntConst 0)
        case var of
          (EntVar (_,v))
-             | elem Im.LoopCounter (Im.vflags v)  -> throwErr 42 $ "Loop counter " << name
+             | elem Im.LoopCounter (Im.vflags v)  -> throwErr cL $ "Loop counter " << name
                                                                 << " reused in nested loop"
          _                                        -> return ()
          
@@ -845,7 +849,7 @@ extractEnt     name = do TCS {types=ts,
                               vars=vs} <- St.get
                          case extractHelper (ts,cs,fs,vs) name of
                            (Just ent)   -> return ent
-                           _            -> throwErr 42 $ "Identifier " << name
+                           _            -> throwErr cL $ "Identifier " << name
                                                            << " not in scope"
 
 
@@ -866,7 +870,7 @@ extractHelper (ts,cs,fs,vs) name = msum [(maybeLookup name vs >>=
 extractFunc     name = do TCS {funcs=fs} <- St.get
                           let res = maybeLookup name [fs]
                           case res of (Just f) -> return f
-                                      _        -> throwErr 42 $ name
+                                      _        -> throwErr cL $ name
                                                               << " is not in scope as a function"
 
 -- check a unary opeartion, and return its type.
@@ -878,7 +882,7 @@ checkUnary e@(Im.ExpT t inner_e) =
                          ( (Im.UnOp Im.BNot _), it@(Im.IntT _) )  -> return it
                          ( (Im.UnOp Im.Neg  _), it@(Im.IntT _) )  -> return it
                          ( _                  , _              )  ->
-                             throwErr 42 $ "Unary operation " << inner_e
+                             throwErr cL $ "Unary operation " << inner_e
                                           << " has invalid param type " << t_full
                                  
 
@@ -890,7 +894,7 @@ checkLogical op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
        let exp_out = (Im.BinOp op e1 e2)
        case (t1_full, t2_full) of
                 (Im.BoolT, Im.BoolT) -> return $ Im.ExpT Im.BoolT exp_out
-                _                    -> throwErr 42 $ "Logical expression " << exp_out
+                _                    -> throwErr cL $ "Logical expression " << exp_out
                                                    << " does not have Bool args"
 
 -- check an arithmetic expression whose components e1 and e2 are already checked.
@@ -905,7 +909,7 @@ checkBinary op e1 e2 =
              ((Im.IntT i1_e),
               (Im.IntT i2_e) )  -> do i_out <- Im.tryEvalStaticBin max Im.Max i1_e i2_e
                                       return $ annot (Im.IntT i_out) (Im.BinOp op e1 e2)
-             _                  -> throwErr 42 $ "Arithmetic expression "
+             _                  -> throwErr cL $ "Arithmetic expression "
                                             << (Im.BinOp op e1 e2)
                                             << " has non-integer params"
 
@@ -921,7 +925,7 @@ checkArith op e1 e2 =
     case (e1,e2) of
        ( (T.IntT i1) _),
          (T.ExpT (T.IntT i2) _) )    -> return ( (op e1 e2), (T.EMax i1 i2) )
-       _                             -> throwErr 42 $ "Arithmetic expression "
+       _                             -> throwErr cL $ "Arithmetic expression "
                                                       << (op e1 e2)
                                                       << " has non-integer params"
 -}
@@ -935,7 +939,7 @@ checkComparison op e1@(Im.ExpT t1 _) e2@(Im.ExpT t2 _) =
           (Im.BoolT,  Im.BoolT)                         -> return answer
           (Im.IntT _, Im.IntT _)                        -> return answer
           (Im.EnumT nm1 _, Im.EnumT nm2 _) | nm1 == nm2 -> return answer
-          _                      -> throwErr 42 $ "Args to comparison expression "
+          _                      -> throwErr cL $ "Args to comparison expression "
                                                   << answer
                                                   << " are of incompatible types "
                                                   << show (full_t1) << " and " << show(full_t2)
@@ -982,10 +986,10 @@ computeStaticExp e
                      let val = maybeLookup nm [ct]
                      case val of
                               (Just i) -> return i
-                              _        -> throwErr 42 ("Supposedly static expression " << e
+                              _        -> throwErr cL ("Supposedly static expression " << e
                                                        << " is not static: "
                                                        << nm << " is not a constant")
-               _                -> throwErr 42 $ "Invalid static expression " << e
+               _                -> throwErr cL $ "Invalid static expression " << e
 
 
 
@@ -1021,7 +1025,7 @@ modVar :: String -> (Im.Var -> Im.Var) -> StateWithErr ()
 modVar name f               = do varmaps   <- St.gets vars
                                  -- if the update succeeds, insert the new varmaps,
                                  -- otherwise report error.
-                                 maybe (throwErr 42 $ "Variable " << name << " not declared")
+                                 maybe (throwErr cL $ "Variable " << name << " not declared")
                                        (\maps   -> St.modify $ projToVars $ const maps)
                                        (modify_first_map name (projSnd f) varmaps)
                                            
@@ -1033,7 +1037,7 @@ lookupType name =
         let res = maybeLookup name [ts]
         case res of
            Just t -> return t
-           _      -> throwErr 42 $ "Type " << name << " is not in scope"
+           _      -> throwErr cL $ "Type " << name << " is not in scope"
 
 
 {-

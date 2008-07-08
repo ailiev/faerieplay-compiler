@@ -115,7 +115,7 @@ directory.
 @section SFDL
 
 The syntax of the langugage is illustrated in the examples files inside
-@file{examples/Sfdl/}, and specified formally in the syntax file @file{Sfdl/@value{SyntaxFile}}.
+@file{examples/Sfdl/}, and specified formally in the syntax file @indicateurl{Sfdl/@value{SyntaxFile}}.
 
 
 @subsection Semantics
@@ -158,30 +158,7 @@ source languagues, and are described in @ref{Circuit Programming}.
 
 @section FC++
 
-@subsection Additional requirements
-
 @sfdlc supports a subset of C++, which we call FC++, in order to allow a user to use existing C++ development toolchains for tasks like debugging, while using @sfdlc and the Faerieplay CVM for secure execution.
-
-FC++ has a slightly different syntax than C++, in order to ease
-parsing. The differences are:
-@itemize @bullet
-@item
-Variable declarations are preceded by the keyword @code{var}.
-
-@item
-Function declarations are preceded by the keyword @code{function}.
-
-@item
-The whole program is preceded by a line:
-
-@code{program <name>;}
-
-@end itemize
-
-
-Every FC++ file should start with @code{#include <sfdl-crutches.h>},
-which will pull in any preprocessor definitions needed to have FC++
-code compiled by a regular C++ compiler.
 
 @subsection Which subset of C++?
 
@@ -209,6 +186,28 @@ Standard C/C++ array syntax is not supported. Multi-dimentional arrays
 are specified as in boost: @code{array<array<T,N1>, N2>}.
 
 @end itemize
+
+@subsection Additional syntax requirements
+
+FC++ has a slightly different syntax than C++, in order to ease
+parsing. A few simple The differences are:
+@itemize @bullet
+@item
+Variable declarations are preceded by the keyword @code{var}.
+
+@item
+Function declarations are preceded by the keyword @code{function}.
+
+@item
+The whole program must be preceded by a line:
+
+@code{program <name>;}
+
+@end itemize
+
+Every FC++ file should invoke @code{#include <sfdl-crutches.h>},
+which will pull in any preprocessor definitions needed to have FC++
+code compiled by a regular C++ compiler.
 
 
 @node Circuit Programming

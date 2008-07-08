@@ -12,26 +12,24 @@
  *
  */
 
-
-program ScopesTest
+// This should fail compilation, as f() does not actually return anything.
+// Currently this is neither specified nor implemented, and we just get a
+// constant 0-valued sfdlmain()
+program NoFuncReturn
 {
 
     const WordSize = 8;
     type Word = Int<WordSize>;
 
+    function Word f (Word a, Word b)
+    {
+      var Word c;
+      c = a+b;
+    }
+
     function Word sfdlmain (Word a, Word b)
     {
-
-        var Word [32] A;
-        
-        if (a > b) {
-            A[12] = 30;
-        }
-        A[12] = 32;
-        
-        sfdlmain = A[0] * A[1];
-        
+      sfdlmain = f(a,b);
     }
-                
 
 }

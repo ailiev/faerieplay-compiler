@@ -15,7 +15,6 @@
 
 program SimplestCond
 {
-
     const WordSize = 32;
     type Word = Int<WordSize>;
 
@@ -23,10 +22,10 @@ program SimplestCond
     {
       print ("y = ", y);
       if (y != 0) {
-	sfdlmain = x/y;
+        sfdlmain = x/y;
       }
       else {
-	sfdlmain = x;
+        sfdlmain = x;
       }
     }
 

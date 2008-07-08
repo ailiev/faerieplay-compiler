@@ -1,4 +1,4 @@
-all: sfdlc.info syntax
+all: sfdlc.info sfdlc.html syntax
 
 syntax: SFDL/Doc.pdf SFDL_C/Doc.pdf
 
@@ -13,5 +13,6 @@ sfdlc.info: sfdlc.texi values.texi version.texi
 %.pdf: %.texi
 	texi2dvi --pdf $<
 
+# Want this step to be optional
 %.html: %.texi
-	texi2html $<
+	texi2html $< || true

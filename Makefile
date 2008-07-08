@@ -13,7 +13,8 @@
 
 include config.make
 
-GHCFLAGS =  -fglasgow-exts
+#GHCFLAGS += -L$(HOME)/minime/x64/lib
+GHCFLAGS += -fglasgow-exts
 GHCFLAGS += -fallow-overlapping-instances
 
 GHCFLAGS += -v0
@@ -124,10 +125,18 @@ $(VERSFILE): $(VERSFILE).tok $(SRCS)
 
 
 ifdef TOOLS_DIR
-# FIXME: these are pretty brittle, with version numbers embedded.
-ALEXFLAGS += --template=$(TOOLS_DIR)/usr/share/alex-2.1.0
-HAPPYFLAGS += --template=$(TOOLS_DIR)/usr/share/happy-1.16
+# alex and happy are not quite smart enough to find their helper files relative
+# to the executable, so we have to tell them.
+ifneq ($(empty), $(wildcard $(TOOLS_DIR)/$(ALEX_SUBDIR)))
+ALEXFLAGS += --template=$(TOOLS_DIR)/$(ALEX_SUBDIR)
 endif
+
+ifneq ($(empty), $(wildcard $(TOOLS_DIR)/$(HAPPY_SUBDIR)))
+HAPPYFLAGS += --template=$(TOOLS_DIR)/$(HAPPY_SUBDIR)
+endif
+
+endif
+
 
 BNFCDIR = $(BNFC_LANG_DIR)
 
@@ -138,7 +147,7 @@ $(bnfc_files): $(source_lang).cf
 	bnfc -haskell -d -p $(BNFC_PACKAGE_ROOT) $<
 	happy $(HAPPYFLAGS) -gca $(BNFCDIR)/Par.y
 	alex $(ALEXFLAGS) -g $(BNFCDIR)/Lex.x
-#	(cd $(BNFCDIR); latex Doc.tex; dvips Doc.dvi -o Doc.ps)
+	(cd $(BNFCDIR); pdflatex Doc.tex)
 	ed $(BNFCDIR)/Abs.hs < add-bnfc-derives.ed
 #	ghc --make $(BNFCDIR)/Test.hs -o Faerieplay/Bnfc/Sfdl/Test
 

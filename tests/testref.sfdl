@@ -1,4 +1,4 @@
-// -*- c -*-
+// -*- mode: c++; fill-column: 72; -*-
 /*
  * Circuit compiler for the Faerieplay hardware-assisted secure
  * computation project at Dartmouth College.
@@ -21,25 +21,30 @@ program TestRef
 
     const REPEAT = 10;
 
+    // Function with a reference parameter.
+    // Need the dummy return value, as there is now no way to call a
+    // void function.
     function Word accumulate (Word & accum, Word x) {
-	accum = accum + x;
-	accumulate = 0;
+        accum = accum + x;
+        accumulate = 0;
     }
 
     // result should be:
     // a + REPEAT*b
     // important point is that it's done via a reference parameter.
     function Word sfdlmain (Word a, Word b) {
-	var Word accum;
+        var Word accum;
 
-	accum = a;
-	
-	for (i = 1 to REPEAT) {
-	    var Word dummy;
-	    dummy = accumulate (accum, b);
-	}
+        accum = a;
 
-	sfdlmain = accum;
+        for (i = 1 to REPEAT) {
+            var Word dummy;
+            // FIXME: we do not support statements which do not assign a
+            // result, so need this dummy for now.
+            dummy = accumulate (accum, b);
+        }
+
+        sfdlmain = accum;
     }
-    
+
 }

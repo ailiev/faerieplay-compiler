@@ -1,4 +1,4 @@
-/*
+/* -*- mode: c++; fill-column: 72; -*-
  * Circuit compiler for the Faerieplay hardware-assisted secure
  * computation project at Dartmouth College.
  *
@@ -25,30 +25,29 @@ program NestedLoops
     const Y=7;
     
     // use addition and loops to achieve exponentiation: return X^Y.
-    // note that we cannot have X and Y be (input) variables, as they delimit
-    // the loops below, and so need to be static/constant.
+    // note that we cannot have X and Y be (input) variables, as they
+    // delimit the loops below, and so need to be static/constant.
     function Word sfdlmain () {
 
-      var Word x;
+        var Word x;
 
-      x = 1;
+        x = 1;
 
-      for (i = 1 to Y) {
+        for (i = 1 to Y) {
+            //want:
+            // x = x*X;
+            // but do in a loop
+            var Word x_1;
+            x_1 = x;
+            x = 0;
+            for (j = 1 to X) {
+                x = x + x_1;
+            }
 
-	//want:
-	// x = x*X;
-	// but do in a loop
-	var Word x_1;
-	x_1 = x;
-	x = 0;
-	for (j = 1 to X) {
-	  x = x + x_1;
-	}
+        }
 
-      }
-
-      sfdlmain = x;
-	
+        sfdlmain = x;
+        
     }
 
 }
