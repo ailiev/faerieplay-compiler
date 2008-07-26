@@ -1,4 +1,10 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
+
+# Check the SVN versions of all the files given as args, and replace a token
+# <versions>...</versions> with a summary of the versions. Actually the output
+# of svnversion for each source directory (inferred from the argument files)
+
+use warnings;
 
 use English;
 

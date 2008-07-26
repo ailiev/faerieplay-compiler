@@ -1,16 +1,3 @@
---
--- Circuit compiler for the Faerieplay hardware-assisted secure
--- computation project at Dartmouth College.
---
--- Copyright (C) 2003-2007, Alexander Iliev <sasho@cs.dartmouth.edu> and
--- Sean W. Smith <sws@cs.dartmouth.edu>
---
--- All rights reserved.
---
--- This code is released under a BSD license.
--- Please see LICENSE.txt for the full license and disclaimers.
---
-
 module Faerieplay.Version where
 
 import Faerieplay.SashoLib          as SL
@@ -45,8 +32,9 @@ getVersion
 -- thus, this file will be seen as updated by the SCM if any of the other files are.
 {-
 <versions>
-/home/sasho/work/code/sfdl-compiler/Faerieplay/: 664:668M;
-/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Fcpp/: 668;
-/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Sfdl/: 668;
+/home/sasho/work/code/sfdl-compiler/Faerieplay/: 773:814M;
+/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Fcpp/: 773:814;
+/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Sfdl/: 773:814;
+Faerieplay/: 773:814M;
 </versions>
 -}

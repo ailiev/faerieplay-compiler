@@ -98,6 +98,9 @@ BNFC_LANG_DIR = $(subst .,/,$(BNFC_LANG_PACKAGE_ROOT))
 
 EXE = $(ODIR)/sfdlc
 
+# Generated and used to track versions across the source files.
+VERSFILE = Faerieplay/Version.hs
+
 all: $(VERSFILE) $(EXE)
 #	@echo srcs = $(SRCS)
 #	@echo vers file = $(VERSFILE)
@@ -109,16 +112,18 @@ $(EXE):
 
 SRCS = $(shell find $(CURDIR)/Faerieplay -name '*.hs' -o -name '*.cf') 
 
-
+doc:
+	$(MAKE) -C doc
+.PHONY: doc
 
 ##############################
 ## version management
 ##############################
-versions: $(VERSFILE)
 
-.PHONY: versions
-
-VERSFILE = $(CURDIR)/Faerieplay/Version.hs
+# Both $(VERSFILE) and $(VERSFILE).tok are kept in svn. $(VERSFILE).tok is a
+# static template, while $(VERSFILE) is updated with version summary info, so it
+# changes if any other source file changes. Then upon checkin, svn updates the
+# version info in $(VERSFILE) to be the same as the latest modified source file.
 
 $(VERSFILE): $(VERSFILE).tok $(SRCS)
 	$(CURDIR)/update-versions.pl < $(VERSFILE).tok > $(VERSFILE) $^
@@ -167,7 +172,7 @@ $(ODIR)/%.o: %.hs
 	$(GHC) -E -ddump-minimal-imports $(GHCFLAGS) $< > $@
 
 
-# this make shouldnt look at the sfdlc file, hmake or ghc do that.
+# this make shouldnt look at the sfdlc file--hmake or ghc do that.
 .PHONY: $(EXE) bnfc dep
 
 clean:
