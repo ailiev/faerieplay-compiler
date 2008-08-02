@@ -16,3 +16,6 @@ sfdlc.info: sfdlc.texi values.texi version.texi
 # Want this step to be optional
 %.html: %.texi
 	texi2html $< || true
+
+clean:
+	$(RM) sfdlc.info sfdlc.html

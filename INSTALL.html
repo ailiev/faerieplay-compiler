@@ -14,18 +14,16 @@ ghc revisions may
   not be source-compatible with older versions. Also needs several Haskell
   packages which are not in the base library, but are released with ghc, or are easily available as optional packages (eg. in current Debian):
   <ul>
-    <li> The functional graph library (<code>fgl</code>) (package <code>Data.Graph.Inductive</code>).
-    <li> The Monad template library - <code>mtl</code> (package <code>Control.Monad</code>).
-    <li> The "ditch your boilerplate" generic programming library (package
+    <li> The functional graph library <code>fgl</code> (package <code>Data.Graph.Inductive</code>).
+    <li> The Monad template library <code>mtl</code> (package <code>Control.Monad</code>).
+    <li> The "ditch your boilerplate" generic traversal library (package
       <code>Data.Generics</code>).
 </ul>  All these should be available with ghc, but may need to be installed
   separately.
 
 <li> <code>bnfc</code> <em>labelled BNF</em> grammar processor from <a
 href="http://www.cs.chalmers.se/Cs/Research/Language-technology/BNFC/">http://www.cs.chalmers.se/Cs/Research/Language-technology/BNFC/</a>.
-Sfdlc requires bnfc version 2.3b or later. Version 2.3b has more flexible
-  support than 2.2 for placing the bnfc artifacts (lexer and parser files, as
-  well as tartet language code).</li>
+Sfdlc requires bnfc version 2.3b or later.</li>
 
 <li> <code><a href="http://www.haskell.org/happy/" >happy</a></code>, the
   parser-generator for Haskell.</li>
@@ -37,7 +35,7 @@ Sfdlc requires bnfc version 2.3b or later. Version 2.3b has more flexible
 
   <li> <a href="http://www.gnu.org/software/texinfo/">texinfo</a> for compiling the manual.</li>
 
-  <li> <a href="">texi2html</a> to generate an <a href="doc/sfdlc.html">html form</a> of the manual (available after <code class="command">make doc</code> has been run).</li>
+  <li> <a href="TODO">texi2html</a> to generate an <a href="doc/sfdlc.html">html form</a> of the manual (available after <code class="command">make doc</code> has been run).</li>
 
 </ul>
 
@@ -53,9 +51,7 @@ Without these, some of the Makefile targets will not work:
 
 
 <h2>Building</h2>
-<pre>
-$ make bnfc
-$ make
+<pre class="command">
 $ make install
 </pre>
 
@@ -86,7 +82,7 @@ The default is to build an optimized <code>sfdlc</code>.
   </tr>
 </table>
 
-NOTE: the desired make flag needs to be provided to the "install" make target
+<b>NOTE:</b> the desired make flag needs to be provided to the <code>install</code> make target
 too, or it will not install the desired executable but the default one.
 
   </body>

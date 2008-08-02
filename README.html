@@ -11,34 +11,28 @@
 This is <code>sfdlc</code>, the Faerieplay compiler, which translates a high
 level language into an arithmetic circuit extended with gates for accessing
 indirect arrays.
-<p>
-  Please see also the introduction to the compiler in the <a href="doc/sfdlc.html#Introduction">manual</a> (available after <code>make doc</code> is run in the <code>sfdl-compiler</code> directory).
 
-<h2>Languages</h2>
-
-Sfdl&mdash;secure function definition language&mdash;is similar to C with a bit
-of Pascal sprinkled in. Sfdlc also has support for a subset of C++, which is not
-fully tested yet. Both languages are documented in the <a href="doc/sfdlc.html#Source-Languages">info manual</a>.
-
-<h2>Using</h2>
-
-Please consult the <a href="doc/sfdlc.html">manual</a> (which is built as
-part of <a href="INSTALL.html">building</a> the compiler).
-<p>
-Also, an info file is built, <code>doc/sfdlc.info</code>:
-<pre>
+<h2>Texinfo manual</h2>
+The sfdlc documenation is maintained in texinfo form, and built with
+<pre class="command">
+$ cd sfdl-compiler
+$ make doc
+</pre>
+Then, the manual is available in <a href="doc/sfdlc.html">html form</a>, and also as an info file:
+<pre class="command">
+$ cd sfdl-compiler
 $ info -f doc/sfdlc.info
 </pre>
 
+
 <h2>Example programs</h2>
 
-Several example programs are provided in <code>BASEDIR/sfdl/</code>.
+Several example SFDL programs are provided in <code>BASEDIR/sfdl/</code>.
 <p>
-The compiler has test programs in <code>tests/</code>.
+The compiler has test programs in <code>BASEDIR/sfdl-compiler/tests/</code>.
 
 
 
 <hr>
-<address></address>
-<!-- hhmts start -->Last modified: Sun Sep  2 20:24:15 EDT 2007 <!-- hhmts end -->
+Subversion $Id: README.html 773 2008-03-30 12:56:38Z sasho $
 </body> </html>
