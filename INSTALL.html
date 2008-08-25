@@ -85,5 +85,14 @@ The default is to build an optimized <code>sfdlc</code>.
 <b>NOTE:</b> the desired make flag needs to be provided to the <code>install</code> make target
 too, or it will not install the desired executable but the default one.
 
+<a name="build-docs"/>
+<h3>Building the docs</h3>
+The sfdlc documenation is maintained in texinfo form, and built with
+<pre class="command">
+$ cd sfdl-compiler
+$ make doc
+</pre>
+(this step is included in a normal <code class="command">make all</code>.)
+
   </body>
   </html>

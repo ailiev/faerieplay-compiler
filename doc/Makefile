@@ -1,9 +1,8 @@
-all: sfdlc.info sfdlc.html syntax
+all: sfdlc.info sfdlc.html
 
-syntax: SFDL/Doc.pdf SFDL_C/Doc.pdf
 
+# not trying to build the syntax docs from here for now.
 vpath %.tex ../
-
 %.pdf: %.tex
 	rubber --into $(shell dirname $@) --pdf $<
 

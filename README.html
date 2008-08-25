@@ -12,18 +12,23 @@ This is <code>sfdlc</code>, the Faerieplay compiler, which translates a high
 level language into an arithmetic circuit extended with gates for accessing
 indirect arrays.
 
+<h2>Source Language Syntax Reference</h2>
+
+The syntax reference documents are mentioned in the Texinfo manual, but here we
+can provide direct links to them. They are generated with <a
+href="http://www.cs.chalmers.se/Cs/Research/Language-technology/BNFC/">the BNF converter</a>:<br/>
+<b>SFDL: </b><a href="Faerieplay/Bnfc/Sfdl/Doc.pdf">Doc.pdf</a><br/>
+<b>FC++: </b><a href="Faerieplay/Bnfc/Fcpp/Doc.pdf">Doc.pdf</a>
+
 <h2>Texinfo manual</h2>
-The sfdlc documenation is maintained in texinfo form, and built with
-<pre class="command">
-$ cd sfdl-compiler
-$ make doc
-</pre>
-Then, the manual is available in <a href="doc/sfdlc.html">html form</a>, and also as an info file:
+
+The sfdlc documenation is maintained in texinfo form. It is available
+in <a href="doc/sfdlc.html">html form</a> and as an info file:
 <pre class="command">
 $ cd sfdl-compiler
 $ info -f doc/sfdlc.info
 </pre>
-
+(After the documentation has been <a href="INSTALL.html#build-docs">built</a>.)
 
 <h2>Example programs</h2>
 
