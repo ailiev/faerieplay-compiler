@@ -1,0 +1,19 @@
+// -*- c++ -*-
+
+program (ScalarAddition);
+
+const int REPEAT = 8;
+
+function int sfdlmain (int a, int b) {
+    // computes alice + R*bob + sum[0..R-1]
+    // haskell one-liner (run in 'hugs' or such):
+    // let a=10; b=12; r=8 in a + r*b + sum[0..r-1]
+
+    var int i;
+	for (i = 0; i < REPEAT; i=i+1) {
+	    a = a + b + i;
+	}
+
+    return a;
+
+}

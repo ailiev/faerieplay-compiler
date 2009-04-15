@@ -2009,7 +2009,7 @@ showCctGraph g =
                                      else []
                                     ),
                                     (case gate_op g of
-                                       Input   -> [("COLOR", "green")
+                                       Input   -> [("COLOR", "light green")
                                                   --, ("_GO",   "rhombus")
                                                   ]
                                        Select  -> [("_GO",   "rhombus")

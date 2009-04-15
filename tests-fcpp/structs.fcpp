@@ -1,0 +1,33 @@
+// -*- c++ -*-
+// Faerie C++
+
+// define empty macros for 'program', 'var' etc.
+#include "fcpp-crutches.h"
+
+// Test program with structures.
+
+// this program is affected by two compiler bugs:
+// - the field decl separator for structs is now a comma and not semicolon as in
+// C/C++, and
+// - GenHelper_C.gen_arg_parser can only handle int params to mainsfdl
+program (Structs);
+
+// Faerieplay compiler only supports this style of struct definition.
+typedef struct {
+    int x,
+    int y
+} point_t;
+
+// the 'function' keyword is required
+function int sfdlmain (int p1_x, int p1_y,
+                       int p2_x, int p2_y)
+{
+    // the 'var' keyword is required
+    var point_t p1, p2;
+    p1.x = p1_x;
+    p1.y = p1_y;
+    p2.x = p2_x;
+    p2.y = p2_y;
+
+    return p1.x > p2.x && p1.y > p2.y;
+}

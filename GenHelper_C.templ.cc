@@ -5,6 +5,9 @@
 #include <iostream>
 #include <stdlib.h>
 
+// our helper code
+#include "sfdl-crutches.h"
+
 using namespace std;
 
 %s				// sfdlmain return type **rettype_d**

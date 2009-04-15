@@ -35,7 +35,7 @@ instance (Ord k) => Mapping ([(k,a)]) k a where
     insert k a l    = (k,a):l
     lookup k l      = let m_v = Prelude.lookup k l
                       in        -- convert from Maybe to this Monad
-                        maybe (fail "")
+                        maybe (fail "Key not found in list Mapping")
                               (\v -> return v)
                               m_v
     empty           = []

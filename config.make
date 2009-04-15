@@ -11,8 +11,8 @@ GHC = ghc
 # the source language for the Faerieplay compiler.
 # these need to start with an upper case, as they are used as haskell package
 # names at some stage.
-source_lang = Sfdl
-#source_lang = Fcpp
+#source_lang = Sfdl
+source_lang = Fcpp
 
 # Locations under $(TOOLS_DIR) of the haskell parsing tools, alex and happy.
 ALEX_SUBDIR=usr/share/alex-2.1.0

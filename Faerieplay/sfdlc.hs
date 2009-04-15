@@ -38,6 +38,8 @@ import qualified Debug.Trace                as Trace
 
 import qualified Text.PrettyPrint           as PP
 
+import qualified System.IO.Error            as IOErr
+
 -- get the parser stuff; for SFDL syntax, or for C
 
 #if defined SYNTAX_SFDL
@@ -320,7 +322,16 @@ doCompile v rtFlags parser filenameIn hOut strIn =
 
 #ifdef SYNTAX_C
        -- FIXME: the helper file generation shouldbe controlled by some options probably.
-                      templ <- openFile cC_HELPER_TEMPLATE ReadMode >>= hGetContents
+                      templ <- catch (openFile cC_HELPER_TEMPLATE ReadMode >>= hGetContents)
+                                     (\e -> IOErr.ioError $
+                                            if IOErr.isDoesNotExistError e
+                                            then 
+                                                 IOErr.annotateIOError
+                                                 e
+                                                 ("Could not find the helper template " ++ cC_HELPER_TEMPLATE ++
+                                                  ", ensure it is present in the current dir.")
+                                                 Nothing (Just cC_HELPER_TEMPLATE)
+                                            else e)
                       let helper         = SrcGenHelper.genHelper templ prog
                           helperFileName = modFileExt filenameIn "helper.cc"
                       if not (null helper)

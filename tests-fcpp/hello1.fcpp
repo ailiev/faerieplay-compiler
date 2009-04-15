@@ -1,0 +1,6 @@
+program (hello1);
+
+function int sfdlmain (int j)
+{
+    return j;
+}

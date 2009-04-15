@@ -60,7 +60,7 @@ genHelper templ prog =
                          (render main_param_var_addrs_d)
                          (render main_params_d)
 
-
+-- FIXME: need to handle other arg types too!
 gen_arg_parser (name, Im.IntT _) arg_idx =
     hcat [char '*', text name,
           equals,

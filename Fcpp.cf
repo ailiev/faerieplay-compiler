@@ -57,17 +57,17 @@ separator nonempty Ident "," ;
 
 -- declarations
 
--- FIXME: type of constants is limited for now.
+-- TODO: type of constants is limited for now.
 ConstDecl.      Dec     ::= "const" "int" Ident "=" Exp                 ";" ;
 
 -- FIXUP: order is wrong, convert to TypeDecl
 TypeDecl_C.     Dec     ::= "typedef"  Typ Ident                        ";" ;
 
--- FIXME: it seems difficult to distinguish the following declaration types without
--- keywords introducing them. Probably need to complicate the grammar to avoid this (see
--- any of the published C grammars), just use the keywords for now.
+-- NOTE: it seems difficult to distinguish the following declaration types without
+-- keywords introducing them. Probably would need to complicate the grammar to avoid this (see
+-- any of the published C grammars), so just use the keywords.
 
--- FIXME: put in ConstExp for the length, also need to touch TypeChecker.hs for that.
+-- FIXME: put in SizeExp for the length, also need to touch TypeChecker.hs for that.
 -- FIXUP: convert to VarDecl with an ArrayT
 ArrVarDecl.     Dec     ::= "var" Typ Ident "[" Exp "]"            ";" ;
 
@@ -97,14 +97,16 @@ IntTConcrete.    Typ      ::= "Integer" "<" SizeExp ">" ;
 BoolT.          Typ     ::= "bool" ;
 VoidT.          Typ     ::= "void" ;
 
-StructT.        Typ     ::= "struct" "{" [TypedName] "}"                ";" ;
-EnumT.          Typ     ::= "enum" "{" [Ident] "}"                      ";" ;
--- FIXME: use ConstExp here.
+-- FIXME: BUG: the separator for [TypedName] is comma, which is wrong for C struct
+-- defs.
+StructT.        Typ     ::= "struct" "{" [TypedName] "}"                    ;
+EnumT.          Typ     ::= "enum" "{" [Ident] "}"                          ;
+-- FIXME: use SizeExp here.
 ArrayT.         Typ     ::= Typ "[" Exp "]" ;
 RefT.           Typ     ::= Typ "&" ;
 SimpleT.        Typ     ::= Ident ;
 
--- FIXME: use ConstExp here.
+-- FIXME: use SizeExp here.
 internal IntT.  Typ     ::= "int" "<" Exp ">" ;
 
 -- this is a declaration of a named typed variable, like in a function
@@ -322,7 +324,6 @@ internal RedArrayT.     Typ     ::= Typ Integer ;
 
 comment "/*" "*/" ;
 comment "//" ;
-comment "#" ;
 
 -- Typ is an entry point just for debugging
 entrypoints Prog, Stm, Exp ;

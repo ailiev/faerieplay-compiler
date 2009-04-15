@@ -1,5 +1,6 @@
 {-# OPTIONS -fglasgow-exts -cpp #-}
 {-# LINE 3 "Faerieplay/Bnfc/Fcpp/Lex.x" #-}
+
 {-# OPTIONS -fno-warn-incomplete-patterns #-}
 module Faerieplay.Bnfc.Fcpp.Lex where
 
@@ -7,7 +8,7 @@ module Faerieplay.Bnfc.Fcpp.Lex where
 
 #if __GLASGOW_HASKELL__ >= 603
 #include "ghcconfig.h"
-#else
+#elif defined(__GLASGOW_HASKELL__)
 #include "config.h"
 #endif
 #if __GLASGOW_HASKELL__ >= 503
@@ -37,6 +38,7 @@ alex_deflt = AlexA# "\x1a\x00\xff\xff\x03\x00\x03\x00\xff\xff\xff\xff\x07\x00\x0
 
 alex_accept = listArray (0::Int,32) [[],[],[(AlexAccSkip)],[(AlexAccSkip)],[],[(AlexAcc (alex_action_4))],[(AlexAccSkip)],[(AlexAccSkip)],[(AlexAccSkip)],[(AlexAccSkip)],[],[],[],[],[(AlexAccSkip)],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_4))],[(AlexAcc (alex_action_5))],[(AlexAcc (alex_action_5))],[(AlexAcc (alex_action_6))],[],[],[],[(AlexAcc (alex_action_7))]]
 {-# LINE 35 "Faerieplay/Bnfc/Fcpp/Lex.x" #-}
+
 
 tok f p s = f p s
 
@@ -137,14 +139,15 @@ alexGetChar (p, _, (c:s)) =
 alexInputPrevChar :: AlexInput -> Char
 alexInputPrevChar (p, c, s) = c
 
-alex_action_4 = tok (\p s -> PT p (TS $ share s)) 
-alex_action_5 = tok (\p s -> PT p (eitherResIdent (TV . share) s)) 
-alex_action_6 = tok (\p s -> PT p (TL $ share $ unescapeInitTail s)) 
-alex_action_7 = tok (\p s -> PT p (TI $ share s))    
-{-# LINE 1 "GenericTemplate.hs" #-}
+alex_action_4 =  tok (\p s -> PT p (TS $ share s)) 
+alex_action_5 =  tok (\p s -> PT p (eitherResIdent (TV . share) s)) 
+alex_action_6 =  tok (\p s -> PT p (TL $ share $ unescapeInitTail s)) 
+alex_action_7 =  tok (\p s -> PT p (TI $ share s))    
+{-# LINE 1 "templates/GenericTemplate.hs" #-}
+{-# LINE 1 "templates/GenericTemplate.hs" #-}
 {-# LINE 1 "<built-in>" #-}
-{-# LINE 1 "<command line>" #-}
-{-# LINE 1 "GenericTemplate.hs" #-}
+{-# LINE 1 "<command-line>" #-}
+{-# LINE 1 "templates/GenericTemplate.hs" #-}
 -- -----------------------------------------------------------------------------
 -- ALEX TEMPLATE
 --
@@ -154,9 +157,9 @@ alex_action_7 = tok (\p s -> PT p (TI $ share s))
 -- -----------------------------------------------------------------------------
 -- INTERNALS and main scanner engine
 
-{-# LINE 35 "GenericTemplate.hs" #-}
+{-# LINE 35 "templates/GenericTemplate.hs" #-}
 
-{-# LINE 45 "GenericTemplate.hs" #-}
+{-# LINE 45 "templates/GenericTemplate.hs" #-}
 
 
 data AlexAddr = AlexA# Addr#

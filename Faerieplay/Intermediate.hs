@@ -261,8 +261,8 @@ data Exp =
 
 -- get the main function
 getMain (Prog _ (ProgTables {funcs=fs})) =
-    fromJustMsg "Intermediate::getMain" $
-    Map.lookup cMAINNAME fs
+    fromJustMsg ("Failed to find the main function '" ++ cMAINNAME ++ "'") $
+                Map.lookup cMAINNAME fs
 
 
 --

@@ -45,7 +45,23 @@ fixupDec dec                        = dec
 
 fixupTyp :: CAbs.Typ -> CAbs.Typ
 fixupTyp (IntT_C)                   = IntT (EInt 32)
+fixupTyp conc_int@(IntTConcrete _)  = fixupIntT conc_int
 fixupTyp typ                        = typ
+
+-- convert IntTConcrete nodes to IntT
+-- HACK: copied from SFDL_Fixup.hs
+fixupIntT :: Typ -> Typ
+fixupIntT (IntTConcrete size_exp)   = IntT (se2e size_exp)
+    where se2e se = case se of
+                      SEIdent id    -> EIdent id
+                      SEInt i       -> EInt i
+                      SEFunCall id args
+                          -> EFunCall id
+                                      (map (\(SizeFunArg e) -> FunArg (se2e e)) args)
+                      SEPlus x y    -> EPlus (se2e x) (se2e y)
+                      SEMinus x y   -> EMinus (se2e x) (se2e y)
+                      SETimes x y   -> ETimes (se2e x) (se2e y)
+fixupIntT t                         = t
 
 
 -- convert the ArrVarDecl to the normal VarDecl

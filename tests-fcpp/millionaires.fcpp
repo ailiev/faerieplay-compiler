@@ -1,0 +1,12 @@
+// -*- c++ -*-
+// Faerie C++
+
+// define empty macros for 'program', 'var' etc.
+#include "fcpp-crutches.h"
+
+// The millionaire's problem: compare two numbers.
+program (Millionaires);
+
+function bool sfdlmain (Integer<32> a, Integer<32> b) {
+    return a < b;
+}

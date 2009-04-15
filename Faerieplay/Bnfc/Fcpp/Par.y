@@ -119,8 +119,8 @@ Typ : 'int' { IntT_C }
   | 'Integer' '<' SizeExp '>' { IntTConcrete $3 }
   | 'bool' { BoolT }
   | 'void' { VoidT }
-  | 'struct' '{' ListTypedName '}' ';' { StructT $3 }
-  | 'enum' '{' ListIdent '}' ';' { EnumT $3 }
+  | 'struct' '{' ListTypedName '}' { StructT $3 }
+  | 'enum' '{' ListIdent '}' { EnumT $3 }
   | Typ '[' Exp ']' { ArrayT $1 $3 }
   | Typ '&' { RefT $1 }
   | Ident { SimpleT $1 }

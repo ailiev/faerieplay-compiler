@@ -32,9 +32,9 @@ getVersion
 -- thus, this file will be seen as updated by the SCM if any of the other files are.
 {-
 <versions>
-/home/sasho/work/code/sfdl-compiler/Faerieplay/: 773:814M;
-/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Fcpp/: 773:814;
+/home/sasho/work/code/sfdl-compiler/Faerieplay/: 773:818M;
+/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Fcpp/: 773:814M;
 /home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Sfdl/: 773:814;
-Faerieplay/: 773:814M;
+Faerieplay/: 773:818M;
 </versions>
 -}

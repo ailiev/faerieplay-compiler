@@ -14,7 +14,7 @@ GHCFLAGS += -odir $(ODIR) -hidir $(ODIR)
 
 # GHCFLAGS += -Wall
 
-build_root = build
+build_root = build_$(source_lang)
 
 # for actually running the Faerieplay compiler, if a user of this makefile wants
 # to do that.
@@ -23,8 +23,10 @@ SFDLCFLAGS += +RTS -xc -RTS
 
 ifeq ($(source_lang),Sfdl)
 	GHCFLAGS += -DSYNTAX_SFDL
+	exe_file = sfdlc
 else ifeq ($(source_lang),Fcpp)
 	GHCFLAGS += -DSYNTAX_C
+	exe_file = fc++
 else
 $(error No recognized source language defined in make variable 'source_lang')
 endif

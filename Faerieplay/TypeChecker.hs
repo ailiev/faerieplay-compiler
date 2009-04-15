@@ -401,15 +401,16 @@ checkStm s@(T.SReturn exp)              =
 checkAssStm :: T.AssStm -> StateWithErr Im.AssStm
 checkAssStm ass@(T.ASOpAss lval op rval) =
     setContext ass $
-    do compilerAssert (op /= T.AssId)
-                      "Only expect identity assignment operator during type check, not += etc"
+    -- note: this check only applies to parse tree coming from FC++ source.
+    do compilerAssert (op == T.AssId)
+                      "Only expect simple assignment operator (x = x `op` y) during type check (after fixup), not x += y etc."
        new_lval     <- checkLVal lval
        new_rval     <- checkExp rval
        return $ Im.AssStm new_lval new_rval
 
 
 checkAssStm s =     throwCompilerErr
-                     "Only expect simple assignment type during type check, not x++, ++x, etc"
+                     "Only expect simple assignment type during type check (after fixup), not x++, ++x, etc"
 
 -- SYNTAX_C
 #endif
