@@ -1,0 +1,24 @@
+Name:                sfdlc
+Version:             0.6.4
+Description:         Compiler from the Faerie language to an arithmetic circuit.
+License:             BSD3
+License-file:        LICENSE.txt
+Author:              Alexander Iliev
+Maintainer:          alex DOT iliev AT gmail DOT com
+Build-Type:          Simple
+Cabal-Version:       >=1.2
+
+Executable sfdlc
+  Main-is:           Faerieplay/sfdlc.hs
+  Build-Depends:     haskell98,
+                     base >= 3 && < 5,
+                     containers,
+                     syb,
+                     pretty,
+                     array,
+                     mtl,
+                     fgl,
+                     faerieplay-json,
+                     ilievutils
+  cpp-options:       -DSYNTAX_C
+
