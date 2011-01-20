@@ -42,9 +42,14 @@ instance (Ord k) => Mapping ([(k,a)]) k a where
     toList          = id
 
 -- a Map makes a very good Mapping of course
+-- with the slight detail that Map.lookup returns a Maybe, whereas we
+-- want a generic Monad.
 instance (Ord k) => Mapping (Map.Map k a) k a where
     insert      = Map.insert
-    lookup      = Map.lookup
+    lookup k m  = -- convert from Maybe to this Monad
+                  maybe (fail "Key not found in Map Mapping")
+                        (\v -> return v)
+                        (Map.lookup k m)
     empty       = Map.empty
     toList      = Map.toList
 

@@ -516,7 +516,7 @@ showsValBinary p (Just g)   =
                             -- Surround every array element with braces '{' and '}'
                             VArr arr  -> str "[" .
                                          (punctuate (str ",") $
-                                          map (\val -> str "{" . rec val . str "}") $ elems arr) .
+                                          map (\val -> str "{" . recurse val . str "}") $ elems arr) .
                                          str "]"
 
                             -- if a list contains several integers, they will be collapsed
@@ -525,16 +525,16 @@ showsValBinary p (Just g)   =
                             -- match the evalutor---it would be difficult for the
                             -- evaluator to separate out list elements, so it just dumps a
                             -- list of bytes.
-                            VList l   -> (punctuate (str ",") $ map rec l)
+                            VList l   -> (punctuate (str ",") $ map recurse l)
 
-        where rec x      = showsValBinary p x
+        where recurse x      = showsValBinary p x
 
 
 showsScalarBinary p s = case s of (ScInt i)     -> showsInt_bytes p i
                                   -- show boolean as the corresponding Int
-                                  (ScBool b)    -> rec $ ScInt $ toInteger $ fromEnum b
+                                  (ScBool b)    -> recurse $ ScInt $ toInteger $ fromEnum b
                                   (ScString s)  -> showsPrec p s
-    where rec = showsScalarBinary p
+    where recurse = showsScalarBinary p
 
 
 
@@ -542,13 +542,13 @@ showsValHuman p Nothing = str "Nothing"
 showsValHuman p (Just gv) =
                 case gv of
                       Blank     -> str "Blank"
-                      VScalar s -> rec s
-                      VArr arr  -> str "array[" . rec (rangeSize $ bounds arr) . str "]"
+                      VScalar s -> recurse s
+                      VArr arr  -> str "array[" . recurse (rangeSize $ bounds arr) . str "]"
                       VList l   -> str "vl " .
                                    str "[" .
                                            (punctuate (str ",") $ map (showsValHuman p) l) .
                                   str "]"
-        where rec x = showsPrec p x -- not a recursion, but anyway.
+        where recurse x = showsPrec p x -- not a recursion, but anyway.
               str   = (++)
 
 

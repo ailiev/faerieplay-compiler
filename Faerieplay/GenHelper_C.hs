@@ -1,3 +1,4 @@
+{-# LANGUAGE ParallelListComp #-}
 --
 -- Circuit compiler for the Faerieplay hardware-assisted secure
 -- computation project at Dartmouth College.

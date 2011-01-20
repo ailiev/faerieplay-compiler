@@ -707,10 +707,10 @@ spliceInIf :: (a -> Bool)       -- ^ Do we splice in at this element?
            -> [b]
 
 spliceInIf p f g ns (x:xs)
-    | p x       = case ns of (n:ns')    -> f x n : rec ns' xs
+    | p x       = case ns of (n:ns')    -> f x n : recurse ns' xs
                              []         -> error "spliceInIf: ran out of replacement values"
-    | otherwise = g x : rec ns xs
-    where rec = spliceInIf p f g
+    | otherwise = g x : recurse ns xs
+    where recurse = spliceInIf p f g
 spliceInIf _ _ _ ns []  = case ns of [] -> []
                                      _  -> error "WARNING: spliceInIf had replacements left over at the end" []
 

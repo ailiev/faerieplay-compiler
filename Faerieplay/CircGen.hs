@@ -687,21 +687,21 @@ getRootvarOffset :: (TypeTableMonad m)                  =>
                     Exp                                 ->
                     m (Var, Typ, Int)
 getRootvarOffset loc_extr exp =
-    do let rec = getRootvarOffset loc_extr
+    do let recurse = getRootvarOffset loc_extr
        case exp of
         (ExpT t (EVar v))   -> return (v, t, 0)
         (EVar v)            -> error
                                ("getRootvarOffset got an EVar " << exp
                                 << " without an ExpT annotation!")
-        (EStruct str_e idx) -> do  (v, t, o)  <- rec str_e
+        (EStruct str_e idx) -> do  (v, t, o)  <- recurse str_e
                                    fld_info   <- getStrTParams str_e
                                    let locs   = loc_extr fld_info
                                        preceding  = sum $
                                                     map snd $
                                                     take idx locs
                                    return (v, t, o + preceding)
-        (ExpT t e)          -> rec e
-        (EArr arr_e idx_e)  -> rec arr_e
+        (ExpT t e)          -> recurse e
+        (EArr arr_e idx_e)  -> recurse arr_e
         e                   -> error $
                                "CircGen: getRootvarOffset: invalid lval "
                                << e
@@ -1872,11 +1872,11 @@ cctShowsGate sep delim
                      -- 1: gate number
                      rec' i                                 .   (sep ++) .
                      -- 2: gate flags
-                     rec flags                              .   (sep ++) .
+                     recurse flags                              .   (sep ++) .
                      -- 3: gate result type
-                     (rec typ)                              .   (sep ++) .
+                     (recurse typ)                              .   (sep ++) .
                      -- 4: gate operation
-                     rec op                                 .   (sep ++) .
+                     recurse op                                 .   (sep ++) .
                      -- 5: source gates
                      (if null srcs
                       then ("nosrc" ++)
@@ -1901,7 +1901,7 @@ cctShowsGate sep delim
 --                      else ((strShow $ map strip doc) ++))               .
                      (delim ++)
 
-        where rec x         = cctShows x -- recurse
+        where recurse x         = cctShows x -- recurse
               rec'          = showsPrec 0 -- and go into the Show class
 
 
@@ -1960,7 +1960,7 @@ cctShowsOp o =
                             -> str "Slicer " . rec' off . sp . rec' len
 
             (Print prompt)  -> str "Print " . str prompt
-          where rec y   = cctShows y
+          where -- recurse y   = cctShows y
                 rec' y  = showsPrec 0 y
                 str     = (++)
                 sp      = (" " ++)

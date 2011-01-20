@@ -450,7 +450,7 @@ expandType flags t =
 
 expandType' :: TypeTable -> [ExpandTypFlags] -> Typ -> Typ
 expandType' type_table flags t =
-    let rec = expandType' type_table flags
+    let recurse = expandType' type_table flags
     in
       case t of
                 (SimpleT name)          -> worker DoTypeDefs
@@ -458,20 +458,20 @@ expandType' type_table flags t =
                                                            ("Intermediate.expandType " ++ name) $
                                                          Map.lookup name type_table
                                                 in
-                                                  rec t')
+                                                  recurse t')
                 (ArrayT elem_t
                            len)         -> worker DoArrayElems
-                                               (ArrayT (rec elem_t) len)
+                                               (ArrayT (recurse elem_t) len)
 
                 (StructT (name_typs,
                           locs))        -> worker DoFields
                                                (let (names,typs)    = unzip name_typs
-                                                    typs'           = map rec typs
+                                                    typs'           = map recurse typs
                                                 in
                                                   StructT (zip names typs', locs))
 
                 (RefT t)                -> worker DoRefs
-                                                (RefT $ rec t)
+                                                (RefT $ recurse t)
 
                 _                       -> t
 
@@ -496,11 +496,11 @@ getFieldName t                    fld_idx = show fld_idx
 -- use 'tblen' for f to get the length of simple types: Int, Bool, EnumT
 typeLength :: (Typ -> Int) -> Typ -> Int
 typeLength f t =
-    let rec = typeLength f in
+    let recurse = typeLength f in
     case t of
       (StructT (ts,
                 locs))          -> (sum $
-                                    map (rec . snd) $ -- snd pulls out the field's type
+                                    map (recurse . snd) $ -- snd pulls out the field's type
                                     ts)
                                      `trace`
                                      ("Intermediate.typeLength: got a StructT with fields "
