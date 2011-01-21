@@ -1,6 +1,8 @@
-{-# OPTIONS_GHC -fallow-overlapping-instances -fglasgow-exts -cpp #-}
--- -fglasgow-exts for parallel list comprehension
-
+{-# OPTIONS_GHC -cpp #-}
+{-# LANGUAGE OverlappingInstances,
+  ParallelListComp,
+  TypeSynonymInstances,
+  PatternGuards #-}
 --
 -- Circuit compiler for the Faerieplay hardware-assisted secure
 -- computation project at Dartmouth College.

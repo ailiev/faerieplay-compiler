@@ -1,4 +1,8 @@
-{-# OPTIONS_GHC -fallow-overlapping-instances  -fglasgow-exts #-}
+{-# LANGUAGE OverlappingInstances,
+  ParallelListComp,
+  TypeSynonymInstances,
+  FlexibleInstances,
+  FlexibleContexts #-}
 --
 -- Circuit compiler for the Faerieplay hardware-assisted secure
 -- computation project at Dartmouth College.

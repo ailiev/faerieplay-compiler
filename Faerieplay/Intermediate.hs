@@ -1,7 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
--- -fglasgow-exts: for "Non-type variables, or repeated type variables",
--- in evalStatic
-
+{-# LANGUAGE TypeSynonymInstances, DeriveDataTypeable, FlexibleContexts #-}
 --
 -- Circuit compiler for the Faerieplay hardware-assisted secure
 -- computation project at Dartmouth College.
