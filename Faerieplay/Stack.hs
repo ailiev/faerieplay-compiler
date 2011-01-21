@@ -18,7 +18,7 @@ module Faerieplay.Stack where
 import Monad                        (MonadPlus, msum)
 import qualified Data.Map           as Map
 
-import Faerieplay.SashoLib          (modifyFirst)
+import IlievUtils.Misc              (modifyFirst)
 
 
 -- | A class of types with Stack-like functionality. Not sure if anything other than a
