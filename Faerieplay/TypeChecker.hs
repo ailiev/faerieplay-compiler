@@ -40,12 +40,13 @@ import Control.Monad.Trans (lift)
 
 import Faerieplay.Common (MyError(..),MyErrorCtx, ErrCtxMonad, trace, logDebug)
 
-import Faerieplay.SashoLib ((<<), ilog2,
+import IlievUtils.Misc ((<<), ilog2,
                  myLiftM, concatMapM, iterateWhileM,
                  (>>==), mapTuple2, projSnd,
                  StreamShow(..),
-                 compilerAssert, throwCompilerErr
                 )
+
+import Faerieplay.Common            (compilerAssert, throwCompilerErr)
 
 import Faerieplay.Stack               as Stack (Stack(..), maybeLookup,modify_first_map)
 

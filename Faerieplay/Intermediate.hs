@@ -42,7 +42,7 @@ import Data.Generics            (Data,
 import qualified Faerieplay.Bnfc.Sfdl.Abs       as CAbs
 import qualified Faerieplay.Bnfc.Sfdl.Print     as BNFCPrint
 
-import Faerieplay.SashoLib                      as SL
+import IlievUtils.Misc                      as SL
 
 
 import qualified Faerieplay.Container as Cont

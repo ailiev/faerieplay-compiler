@@ -31,7 +31,7 @@ import Maybe                            (fromJust)
 import List                             (unfoldr, partition)
 import qualified Data.Map               as Map
 
-import Faerieplay.SashoLib              ((<<), ilog2, unfoldrM,
+import IlievUtils.Misc              ((<<), ilog2, unfoldrM,
                                          mapTuple2, iterateWhileM,
                                          fromJustMsg)
 import Faerieplay.Stack                 (Stack(..), maybeLookup)

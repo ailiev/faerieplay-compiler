@@ -1,4 +1,6 @@
+{-# LANGUAGE OverlappingInstances #-}
 {-# OPTIONS_GHC -cpp #-}
+
 --
 -- Circuit compiler for the Faerieplay hardware-assisted secure
 -- computation project at Dartmouth College.
@@ -80,14 +82,14 @@ import qualified Faerieplay.HoistStms      as Ho
 import qualified Faerieplay.Unroll         as Ur
 import qualified Faerieplay.CircGen        as CG
 import qualified Faerieplay.Runtime        as Run
-import qualified Faerieplay.GraphLib       as GrLib
-import           Faerieplay.UDraw
+import qualified IlievUtils.GraphLib       as GrLib
+import           IlievUtils.UDraw
 import           Faerieplay.Common          (trace,cMINPRIO,LogPrio(..),RunFlag(..))
 import Faerieplay.ErrorWithContext          (ErrorWithContext(..))
 
 import Faerieplay.TypeChecker
 
-import Faerieplay.SashoLib
+import IlievUtils.Misc
 
 
 cC_HELPER_TEMPLATE = "GenHelper_C.templ.cc"

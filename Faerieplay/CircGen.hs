@@ -75,17 +75,17 @@ import qualified Data.Tree                      as Tree
 
 import qualified Control.Monad.State            as St
 
-import Faerieplay.SashoLib                      as Lib
-import Faerieplay.UDraw                         as UDraw
+import IlievUtils.Misc                      as Lib
+import IlievUtils.UDraw                         as UDraw
 -- import Sasho.XDR
 
-import qualified    Faerieplay.TreeLib          as TreeLib
+import qualified    IlievUtils.TreeLib          as TreeLib
 import qualified    Faerieplay.Container        as Cont
 import              Faerieplay.Mapping          as Mapping
 
-import Faerieplay.Stack                         as Stack   (Stack(..), maybeLookup)
+-- import Faerieplay.Stack                         as Stack   (Stack(..), maybeLookup)
 
-import qualified    Faerieplay.GraphLib         as GrLib
+import qualified    IlievUtils.GraphLib         as GrLib
 
 import Faerieplay.Common                        (trace,LogPrio(..),logmsg,logProgress,
                                                  logDebug,logDump,RunFlag(..))

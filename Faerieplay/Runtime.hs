@@ -47,7 +47,7 @@ import qualified Text.PrettyPrint               as PP
 import Text.PrettyPrint                         (($$))
 
 
-import Faerieplay.SashoLib
+import IlievUtils.Misc
 
 import Faerieplay.Common (trace, RunFlag(..))
 

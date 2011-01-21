@@ -22,7 +22,7 @@ module Faerieplay.GenHelper_C where
 
 import qualified Faerieplay.Intermediate        as Im
 
-import Faerieplay.SashoLib                      (DocAble(..))
+import IlievUtils.Misc                      (DocAble(..))
 
 import Control.Exception                        (assert)
 import Text.Printf                              (printf)

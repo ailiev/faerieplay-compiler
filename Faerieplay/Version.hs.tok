@@ -1,6 +1,6 @@
 module Faerieplay.Version where
 
-import Faerieplay.SashoLib          as SL
+import IlievUtils.Misc          as SL
 
 cIS_RELEASE = False
 

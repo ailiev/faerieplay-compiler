@@ -45,7 +45,7 @@ module Faerieplay.HoistStms (flattenProg,
 import qualified Control.Monad.State as St
 import qualified Data.Map as Map
 
-import Faerieplay.SashoLib (mapTuple2, (>>==), replicateM)
+import IlievUtils.Misc (mapTuple2, (>>==), replicateM)
 import qualified Faerieplay.Container           as Cont
 import Faerieplay.Stack                         (Stack(..))
 

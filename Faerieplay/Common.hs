@@ -16,11 +16,11 @@
 
 module Faerieplay.Common where
 
-import Control.Monad.Error (Error, noMsg, strMsg, throwError)
+import Control.Monad.Error (MonadError(..),Error(strMsg),throwError,noMsg)
 
 import qualified Debug.Trace                    as Trace
 
-import Faerieplay.SashoLib                                 (StreamShow (..))
+import IlievUtils.Misc                                 (StreamShow (..))
 
 import Faerieplay.ErrorWithContext
 
@@ -58,6 +58,18 @@ type ErrCtxMonad = Either MyErrorCtx
 data RunFlag = DumpGates | DumpGraph | DoPrint | Verbose | RunTraceBinary
     deriving (Read,Show,Eq,Ord)
 
+
+-- | assertion at the compiler level, ie. a failure indicates a compiler bug.
+-- in an arbitary Error monad
+compilerAssert :: (Error e, MonadError e m) => Bool -> String -> m ()
+compilerAssert pred msg
+    | pred      = return ()
+    | otherwise = throwCompilerErr msg
+
+
+-- | Raise a compiler exception within the current Error monad.
+throwCompilerErr :: (Error e, MonadError e m) => String -> m a
+throwCompilerErr msg = throwError $ strMsg ("Compiler internal bug: " ++ msg)
 
 
 #ifdef TRACE
