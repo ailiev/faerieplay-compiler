@@ -5,11 +5,14 @@ License:             BSD3
 License-file:        LICENSE.txt
 Author:              Alexander Iliev
 Maintainer:          alex DOT iliev AT gmail DOT com
+Homepage:            http://www.cs.dartmouth.edu/~trust/w/index.php/Faerieplay
 Build-Type:          Simple
 Cabal-Version:       >=1.2
 
-Executable sfdlc
+Executable fc++
   Main-is:           Faerieplay/sfdlc.hs
+  Other-Modules:     Faerieplay.Bnfc.Fcpp.Par,
+                     Faerieplay.Bnfc.Fcpp.Lex
   Build-Depends:     haskell98,
                      base >= 3 && < 5,
                      containers,
@@ -18,7 +21,20 @@ Executable sfdlc
                      array,
                      mtl,
                      fgl,
-                     faerieplay-json,
                      ilievutils
   cpp-options:       -DSYNTAX_C
 
+Executable sfdlc
+  Main-is:           Faerieplay/sfdlc.hs
+  Other-Modules:     Faerieplay.Bnfc.Sfdl.Par,
+                     Faerieplay.Bnfc.Sfdl.Lex
+  Build-Depends:     haskell98,
+                     base >= 3 && < 5,
+                     containers,
+                     syb,
+                     pretty,
+                     array,
+                     mtl,
+                     fgl,
+                     ilievutils
+  cpp-options:       -DSYNTAX_SFDL

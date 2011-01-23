@@ -1,9 +1,13 @@
 # -*- makefile -*-
 
-SHARED_DIR=../pir
+FAERIEPLAY_DIST_ROOT ?= $(HOME)/faerieplay
 
-# this defined DIST_ROOT, we will use the same installation directory.
-include $(SHARED_DIR)/config.make
+DIST_ROOT ?= $(FAERIEPLAY_DIST_ROOT)
+
+ifeq ($(DIST_ROOT),)
+$(error Please set the environment variable FAERIEPLAY_DIST_ROOT)
+endif
+
 
 # the ghc compiler
 GHC = ghc
