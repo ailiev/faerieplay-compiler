@@ -10,10 +10,9 @@ cRELEASE="0.8"
 -- section at the end.
 -- g_timestamp = "2006-11-08 13:24:07 sasho"
 
--- these two updated by subversion, with property "svn:keywords" set to at least
--- "Date Revision"
-g_svn_id = "subversion  $Revision: 664 $"
-g_svn_date = " $Date: 2007-05-27 20:00:12 -0400 (Sun, 27 May 2007) $"
+-- these two updated by our build script, based on git metadata.
+g_svn_id = "git ${fullCommit}: ${subject}"
+g_svn_date = "${date}"
 
 svn_version = SL.trs [(" $",     ""),
                       ("$",      ""),

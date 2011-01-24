@@ -10,10 +10,9 @@ cRELEASE="0.8"
 -- section at the end.
 -- g_timestamp = "2006-11-08 13:24:07 sasho"
 
--- these two updated by subversion, with property "svn:keywords" set to at least
--- "Date Revision"
-g_svn_id = "subversion  $Revision$"
-g_svn_date = " $Date$"
+-- these two updated by our build script, based on git metadata.
+g_svn_id = "git c129fde32b6277e0a682f6c8eb4c7b48e456108c: Incorporate cabal into build. update hasktags."
+g_svn_date = "2011-01-23 16:39:22 +0000"
 
 svn_version = SL.trs [(" $",     ""),
                       ("$",      ""),
@@ -32,9 +31,5 @@ getVersion
 -- thus, this file will be seen as updated by the SCM if any of the other files are.
 {-
 <versions>
-/home/sasho/work/code/sfdl-compiler/Faerieplay/: 773:818M;
-/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Fcpp/: 773:814M;
-/home/sasho/work/code/sfdl-compiler/Faerieplay/Bnfc/Sfdl/: 773:814;
-Faerieplay/: 773:818M;
 </versions>
 -}

@@ -61,7 +61,7 @@ doc:
 # version info in $(VERSFILE) to be the same as the latest modified source file.
 
 $(VERSFILE): $(VERSFILE).tok $(SRCS)
-	$(CURDIR)/update-versions.pl < $(VERSFILE).tok > $(VERSFILE) $^
+	$(CURDIR)/update-versions.pl < $(VERSFILE).tok > $(VERSFILE) $(CURDIR)
 
 
 ifdef TOOLS_DIR

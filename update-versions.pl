@@ -10,47 +10,24 @@ use English;
 
 use File::Basename;
 
-sub get_versions(@);
-sub exp_chomp ($);
-
-my $versions = get_versions (@ARGV);
-
-# print $versions, "\n";
+sub get_version_info($);
 
 
-$INPUT_RECORD_SEPARATOR = undef;
+my %versions = % { get_version_info ($ARGV[0]) };
 
-$ARG = <STDIN>;
-s+(<versions>\s*).*(\s*</versions>)+$1$versions\n$2+s;
+# map { print "$_=$versions{$_}\n" } (keys %versions);
 
-print $ARG;
-
-sub get_versions(@) {
-  # get the unique dirs
-  my @dirs = sort (map { dirname $_ } @_);
-
-  my @uniq_dirs;
-  my $last = "";
-  foreach my $d (@dirs) {
-    if ($d ne $last) {
-      push @uniq_dirs, $d;
-    }
-    $last = $d;
-  }
-
-#  print ("unique dirs: ", (join ':', @uniq_dirs), "\n");
-
-  my @versions = map { "$_/: " . exp_chomp(`svnversion $_`) . ';' } @uniq_dirs;
-
-  return (join "\n", @versions);
+while (<STDIN>) {
+  s/ \$ \{ ([^}]+) \} /$versions{$1}/exg;
+  print;
 }
 
-
-# chomp a value and return the chomped value.
-sub exp_chomp ($) {
-  my $val = shift;
-
-  chomp $val;
-
-  return $val;
+sub get_version_info($) {
+    my $srcDir = shift;
+    my $info = `git log -n 1 --pretty="format:fullCommit=%H%ndate=%ai%nsubject=%s%n" -- $srcDir`;
+#    return $info;
+    my @matches = $info =~ m/([^=]+)=([^\n]+)\n/gs;
+    # create a hash from array of key, value element pairs
+    return {@matches};
 }
+
