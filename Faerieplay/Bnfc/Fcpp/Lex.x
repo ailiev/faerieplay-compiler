@@ -20,7 +20,6 @@ $u = [\0-\255]          -- universal: any character
 
 :-
 "//" [.]* ; -- Toss single line comments
-"#" [.]* ; -- Toss single line comments
 "/*" ([$u # \*] | \* [$u # \/])* ("*")+ "/" ; 
 
 $white+ ;
