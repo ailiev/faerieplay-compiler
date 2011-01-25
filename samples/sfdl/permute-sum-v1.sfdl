@@ -1,0 +1,39 @@
+// -*- c -*-
+
+// For Fairplay version 1
+
+program Sum {
+
+    const N = 100;
+    
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    type Pair = struct { Word x,
+			 Word y };
+
+    type BobInput	= Pair[N];
+    type Input		= struct {BobInput bob};
+
+    type AliceOutput	= Word;
+    type Output		= struct {AliceOutput alice};
+
+    function Word sum (Pair [N] ins) {
+	var Word res;
+	res = 0;
+	
+	for (i = 0 to N) {
+	    // read the .y elements in order decided by the .x elements
+	    res = res + res;
+	}
+
+	sum = res;
+    }
+
+
+    function Output output (Input input) {
+	output.alice = sum (input.bob);
+    }
+		
+
+}

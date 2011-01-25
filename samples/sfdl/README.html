@@ -1,0 +1,38 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+  <head>
+    <link href="../shared/style.css" rel="stylesheet" type="text/css" />
+    <title>SFDL sample programs</title>
+  </head>
+
+  <body>
+    <h1>SFDL sample programs</h1>
+
+ <p>The source files have <code>.sfdl</code> extensions.
+    Some of them have matching <code>.cjs</code> files with sample input data. (cjs is
+    Cson, see <a href="../json/README.html">README</a>). </p>
+
+ <h2>Preparation</h2>
+<a href="../docs/INSTALL.html">Build and install</a> the Faerieplay system. Most of it is needed, except the MIPS emulator and
+its RAM plugins.
+
+
+<h2>Example: gcd program</h2>
+<pre class="command">
+$ cd BASEDIR/sfdl
+$ make gcd.runtime
+
+# in another terminal:
+$ card_server -d /tmp/faerieplay
+
+$ cvm gcd.runtime < gcd-input.cjs
+</pre>
+
+Check out the other SFDL (<code class="command">ls *.sfdl</code>) example files in the same
+manner.
+
+
+<hr>
+Subversion $Id: README.html 773 2008-03-30 12:56:38Z sasho $
+  </body>
+</html>

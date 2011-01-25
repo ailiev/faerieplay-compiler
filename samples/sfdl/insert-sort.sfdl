@@ -1,0 +1,64 @@
+/* -*- c -*-
+ */
+program InsertSort
+{
+
+    const LOGN = 3;
+    const N = 1 << LOGN;
+
+    type Word = Int<LOGN>;
+
+    type Val = Int<20>;
+    
+  
+
+    function Val min (Val a, Val b) {
+	if (a < b) min = a;
+	else       min = b;
+    }
+	
+
+    function Val max (Val a, Val b) {
+	if (a > b) max = a;
+	else       max = b;
+    }
+
+    
+    function Val[N] insert (Val[N] arr, Word n, Val v) {
+	var Val a, b;
+
+	b = v;
+
+	print ("inserting at index ", n);
+
+	for (i = 0 to N-1) {
+
+	    if (i < n) {
+		a = arr[i];
+		
+		arr[i] = min (a,b);
+		b      = max (a,b);
+	    }
+	}
+
+	arr[n] = b;
+	
+	insert = arr;
+    }
+
+    
+    function Val[N] sort (Val[N] arr) {
+	for (i = 1 to N-1) {
+	    arr = insert (arr, i, arr[i]);
+	}
+
+	sort = arr;
+    }
+
+    
+    function Val[N] sfdlmain (Val [N] xs) {
+	sfdlmain = sort (xs);
+    }
+
+
+}

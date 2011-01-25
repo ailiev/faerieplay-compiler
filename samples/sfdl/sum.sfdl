@@ -1,0 +1,34 @@
+program Sum
+{
+
+    const N = 100;
+    
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    type Pair = struct { Word x,
+			 Word y };
+
+
+    function Word sum (Pair [N] ins)
+    {
+	var Word res;
+	res = 0;
+	
+	for (i = 0 to N) {
+	    if (ins[i].x < 10) {
+		res = res + ins[i].y;
+	    }
+	}
+
+	sum = res;
+    }
+
+
+    function Word sfdlmain (Pair [N] ins)
+    {
+	sfdlmain = sum (ins);
+    }
+		
+
+}

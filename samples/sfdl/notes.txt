@@ -1,0 +1,543 @@
+a dummy
+Tue Jun 28 13:07:53 2005
+
+ran permute-sum-v2 with N=32, communicating over localhost on pipe:
+
+Bob:
+real    1m39.411s
+user    0m37.237s
+sys     0m3.522s
+
+Alice:
+real    1m37.054s
+user    0m46.716s
+sys     0m1.050s
+
+
+and on 2 machines: zele and pipe:
+
+bob in zele:
+real    1m4.858s
+user    0m29.570s
+sys     0m1.110s
+
+alice on pipe:
+real    1m10.367s
+user    0m46.687s
+sys     0m0.905s
+
+
+
+N=64, alice on pipe, bob on bear.cs, 512MB max heap on both (top on bear showed almost
+700M):
+
+bob:
+real    2m41.197s
+user    1m38.517s
+sys     0m1.284s
+
+alice:
+real    2m46.393s
+user    2m3.330s
+sys     0m1.422s
+
+
+N=128, alice on jefferson7 (used 1.4G mem), bob on osceola. compilation on
+osceola took 30 mins.
+
+alice
+real    8m15.784s
+user    6m41.932s
+sys     0m7.587s
+
+bob
+real    7m59.808s
+user    3m37.068s
+sys     0m1.909s
+
+
+
+
+
+on the 4758, with N=128 and doing decryption of gates and values:
+# date; runtime; date
+Sat Aug  8 11:19:59 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Doing gate 300
+Doing gate 400
+Doing gate 500
+Doing gate 600
+Doing gate 700
+Doing gate 800
+Output main: 8128
+Sat Aug  8 11:20:14 GMT 2009
+
+
+
+and now with full sqrt alg. at work:
+# date; runtime; date
+Sat Aug  8 13:14:41 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Reshuffle!
+Reshuffle done!
+Doing gate 300
+Doing gate 400
+Reshuffle!
+Reshuffle done!
+Doing gate 500
+Doing gate 600
+Reshuffle!
+Reshuffle done!
+Doing gate 700
+Doing gate 800
+Output main: 8128
+Sat Aug  8 13:16:28 GMT 2009
+
+
+and now with batching of 128 reads and writes at a time (the array elements are
+8 bytes now) (much better!):
+# date; runtime; date
+Sat Aug  8 14:06:37 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Reshuffle!
+Reshuffle done!
+Doing gate 300
+Doing gate 400
+Reshuffle!
+Reshuffle done!
+Doing gate 500
+Doing gate 600
+Reshuffle!
+Reshuffle done!
+Doing gate 700
+Doing gate 800
+Output main: 8128
+Sat Aug  8 14:06:54 GMT 2009
+
+
+
+compiling the N=256 instance:
+(used about 1.3G RAM, took almost 12 hours)
+
+[jefferson-node25:deploy] 132) time ./compile ~/work/code/sfdl/permute-sum-v2.sfdl
+java -Xmx1600M -Xms1600M -Xmn100M -cp /net/grad/sasho/work/src/SFE-v2-compiler/sfe sfe.Runner -s ./system/system.txt -f /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl
+using system file at ./system/system.txt
+NOT OPTIMIZING
+file name: /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl
+setting to silent mode!!
+eval program
+Initing input params
+writing input pins to format file
+evaluating main
+writing output vars to format file
+end program eval
+the size of circuit is 6234370
+
+real    708m57.342s
+user    707m33.860s
+sys     0m49.960s
+
+
+
+
+
+###########################3
+compiling b=16 N=64 on jefferson
+
+[master:deploy] 109) `which time` ./compile ~/work/code/sfdl/permute-sum-v2.sfdl
+java -Xmx1600M -Xms1600M -Xmn100M -cp /net/grad/sasho/work/src/SFE-v2-compiler/sfe sfe.Runner -s ./system/system.txt -f /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl
+using system file at ./system/system.txt
+NOT OPTIMIZING
+file name: /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl
+setting to silent mode!!
+eval program
+Initing input params
+writing input pins to format file
+evaluating main
+writing output vars to format file
+end program eval
+the size of circuit is 193602
+64.64user 1.02system 1:09.21elapsed 94%CPU (0avgtext+0avgdata 0maxresident)k
+
+
+
+
+compiling b=16 N=256 on jefferson-node3
+
+[jefferson-node3:deploy] 102) time ./compile ~/work/code/sfdl/permute-sum-v2.sfdl
+java -Xmx1600M -Xms1600M -Xmn100M -cp /net/grad/sasho/work/src/SFE-v2-compiler/sfe sfe.Runner -s ./system/system.txt -f /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl
+using system file at ./system/system.txt
+NOT OPTIMIZING
+file name: /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl
+setting to silent mode!!
+eval program
+Initing input params
+writing input pins to format file
+evaluating main
+writing output vars to format file
+end program eval
+the size of circuit is 3084546
+
+real    148m36.172s
+user    147m59.014s
+sys     0m5.236s
+
+
+
+
+
+************ THE REAL THING ****************
+
+** b=16, N=64 on 2 jeffersons
+
+ time ./run_alice -sn ~/work/code/sfdl/permute-sum-v2.sfdl-b16-N64 1234 jefferson-node3
+java -Xmx1500M -Xms1500M -Xmn128M -ea -classpath /net/grad/sasho/work/src/SFE-v1-eclipse/bin:../jars/log4j-1.2beta3.jar -Drundir=./ SFE.BOAL.Alice -sn /net/grad/sasho/work/code/sfdl/permute-sum-v2.sfdl-b16-N64 1234 jefferson-node3
+Running Alice...
+alice.output=2016
+Initial calculations   [sum1] = 34.747
+Circuits communication [sum2] = 26.629
+Oblivious Transfers    [sum3] = 0.1
+Evaluation & output    [sum4] = 2.142
+
+real    1m4.198s
+user    0m47.557s
+sys     0m1.012s
+
+bob:
+real    1m4.238s
+user    0m48.813s
+sys     0m0.819s
+
+** b=16, N=128
+
+alice.output=8128
+Initial calculations   [sum1] = 142.786
+Circuits communication [sum2] = 105.843
+Oblivious Transfers    [sum3] = 0.099
+Evaluation & output    [sum4] = 8.961
+
+real    4m18.353s
+user    3m11.970s
+sys     0m3.874s
+
+bob:
+real    4m11.610s
+user    3m16.135s
+sys     0m2.279s
+
+++ estimate of NFS-to-local speed there: 11MB/sec
+++ NFS from master to local: 29MB/s (seems faster)
+
+
+b=16, N=256
+Initial calculations   [sum1] = 616.658
+Circuits communication [sum2] = 456.637
+Oblivious Transfers    [sum3] = 0.1
+Evaluation & output    [sum4] = 35.315
+
+real    18m29.707s
+user    13m47.403s
+sys     0m10.363s
+
+bob:
+real    17m56.362s
+user    14m18.011s
+sys     0m8.516s
+
+
+
+********** all the fairplay runs are with m (number of checker circuits bob
+           generates and sends) = 2. so next to no overhead there.
+
+
+
+
+
+
+########################### and now to the TTP!!!!!!!!!!!
+
+N=64
+# date; runtime; date
+Sun Aug  9 11:16:46 GMT 2009
+Doing gate 0
+BATCHSIZE = 12
+Doing gate 100
+Reshuffle!
+Reshuffle done!
+Doing gate 200
+Reshuffle!
+Reshuffle done!
+Doing gate 300
+Doing gate 400
+Output main: 2016
+Sun Aug  9 11:16:58 GMT 2009
+
+
+
+N=128
+896 gates
+# date; runtime; date
+Sun Aug  9 11:18:18 GMT 2009
+Doing gate 0
+Doing gate 100
+BATCHSIZE = 19
+Doing gate 200
+Reshuffle!
+Reshuffle done!
+Doing gate 300
+Doing gate 400
+Reshuffle!
+Reshuffle done!
+Doing gate 500
+Doing gate 600
+Reshuffle!
+Reshuffle done!
+Doing gate 700
+Doing gate 800
+Output main: 8128
+Sun Aug  9 11:18:44 GMT 2009
+
+
+N=256
+1792 gates
+# date; runtime; date
+Sun Aug  9 11:19:24 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+BATCHSIZE = 32
+Doing gate 300
+Doing gate 400
+Doing gate 500
+Reshuffle!
+Reshuffle done!
+Doing gate 600
+Doing gate 700
+Reshuffle!
+Reshuffle done!
+Doing gate 800
+Doing gate 900
+Doing gate 1000
+Reshuffle!
+Reshuffle done!
+Doing gate 1100
+Doing gate 1200
+Doing gate 1300
+Doing gate 1400
+Doing gate 1500
+Doing gate 1600
+Doing gate 1700
+Output main: 32640
+Sun Aug  9 11:20:21 GMT 2009
+
+
+N=512
+3584 gates
+# date; runtime; date
+Sun Aug  9 11:21:24 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Doing gate 300
+Doing gate 400
+Doing gate 500
+BATCHSIZE = 50
+Doing gate 600
+Doing gate 700
+Doing gate 800
+Doing gate 900
+Reshuffle!
+Reshuffle done!
+Doing gate 1000
+Doing gate 1100
+Doing gate 1200
+Doing gate 1300
+Reshuffle!
+Reshuffle done!
+Doing gate 1400
+Doing gate 1500
+Doing gate 1600
+Doing gate 1700
+Reshuffle!
+Reshuffle done!
+Doing gate 1800
+Doing gate 1900
+Doing gate 2000
+Doing gate 2100
+Reshuffle!
+Reshuffle done!
+Doing gate 2200
+Doing gate 2300
+Doing gate 2400
+Doing gate 2500
+Doing gate 2600
+Doing gate 2700
+Doing gate 2800
+Doing gate 2900
+Doing gate 3000
+Doing gate 3100
+Doing gate 3200
+Doing gate 3300
+Doing gate 3400
+Doing gate 3500
+Output main: 130816
+Sun Aug  9 11:23:46 GMT 2009
+
+
+
+N=1024
+7168 gates
+
+# date; runtime; date
+Sun Aug  9 11:29:46 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Doing gate 300
+Doing gate 400
+Doing gate 500
+Doing gate 600
+Doing gate 700
+Doing gate 800
+Doing gate 900
+Doing gate 1000
+BATCHSIZE = 64
+Doing gate 1100
+Doing gate 1200
+Doing gate 1300
+Doing gate 1400
+Doing gate 1500
+Doing gate 1600
+Reshuffle!
+Reshuffle done!
+Doing gate 1700
+Doing gate 1800
+Doing gate 1900
+Doing gate 2000
+Doing gate 2100
+Doing gate 2200
+Doing gate 2300
+Reshuffle!
+Reshuffle done!
+Doing gate 2400
+Doing gate 2500
+Doing gate 2600
+Doing gate 2700
+Doing gate 2800
+Doing gate 2900
+Reshuffle!
+Reshuffle done!
+Doing gate 3000
+Doing gate 3100
+Doing gate 3200
+Doing gate 3300
+Doing gate 3400
+Doing gate 3500
+Doing gate 3600
+Reshuffle!
+Reshuffle done!
+Doing gate 3700
+Doing gate 3800
+Doing gate 3900
+Doing gate 4000
+Doing gate 4100
+Doing gate 4200
+Reshuffle!
+Reshuffle done!
+Doing gate 4300
+Doing gate 4400
+Doing gate 4500
+Doing gate 4600
+Doing gate 4700
+Doing gate 4800
+Reshuffle!
+Reshuffle done!
+Doing gate 4900
+Doing gate 5000
+Doing gate 5100
+Doing gate 5200
+Doing gate 5300
+Doing gate 5400
+Doing gate 5500
+Doing gate 5600
+Doing gate 5700
+Doing gate 5800
+Doing gate 5900
+Doing gate 6000
+Doing gate 6100
+Doing gate 6200
+Doing gate 6300
+Doing gate 6400
+Doing gate 6500
+Doing gate 6600
+Doing gate 6700
+Doing gate 6800
+Doing gate 6900
+Doing gate 7000
+Doing gate 7100
+Output main: 523776
+Sun Aug  9 11:35:58 GMT 2009
+
+
+
+********* doing 512 32-bit additions:
+FP: 32898 gates, 17 sec
+alice:
+Initial calculations   [sum1] = 8.441
+Circuits communication [sum2] = 7.16
+Oblivious Transfers    [sum3] = 1.248
+Evaluation & output    [sum4] = 0.435
+12.65user 0.45system 0:17.87elapsed 73%CPU (0avgtext+0avgdata 0maxresident)k
+0inputs+0outputs (1major+40885minor)pagefaults 0swaps
+
+
+
+TTP:
+513 gates; 9 secs
+# date; runtime; date
+Sun Aug  9 13:10:08 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Doing gate 300
+Doing gate 400
+Doing gate 500
+Output main: 7700
+Sun Aug  9 13:10:17 GMT 2009
+
+
+
+*** 1024 additions:
+
+FP: 65666 gates; 33 secs
+Initial calculations   [sum1] = 16.442
+Circuits communication [sum2] = 14.737
+Oblivious Transfers    [sum3] = 1.269
+Evaluation & output    [sum4] = 0.863
+23.99user 0.67system 0:33.90elapsed 72%CPU (0avgtext+0avgdata 0maxresident)k
+0inputs+0outputs (1major+51693minor)pagefaults 0swaps
+
+
+
+TTP: 1025 gates; 17 secs
+# date; runtime; date
+Sun Aug  9 13:24:07 GMT 2009
+Doing gate 0
+Doing gate 100
+Doing gate 200
+Doing gate 300
+Doing gate 400
+Doing gate 500
+Doing gate 600
+Doing gate 700
+Doing gate 800
+Doing gate 900
+Doing gate 1000
+Output main: 15380
+Sun Aug  9 13:24:24 GMT 2009

@@ -1,0 +1,17 @@
+program Add
+{
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    type BobT	= struct { Word input, Word output };
+
+    type AliceT	= struct { Word input };
+
+    function void main (AliceT alice, BobT bob) {
+
+	bob.output = bob.input + alice.input;
+
+    }
+
+}

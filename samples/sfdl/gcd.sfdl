@@ -1,0 +1,29 @@
+// -*- c -*-
+
+program GCD
+{
+
+    const WordSize = 8;
+    type Word = Int<WordSize>;
+
+    function Word gcd (Word a, Word b) {
+	var Word temp;
+		
+	for (i = 1 to WordSize*2) {
+	    // (b != 0) is the real loop condition
+	    if (b != 0) {
+		temp	= b;
+		b	= a % b;
+		a	= temp;
+	    }
+	}
+
+	gcd = a;
+    }
+
+
+    function Word sfdlmain (Word a, Word b) {
+	sfdlmain = gcd (a, b);
+    }
+		
+}

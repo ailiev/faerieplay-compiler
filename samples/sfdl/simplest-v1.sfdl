@@ -1,0 +1,22 @@
+// for Fairplay version 1
+
+program Add
+{
+
+    const WordSize = 32;
+    type Word = Int<WordSize>;
+
+    type AliceInput	= Word;
+    type BobInput	= Word;
+    type Input		= struct {AliceInput alice, BobInput bob};
+
+    type BobOutput	= Word;
+    type Output		= struct {BobOutput bob};
+
+
+    function Output output (Input input)
+    {
+	output.bob = input.bob + input.alice;
+    }
+
+}
