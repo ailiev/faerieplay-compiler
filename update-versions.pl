@@ -18,7 +18,7 @@ my %versions = % { get_version_info ($ARGV[0]) };
 # map { print "$_=$versions{$_}\n" } (keys %versions);
 
 while (<STDIN>) {
-  s/ \$ \{ ([^}]+) \} /$versions{$1}/exg;
+  s/ \$ \{ ([^}]+) \} /$versions{$1}/xg;
   print;
 }
 
