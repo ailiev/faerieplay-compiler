@@ -24,9 +24,12 @@ SRCEXT=sfdl
 %.run: %.gates
 	sfdlc $(SFDLCFLAGS) --run $< -o $@
 
+%.ps: %.gviz
+	dot $(DOTFLAGS) -Tps $< -o $@
 
-include $(this_dir)/../rules.make
 
+%.svg: %.gviz
+	dot $(DOTFLAGS) -Tsvg $< -o $@
 
 artifact_exts=cct gates runtime run udg ps pdf svg gviz pdf_t
 
