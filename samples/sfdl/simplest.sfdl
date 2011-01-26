@@ -8,7 +8,7 @@ program Add
 
     type AliceT	= struct { Word input };
 
-    function void main (AliceT alice, BobT bob) {
+    function void sfdlmain (AliceT alice, BobT bob) {
 
 	bob.output = bob.input + alice.input;
 
