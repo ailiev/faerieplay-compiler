@@ -8,4 +8,6 @@ include shared.make
 
 # DOTFLAGS += -v
 
-all: heap.cct
+srcs = $(wildcard *.sfdl)
+
+all: $(subst .sfdl,.runtime,$(srcs))
