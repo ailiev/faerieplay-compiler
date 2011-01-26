@@ -18,7 +18,7 @@ build_root = build_$(source_lang)
 
 # for actually running the Faerieplay compiler, if a user of this makefile wants
 # to do that.
-include ../sfdl/shared.make
+include samples/sfdl/shared.make
 SFDLCFLAGS += +RTS -xc -RTS
 
 ifeq ($(source_lang),Sfdl)
