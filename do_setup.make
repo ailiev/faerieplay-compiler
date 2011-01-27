@@ -16,20 +16,24 @@ GHCFLAGS += -odir $(ODIR) -hidir $(ODIR)
 
 build_root = build_$(source_lang)
 
-# for actually running the Faerieplay compiler, if a user of this makefile wants
-# to do that.
-include samples/sfdl/shared.make
-SFDLCFLAGS += +RTS -xc -RTS
-
 ifeq ($(source_lang),Sfdl)
+	SRCEXT := sfdl
 	GHCFLAGS += -DSYNTAX_SFDL
 	exe_file = sfdlc
 else ifeq ($(source_lang),Fcpp)
+	SRCEXT := fcpp
 	GHCFLAGS += -DSYNTAX_C
 	exe_file = fc++
 else
 $(error No recognized source language defined in make variable 'source_lang')
 endif
+
+FaerieC := $(exe_file)
+
+# for actually running the Faerieplay compiler, if a user of this makefile wants
+# to do that.
+include samples/sfdl/shared.make
+SFDLCFLAGS += +RTS -xc -RTS
 
 
 #
