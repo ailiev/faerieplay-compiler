@@ -1,1 +1,1 @@
-../../sfdl/shared.make
+include ../samples/sfdl/Makefile
