@@ -1,8 +1,8 @@
 // -*- c++ -*-
 // Faerie C++
 
-// define empty macros for 'program', 'var' etc.
-#include "fcpp-crutches.h"
+// define empty macros for 'program', 'var' etc., for when we run the real C++ compiler
+// #include "fcpp-crutches.h"
 
 // The millionaire's problem: compare two numbers.
 program (Millionaires);
