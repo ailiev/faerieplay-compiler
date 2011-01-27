@@ -3,10 +3,10 @@
 this_file := $(lastword $(MAKEFILE_LIST))
 this_dir := $(dir $(realpath $(this_file)))
 
-SRCEXT := sfdl
-FaerieC := sfdlc
+SRCEXT := fcpp
+FaerieC := fc++
 
-include $(this_dir)/shared.make
+include ../samples/sfdl/shared.make
 
 # SFDLCFLAGS += --dgt --dgr
 # SFDLCFLAGS += +RTS -xc -RTS
@@ -16,6 +16,6 @@ include $(this_dir)/shared.make
 
 # DOTFLAGS += -v
 
-srcs = $(wildcard *.sfdl)
+srcs = $(wildcard *.fcpp)
 
-all: $(subst .sfdl,.runtime,$(srcs))
+all: $(subst .fcpp,.runtime,$(srcs))
