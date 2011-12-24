@@ -5,6 +5,7 @@
 module Faerieplay.Bnfc.Sfdl.Lex where
 
 
+
 }
 
 
@@ -23,7 +24,7 @@ $u = [\0-\255]          -- universal: any character
 "/*" ([$u # \*] | \* [$u # \/])* ("*")+ "/" ; 
 
 $white+ ;
-@rsyms { tok (\p s -> PT p (TS $ share s)) }
+@rsyms { tok (\p s -> PT p (eitherResIdent (TV . share) s)) }
 
 $l $i*   { tok (\p s -> PT p (eitherResIdent (TV . share) s)) }
 \" ([$u # [\" \\ \n]] | (\\ (\" | \\ | \' | n | t)))* \"{ tok (\p s -> PT p (TL $ share $ unescapeInitTail s)) }
@@ -39,12 +40,12 @@ share :: String -> String
 share = id
 
 data Tok =
-   TS !String     -- reserved words and symbols
- | TL !String     -- string literals
- | TI !String     -- integer literals
- | TV !String     -- identifiers
- | TD !String     -- double precision float literals
- | TC !String     -- character literals
+   TS !String !Int    -- reserved words and symbols
+ | TL !String         -- string literals
+ | TI !String         -- integer literals
+ | TV !String         -- identifiers
+ | TD !String         -- double precision float literals
+ | TC !String         -- character literals
 
  deriving (Eq,Show,Ord)
 
@@ -61,13 +62,13 @@ posLineCol (Pn _ l c) = (l,c)
 mkPosToken t@(PT p _) = (posLineCol p, prToken t)
 
 prToken t = case t of
-  PT _ (TS s) -> s
-  PT _ (TI s) -> s
-  PT _ (TV s) -> s
-  PT _ (TD s) -> s
-  PT _ (TC s) -> s
+  PT _ (TS s _) -> s
+  PT _ (TL s)   -> s
+  PT _ (TI s)   -> s
+  PT _ (TV s)   -> s
+  PT _ (TD s)   -> s
+  PT _ (TC s)   -> s
 
-  _ -> show t
 
 data BTree = N | B String Tok BTree BTree deriving (Show)
 
@@ -79,11 +80,12 @@ eitherResIdent tv s = treeFind resWords
                               | s > a  = treeFind right
                               | s == a = t
 
-resWords = b "if" (b "else" (b "cast" (b "Int" (b "Boolean" N N) N) (b "const" N N)) (b "for" (b "false" (b "enum" N N) N) (b "function" N N))) (b "true" (b "struct" (b "program" (b "print" N N) N) (b "to" N N)) (b "var" (b "type" N N) (b "void" N N)))
-   where b s = B s (TS s)
+resWords = b "Int" 26 (b "/" 13 (b ")" 7 (b "&" 4 (b "!=" 2 (b "!" 1 N N) (b "%" 3 N N)) (b "(" 6 (b "&&" 5 N N) N)) (b "," 10 (b "+" 9 (b "*" 8 N N) N) (b "." 12 (b "-" 11 N N) N))) (b "=" 20 (b "<<" 17 (b ";" 15 (b ":" 14 N N) (b "<" 16 N N)) (b "<`>" 19 (b "<=" 18 N N) N)) (b ">=" 23 (b ">" 22 (b "==" 21 N N) N) (b "Boolean" 25 (b ">>" 24 N N) N)))) (b "program" 39 (b "enum" 33 (b "cast" 30 (b "]" 28 (b "[" 27 N N) (b "^" 29 N N)) (b "else" 32 (b "const" 31 N N) N)) (b "function" 36 (b "for" 35 (b "false" 34 N N) N) (b "print" 38 (b "if" 37 N N) N))) (b "void" 45 (b "true" 42 (b "to" 41 (b "struct" 40 N N) N) (b "var" 44 (b "type" 43 N N) N)) (b "||" 48 (b "|" 47 (b "{" 46 N N) N) (b "~" 50 (b "}" 49 N N) N))))
+   where b s n = let bs = id s
+                  in B bs (TS bs n)
 
 unescapeInitTail :: String -> String
-unescapeInitTail = unesc . tail where
+unescapeInitTail = id . unesc . tail . id where
   unesc s = case s of
     '\\':c:cs | elem c ['\"', '\\', '\''] -> c : unesc cs
     '\\':'n':cs  -> '\n' : unesc cs
@@ -108,26 +110,28 @@ alexMove (Pn a l c) '\t' = Pn (a+1)  l     (((c+7) `div` 8)*8+1)
 alexMove (Pn a l c) '\n' = Pn (a+1) (l+1)   1
 alexMove (Pn a l c) _    = Pn (a+1)  l     (c+1)
 
-type AlexInput = (Posn, -- current position,
-		  Char,	-- previous char
-		  String)	-- current input string
+type AlexInput = (Posn,     -- current position,
+                  Char,     -- previous char
+                  String)   -- current input string
 
 tokens :: String -> [Token]
 tokens str = go (alexStartPos, '\n', str)
     where
-      go :: (Posn, Char, String) -> [Token]
+      go :: AlexInput -> [Token]
       go inp@(pos, _, str) =
-    	  case alexScan inp 0 of
-    	    AlexEOF                -> []
-    	    AlexError (pos, _, _)  -> [Err pos]
-    	    AlexSkip  inp' len     -> go inp'
-    	    AlexToken inp' len act -> act pos (take len str) : (go inp')
+               case alexScan inp 0 of
+                AlexEOF                -> []
+                AlexError (pos, _, _)  -> [Err pos]
+                AlexSkip  inp' len     -> go inp'
+                AlexToken inp' len act -> act pos (take len str) : (go inp')
 
 alexGetChar :: AlexInput -> Maybe (Char,AlexInput)
-alexGetChar (p, c, [])    = Nothing
-alexGetChar (p, _, (c:s)) =
-    let p' = alexMove p c
-     in p' `seq` Just (c, (p', c, s))
+alexGetChar (p, _, s) =
+  case  s of
+    []  -> Nothing
+    (c:s) ->
+             let p' = alexMove p c
+              in p' `seq` Just (c, (p', c, s))
 
 alexInputPrevChar :: AlexInput -> Char
 alexInputPrevChar (p, c, s) = c

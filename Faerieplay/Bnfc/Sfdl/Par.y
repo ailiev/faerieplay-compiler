@@ -5,6 +5,7 @@ module Faerieplay.Bnfc.Sfdl.Par where
 import Faerieplay.Bnfc.Sfdl.Abs
 import Faerieplay.Bnfc.Sfdl.Lex
 import Faerieplay.Bnfc.Sfdl.ErrM
+
 }
 
 %name pProg Prog
@@ -16,56 +17,56 @@ import Faerieplay.Bnfc.Sfdl.ErrM
 %tokentype { Token }
 
 %token 
- '{' { PT _ (TS "{") }
- '}' { PT _ (TS "}") }
- ',' { PT _ (TS ",") }
- '=' { PT _ (TS "=") }
- ';' { PT _ (TS ";") }
- '(' { PT _ (TS "(") }
- ')' { PT _ (TS ")") }
- ':' { PT _ (TS ":") }
- '<' { PT _ (TS "<") }
- '>' { PT _ (TS ">") }
- '<`>' { PT _ (TS "<`>") }
- '[' { PT _ (TS "[") }
- ']' { PT _ (TS "]") }
- '&' { PT _ (TS "&") }
- '.' { PT _ (TS ".") }
- '!' { PT _ (TS "!") }
- '-' { PT _ (TS "-") }
- '~' { PT _ (TS "~") }
- '*' { PT _ (TS "*") }
- '/' { PT _ (TS "/") }
- '%' { PT _ (TS "%") }
- '+' { PT _ (TS "+") }
- '<<' { PT _ (TS "<<") }
- '>>' { PT _ (TS ">>") }
- '<=' { PT _ (TS "<=") }
- '>=' { PT _ (TS ">=") }
- '==' { PT _ (TS "==") }
- '!=' { PT _ (TS "!=") }
- '^' { PT _ (TS "^") }
- '|' { PT _ (TS "|") }
- '&&' { PT _ (TS "&&") }
- '||' { PT _ (TS "||") }
- 'Boolean' { PT _ (TS "Boolean") }
- 'Int' { PT _ (TS "Int") }
- 'cast' { PT _ (TS "cast") }
- 'const' { PT _ (TS "const") }
- 'else' { PT _ (TS "else") }
- 'enum' { PT _ (TS "enum") }
- 'false' { PT _ (TS "false") }
- 'for' { PT _ (TS "for") }
- 'function' { PT _ (TS "function") }
- 'if' { PT _ (TS "if") }
- 'print' { PT _ (TS "print") }
- 'program' { PT _ (TS "program") }
- 'struct' { PT _ (TS "struct") }
- 'to' { PT _ (TS "to") }
- 'true' { PT _ (TS "true") }
- 'type' { PT _ (TS "type") }
- 'var' { PT _ (TS "var") }
- 'void' { PT _ (TS "void") }
+ '!' { PT _ (TS _ 1) }
+ '!=' { PT _ (TS _ 2) }
+ '%' { PT _ (TS _ 3) }
+ '&' { PT _ (TS _ 4) }
+ '&&' { PT _ (TS _ 5) }
+ '(' { PT _ (TS _ 6) }
+ ')' { PT _ (TS _ 7) }
+ '*' { PT _ (TS _ 8) }
+ '+' { PT _ (TS _ 9) }
+ ',' { PT _ (TS _ 10) }
+ '-' { PT _ (TS _ 11) }
+ '.' { PT _ (TS _ 12) }
+ '/' { PT _ (TS _ 13) }
+ ':' { PT _ (TS _ 14) }
+ ';' { PT _ (TS _ 15) }
+ '<' { PT _ (TS _ 16) }
+ '<<' { PT _ (TS _ 17) }
+ '<=' { PT _ (TS _ 18) }
+ '<`>' { PT _ (TS _ 19) }
+ '=' { PT _ (TS _ 20) }
+ '==' { PT _ (TS _ 21) }
+ '>' { PT _ (TS _ 22) }
+ '>=' { PT _ (TS _ 23) }
+ '>>' { PT _ (TS _ 24) }
+ 'Boolean' { PT _ (TS _ 25) }
+ 'Int' { PT _ (TS _ 26) }
+ '[' { PT _ (TS _ 27) }
+ ']' { PT _ (TS _ 28) }
+ '^' { PT _ (TS _ 29) }
+ 'cast' { PT _ (TS _ 30) }
+ 'const' { PT _ (TS _ 31) }
+ 'else' { PT _ (TS _ 32) }
+ 'enum' { PT _ (TS _ 33) }
+ 'false' { PT _ (TS _ 34) }
+ 'for' { PT _ (TS _ 35) }
+ 'function' { PT _ (TS _ 36) }
+ 'if' { PT _ (TS _ 37) }
+ 'print' { PT _ (TS _ 38) }
+ 'program' { PT _ (TS _ 39) }
+ 'struct' { PT _ (TS _ 40) }
+ 'to' { PT _ (TS _ 41) }
+ 'true' { PT _ (TS _ 42) }
+ 'type' { PT _ (TS _ 43) }
+ 'var' { PT _ (TS _ 44) }
+ 'void' { PT _ (TS _ 45) }
+ '{' { PT _ (TS _ 46) }
+ '|' { PT _ (TS _ 47) }
+ '||' { PT _ (TS _ 48) }
+ '}' { PT _ (TS _ 49) }
+ '~' { PT _ (TS _ 50) }
 
 L_ident  { PT _ (TV $$) }
 L_quoted { PT _ (TL $$) }
@@ -76,8 +77,8 @@ L_err    { _ }
 %%
 
 Ident   :: { Ident }   : L_ident  { Ident $1 }
-String  :: { String }  : L_quoted { $1 }
-Integer :: { Integer } : L_integ  { (read $1) :: Integer }
+String  :: { String }  : L_quoted {  $1 }
+Integer :: { Integer } : L_integ  { (read ( $1)) :: Integer }
 
 Prog :: { Prog }
 Prog : 'program' Ident '{' ListDec '}' { Prog $2 (reverse $4) } 
@@ -294,7 +295,7 @@ happyError ts =
   case ts of
     [] -> []
     [Err _] -> " due to lexer error"
-    _ -> " before " ++ unwords (map prToken (take 4 ts))
+    _ -> " before " ++ unwords (map (id . prToken) (take 4 ts))
 
 myLexer = tokens
 }
