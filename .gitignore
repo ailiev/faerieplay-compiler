@@ -4,3 +4,6 @@
 *.runtime
 *.hi
 *.o
+Faerieplay/Bnfc/Fcpp
+Faerieplay/Bnfc/Sfdl
+dist
